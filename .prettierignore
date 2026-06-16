@@ -1,0 +1,12 @@
+dist/
+dev-dist/
+coverage/
+node_modules/
+pnpm-lock.yaml
+specs/
+files/
+cdk.out/
+cdk-outputs.json
+.localstack/
+.cognito/
+infra/local/local-config.json

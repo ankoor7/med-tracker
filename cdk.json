@@ -1,0 +1,14 @@
+{
+  "app": "tsx infra/cdk/app.ts",
+  "watch": {
+    "include": ["infra/**"],
+    "exclude": ["**/*.test.ts"]
+  },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true,
+    "@aws-cdk/core:checkSecretUsage": true,
+    "@aws-cdk/aws-iam:minimizePolicies": true,
+    "@aws-cdk/core:validateSnapshotRemovalPolicy": true,
+    "@aws-cdk/aws-apigatewayv2:authorizerWithoutDefaultScopes": true
+  }
+}

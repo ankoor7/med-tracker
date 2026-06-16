@@ -1,0 +1,35 @@
+# Local AWS-equivalent resources for development — no real AWS needed.
+#
+#   pnpm local:up         # start containers
+#   pnpm local:bootstrap  # create the DynamoDB table + Cognito pool/dev user
+#   pnpm local:api        # run the sync API against these containers
+#   pnpm local:down       # stop containers (keep data)
+#   pnpm local:reset      # stop + wipe all local data/config
+#
+# LocalStack Community provides DynamoDB (and S3). It does NOT provide Cognito,
+# so auth uses cognito-local, a free Cognito User Pool emulator.
+
+services:
+  localstack:
+    image: localstack/localstack:3.8
+    ports:
+      - '4566:4566' # edge / all services
+    environment:
+      - SERVICES=dynamodb,s3
+      - DEBUG=0
+      - PERSISTENCE=1
+    volumes:
+      - './.localstack:/var/lib/localstack'
+      - '/var/run/docker.sock:/var/run/docker.sock'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:4566/_localstack/health']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  cognito-local:
+    image: jagregory/cognito-local:3.21.0
+    ports:
+      - '9229:9229'
+    volumes:
+      - './.cognito:/app/.cognito'
