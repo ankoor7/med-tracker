@@ -66,7 +66,7 @@ export class DynamoDbSyncStore implements SyncStore {
       id: env.id,
       updatedAt: env.updatedAt,
       version: env.version,
-      ciphertext: env.ciphertext,
+      payload: env.payload,
       ...(env.deleted ? { deleted: true } : {}),
     };
     try {
@@ -90,7 +90,7 @@ function toEnvelope(item: StoredItem): Envelope {
     id: item.id,
     updatedAt: item.updatedAt,
     version: item.version,
-    ciphertext: item.ciphertext,
+    payload: item.payload,
     ...(item.deleted ? { deleted: true } : {}),
   };
 }

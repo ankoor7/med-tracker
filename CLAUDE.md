@@ -1,6 +1,7 @@
 # CLAUDE.md — SteadyDose
 
-Local-first, end-to-end-encrypted PWA for tracking adjusted medication doses.
+Local-first, offline-capable PWA (with a secure, server-readable cloud) for
+tracking adjusted medication doses.
 See `specs/` for the full product/architecture/stage specs. Build proceeds in
 sequenced stages (see `specs/03-implementation-plan.md`).
 
@@ -47,7 +48,8 @@ Folder layout mirrors `specs/02-architecture.md` §4:
   boundary rule. Unit-tested in isolation.
 - `src/store/` — Zustand store; wraps the core and (from Stage 2) the repository.
 - `src/ui/` — React screens/components; presentation only, no business logic.
-- `src/crypto/` — stub until Stage 4 (E2E encryption).
+- `src/crypto/` — stub; Stage 4 may use it for an **optional** on-device cache
+  lock (Web Crypto). Not zero-knowledge; disabled by default.
 - `src/auth/` — Cognito client (`amazon-cognito-identity-js`) + `useAuth` hook.
 - `src/sync/` — authorized API client (Stage 3); full sync engine in Stage 5.
 - `src/config.ts` — backend config from `VITE_*` env (null = local-first only).

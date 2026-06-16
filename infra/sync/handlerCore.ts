@@ -1,7 +1,8 @@
 // Sync handler core — transport-agnostic business logic for /sync/pull and
 // /sync/push. Reused by the Lambda adapter and the local Express server.
-// Stage 3: opaque envelopes, per-user isolation, version guard. Full conflict
-// resolution / offline queue is Stage 5.
+// Stage 3: opaque pass-through envelopes, per-user isolation, version guard.
+// Stage 4 adds readable, typed payloads + server-side schema validation (not
+// zero-knowledge). Full conflict resolution / offline queue is Stage 5.
 
 import type {
   Envelope,
@@ -64,6 +65,6 @@ function validateEnvelope(env: Envelope | undefined): string | null {
   if (typeof env.updatedAt !== 'number' || !Number.isFinite(env.updatedAt))
     return 'missing updatedAt';
   if (typeof env.version !== 'number' || !Number.isFinite(env.version)) return 'missing version';
-  if (typeof env.ciphertext !== 'string') return 'missing ciphertext';
+  if (typeof env.payload !== 'string') return 'missing payload';
   return null;
 }

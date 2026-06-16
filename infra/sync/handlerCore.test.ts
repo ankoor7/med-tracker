@@ -7,7 +7,7 @@ const env = (over: Partial<Envelope> = {}): Envelope => ({
   id: over.id ?? 'r1',
   updatedAt: over.updatedAt ?? 1000,
   version: over.version ?? 1,
-  ciphertext: over.ciphertext ?? 'cipher',
+  payload: over.payload ?? 'data',
   ...(over.deleted ? { deleted: true } : {}),
 });
 
@@ -36,7 +36,7 @@ describe('handlePush', () => {
   it('flags invalid envelopes without throwing', async () => {
     const store = new InMemorySyncStore();
     const res = await handlePush(store, 'userA', {
-      changes: [{ id: '', updatedAt: 1, version: 1, ciphertext: 'x' }],
+      changes: [{ id: '', updatedAt: 1, version: 1, payload: 'x' }],
     });
     expect(res.results[0]!.accepted).toBe(false);
     expect(res.results[0]!.reason).toMatch(/id/i);
@@ -82,8 +82,8 @@ describe('handlePull', () => {
 describe('per-user isolation (AC3)', () => {
   it('one user never sees another user’s envelopes', async () => {
     const store = new InMemorySyncStore();
-    await handlePush(store, 'userA', { changes: [env({ id: 'secretA', ciphertext: 'A' })] });
-    await handlePush(store, 'userB', { changes: [env({ id: 'secretB', ciphertext: 'B' })] });
+    await handlePush(store, 'userA', { changes: [env({ id: 'secretA', payload: 'A' })] });
+    await handlePush(store, 'userB', { changes: [env({ id: 'secretB', payload: 'B' })] });
 
     const a = await handlePull(store, 'userA', {});
     const b = await handlePull(store, 'userB', {});
@@ -94,12 +94,12 @@ describe('per-user isolation (AC3)', () => {
   it('a push by A under the same id does not affect B (AC4 round-trip)', async () => {
     const store = new InMemorySyncStore();
     await handlePush(store, 'userA', {
-      changes: [env({ id: 'shared', version: 1, ciphertext: 'A' })],
+      changes: [env({ id: 'shared', version: 1, payload: 'A' })],
     });
     await handlePush(store, 'userB', {
-      changes: [env({ id: 'shared', version: 1, ciphertext: 'B' })],
+      changes: [env({ id: 'shared', version: 1, payload: 'B' })],
     });
     const a = await handlePull(store, 'userA', {});
-    expect(a.changes[0]!.ciphertext).toBe('A');
+    expect(a.changes[0]!.payload).toBe('A');
   });
 });

@@ -76,9 +76,13 @@ after exporting if you truly want them gone.)
 
 ---
 
-## What the server can / can't see
+## What the server sees
 
-Records are opaque ciphertext envelopes `{ id, updatedAt, version, deleted,
-ciphertext }` partitioned by the authenticated `userId`. At Stage 3 the handlers
-do **not** decrypt anything (client-side E2E encryption is Stage 4; the full
-sync engine — offline queue, LWW, change tracking — is Stage 5).
+The cloud is **not zero-knowledge** — by design, the backend can read the data so
+it can validate it and (later) build server-side features. Records are envelopes
+`{ id, updatedAt, version, deleted, payload }` partitioned by the authenticated
+`userId`. At Stage 3 the handlers treat `payload` as an opaque pass-through blob;
+Stage 4 makes it a **readable, typed record** the server validates (`type` +
+schema + ownership). Privacy comes from per-user auth, TLS in transit, and KMS
+encryption at rest — not from withholding plaintext. The full sync engine (offline
+queue, LWW, change tracking) is Stage 5.

@@ -9,11 +9,21 @@
 ---
 
 ## 1. Summary
-SteadyDose is a **local-first, end-to-end-encrypted Progressive Web App**. The browser holds the source of truth (IndexedDB) and works fully offline. Data is encrypted on-device and synced as opaque ciphertext to a **per-user AWS backend that the user owns and deploys themselves** via infrastructure-as-code. The app manages medications, a fixed grouped daily schedule, dose logging (including adjusted doses for late doses), safety guardrails, history, adherence, and reminders. **It computes no pharmacology**; the user's equations plug into a single interface.
+SteadyDose is a **local-first, offline-capable Progressive Web App** with a
+**secure, server-readable cloud**. The browser holds the source of truth
+(IndexedDB) and works fully offline. Data syncs as **readable, structured records**
+to a **per-user AWS backend that the user owns and deploys themselves** via
+infrastructure-as-code. The backend is **not zero-knowledge**: it can read and
+operate on the data (enabling future server-side features), and is secured by
+transport encryption, strong auth, per-user authorization, and encryption at rest.
+The app manages medications, a fixed grouped daily schedule, dose logging
+(including adjusted doses for late doses), safety guardrails, history, adherence,
+and reminders. **It computes no pharmacology**; the user's equations plug into a
+single interface.
 
 ## 2. Architectural principles
 1. **Local-first.** The client is authoritative and offline-capable; the cloud is sync + backup.
-2. **Zero-knowledge cloud.** The server stores only ciphertext; keys never leave the device.
+2. **Secure, server-readable cloud.** The backend stores readable, structured data (not zero-knowledge) so it can validate it and later power server-side features (reporting, reminders, sharing, backup); the dose math stays on-device. Security comes from TLS, strong auth, per-user authorization, and encryption at rest.
 3. **Data sovereignty.** One user, one AWS account, one deployment. No shared backend.
 4. **Pluggable pharmacology.** Dose adjustment is an interface, not a built-in.
 5. **Safety by construction.** The app records and validates doses; it never originates a dose value. Caps are enforced centrally.
@@ -27,14 +37,14 @@ flowchart LR
     UI["React UI"] --> Core["Domain core (TS, pure)"]
     Core --> Store["Local store (IndexedDB / Dexie)"]
     Core --> Ext["Pharmacology extension"]
-    Store <--> Crypto["Crypto module (Web Crypto)"]
-    Crypto <--> SyncC["Sync client"]
+    Store --> SyncC["Sync client"]
+    Store <-.-> Lock["Optional device lock (Web Crypto)"]
     SW["Service worker (offline + reminders)"] -.-> UI
   end
-  SyncC -- "HTTPS, JWT, ciphertext" --> API["API Gateway (HTTP API)"]
+  SyncC -- "HTTPS, JWT, structured records" --> API["API Gateway (HTTP API)"]
   API --> Authz["Cognito JWT authorizer"]
-  API --> Lambda["Lambda (sync handler)"]
-  Lambda --> DDB[("DynamoDB\nencrypted blobs")]
+  API --> Lambda["Lambda (sync handler + validation)"]
+  Lambda --> DDB[("DynamoDB\nreadable records, SSE-KMS")]
   CF["CloudFront + S3\n(static PWA hosting)"] --> Device
   subgraph AWS["User's own AWS account (CDK-deployed)"]
     API
@@ -46,17 +56,17 @@ flowchart LR
   end
 ```
 
-ASCII fallback: UI → pure domain core → IndexedDB; crypto wraps records before the sync client sends them over HTTPS (JWT-authorised) to API Gateway → Lambda → DynamoDB. Static assets served from S3 via CloudFront. All AWS resources live in the user's account and are created by a CDK stack.
+ASCII fallback: UI → pure domain core → IndexedDB; the sync client sends readable structured records over HTTPS (JWT-authorised) to API Gateway → Lambda (which validates them) → DynamoDB. Static assets served from S3 via CloudFront. All AWS resources live in the user's account and are created by a CDK stack.
 
 ## 4. Components
 - **React UI** — presentation only; binds to the domain core via a thin store (Zustand). No business logic.
 - **Domain core (pure TypeScript)** — entities, scheduling/enumeration, guardrail validation, timezone math, adherence. Framework-agnostic and unit-tested in isolation. This is the heart and is portable.
 - **Local store** — IndexedDB via Dexie; repository interface; tracks per-record `updatedAt`, `version`, and `deleted` for sync.
-- **Crypto module** — Web Crypto API; envelope encryption; key derivation and recovery.
+- **Crypto module (optional)** — Web Crypto API; an **optional on-device lock** that encrypts the local cache at rest (convenience defense, not zero-knowledge). Disabled by default.
 - **Sync client** — pull/push protocol against the API; offline queue; conflict resolution.
 - **Pharmacology extension** — implements `DoseAdjustmentStrategy`; default is a no-op returning `null`.
 - **Service worker** — offline asset/data caching and notification scheduling.
-- **AWS stack (CDK)** — Cognito, API Gateway HTTP API, Lambda, DynamoDB, S3 + CloudFront.
+- **AWS stack (CDK)** — Cognito, API Gateway HTTP API, Lambda (validation), DynamoDB, S3 + CloudFront, KMS.
 
 ## 5. Data model (canonical TypeScript)
 ```ts
@@ -128,26 +138,33 @@ Each syncable record carries `id`, `updatedAt`, optional `deleted`, and an impli
 - **Flights:** changing the active zone re-resolves the schedule; the real inter-dose interval changes accordingly.
 - **Known refinement (Stage 5):** matching a logged dose to its slot occurrence is by `(slotId, medId, scheduledInstant)`. Across a mid-day zone change this becomes approximate; tighten with a tolerance window / occurrence key.
 
-## 7. Encryption design (E2E, zero-knowledge)
-Default decision: **end-to-end encryption**, chosen for the data-rights priority. Server-side-only encryption is the documented simpler alternative (loses zero-knowledge, gains easy recovery).
+## 7. Security & data-protection design (server-readable, not zero-knowledge)
+Default decision: the cloud stores **readable, structured data** so the backend
+can validate it and, later, build server-side features (analytics/reporting,
+server-driven reminders/push, clinician sharing, richer backup). Zero-knowledge /
+end-to-end encryption was considered and **rejected** as it would block those
+server-side features and complicate recovery. **Pharmacology / blood-level
+calculation stays on-device** — it is simple and runs in the extension (§11); the
+readable cloud is about validation, sync, and future server features, not about
+moving the dose math server-side. Protection is layered, not key-custody-based:
 
-- **Algorithms:** AES-GCM-256 for record payloads; key derivation Argon2id (or PBKDF2-SHA-256 as a Web-Crypto-native fallback) from the user passphrase.
-- **Key hierarchy (envelope):**
-  - Passphrase → **Key-Encryption-Key (KEK)** via KDF (per-user salt).
-  - Random **Data-Encryption-Key (DEK)** encrypts records.
-  - DEK is wrapped by KEK and stored (wrapped) locally and in the cloud. Server sees only the wrapped DEK and ciphertext.
-- **Recovery:** at setup, generate a high-entropy **recovery code**; wrap the DEK a second time with a recovery-code-derived key. Losing both passphrase and recovery code = unrecoverable (surfaced explicitly). Optional encrypted export as belt-and-suspenders.
-- **What the server can see:** record `id`, `userId`, `updatedAt`, `deleted`, size, ciphertext. No plaintext, no field names.
-- **Rotation:** passphrase change re-wraps the DEK only (no re-encrypt of data).
+- **In transit:** HTTPS/TLS only; HSTS on CloudFront; JWT (Cognito) on every API call.
+- **At rest:** DynamoDB SSE with a **KMS customer-managed key**; PITR enabled. Key custody is the user's AWS account.
+- **Authentication:** Cognito user pool — strong password policy, optional TOTP **MFA**, short access-token TTL with refresh, sign-out clears tokens.
+- **Authorization:** per-user isolation enforced **server-side** — the Lambda derives `userId` from validated JWT claims and scopes every read/write to that partition; the owner is never trusted from the request body.
+- **Server-side validation:** each record's `type` and `payload` are schema-validated before persist; malformed/oversized/unknown-type writes are rejected.
+- **Optional on-device lock:** a passphrase/WebAuthn-gated key may encrypt the **local cache** at rest (Web Crypto AES-GCM) as a convenience defense for a shared/lost device — not zero-knowledge, disabled by default.
+- **What the server can see:** everything — `userId`, record `id`, `type`, `updatedAt`, `deleted`, and the readable `payload`. This is by design.
+- **Recovery:** account recovery via the identity provider (email reset). No cryptographic recovery code; losing a passphrase does not lose the cloud data.
 
 ## 8. Sync protocol
-Local-first, single-user, multi-device. Records are opaque ciphertext envelopes.
+Local-first, single-user, multi-device. Records are **readable structured envelopes** the server validates.
 
-- **Envelope (server-stored):** `{ userId, id, updatedAt, version, deleted, ciphertext }`.
+- **Envelope (server-stored):** `{ userId, id, type, updatedAt, version, deleted, payload }` — `payload` is readable, typed by `type`.
 - **Endpoints (JWT-authorised):**
-  - `POST /sync/pull` → `{ since: token }` ⇒ changed envelopes + new token.
-  - `POST /sync/push` → `{ changes: envelope[] }` ⇒ accepted/rejected per id.
-- **Change tracking:** client keeps `lastSyncToken` (high-water `updatedAt`/sequence). DynamoDB items keyed `PK=userId`, `SK=recordId`, with a GSI on `updatedAt` for incremental pulls.
+  - `POST /sync/pull` → `{ since: token }` ⇒ changed records + new token.
+  - `POST /sync/push` → `{ changes: record[] }` ⇒ accepted/rejected per id (with validation reasons).
+- **Change tracking:** client keeps `lastSyncToken` (high-water `updatedAt`/sequence). DynamoDB items keyed `PK=userId`, `SK=recordId`, with a GSI on `updatedAt` for incremental pulls (and an optional `byType` GSI for server-side queries).
 - **Conflict resolution:** **last-write-wins by `updatedAt`** per record (conflicts are rare for one user); `deleted` tombstones win ties toward deletion-safety only if newer. Hybrid logical clock is a future option if needed.
 - **Idempotency & resumability:** push is idempotent on `(id, version)`; interrupted syncs resume from `lastSyncToken`. Offline edits queue and replay.
 
@@ -159,14 +176,14 @@ All resources in the **user's own account**, one stack, `cdk deploy`.
 | Cognito User Pool (+ app client) | Per-user auth, JWT issuance |
 | API Gateway **HTTP API** | `/sync/*` endpoints, JWT authorizer |
 | Lambda (Node/TS) | Sync handler; reads/writes DynamoDB |
-| DynamoDB table | Encrypted envelopes; on-demand billing; PITR on; SSE-KMS at rest |
-| S3 + CloudFront | Static PWA hosting (private bucket, OAC) |
-| KMS key | DynamoDB at-rest (defence-in-depth atop E2E) |
+| DynamoDB table | Readable structured records; on-demand billing; PITR on; SSE-KMS at rest |
+| S3 + CloudFront | Static PWA hosting (private bucket, OAC, HSTS) |
+| KMS key | DynamoDB encryption at rest (key custody in the user's account) |
 
 Alternative: **Amplify Gen 2** (higher-level, faster scaffold, less control). Trade-off recorded; CDK chosen for transparency and clean BYO-account deploys in an open-source context.
 
 ## 10. Security model
-- **Threat posture:** cloud provider / DB compromise yields only ciphertext. Device compromise is out of scope of E2E (standard limitation).
+- **Threat posture:** the cloud is **not zero-knowledge** — a DB compromise *within the user's own account* would expose readable medication data. This is the accepted trade-off for a server-usable backend; the blast radius is bounded to one user in their own account, mitigated by SSE-KMS at rest, least-privilege IAM, CloudTrail audit, and optional MFA. The optional on-device lock limits exposure of the **local** cache on a shared/lost device.
 - **Transport:** HTTPS only; JWT (Cognito) on every API call; authorizer enforces user isolation by `userId` claim.
 - **IAM:** least-privilege Lambda role (single-table access). Deploy uses the operator's own short-lived/SSO creds — never committed, never in prompts.
 - **No telemetry** leaves the account by default.
@@ -201,7 +218,9 @@ interface DoseAdjustmentStrategy {
 | Styling | Tailwind | CSS modules |
 | Local DB | IndexedDB via Dexie | RxDB (heavier, built-in replication) |
 | State binding | Zustand | Redux Toolkit |
-| Crypto | Web Crypto (AES-GCM, Argon2id/PBKDF2) | libsodium-wrappers |
+| Auth | Cognito (password policy, optional MFA, JWT) | Auth0 / self-hosted OIDC |
+| Validation | Shared schema (Zod) — client + Lambda | ad-hoc per-handler checks |
+| Local lock (optional) | Web Crypto (AES-GCM) | none (rely on device security) |
 | IaC | AWS CDK (TS) | Amplify Gen 2 |
 | API | API Gateway HTTP API + Lambda | AppSync (GraphQL) |
 | Data | DynamoDB single-table | DynamoDB + per-type tables |
@@ -212,7 +231,7 @@ interface DoseAdjustmentStrategy {
 2. `cdk bootstrap` (first time) then `cdk deploy` provisions the stack.
 3. Build the PWA, sync assets to S3, invalidate CloudFront.
 4. Configure the app with the deployed Cognito/API IDs (generated config).
-5. Create the user, set passphrase, store recovery code.
+5. Create the user account (Cognito), sign in, and optionally enable the on-device lock.
 Teardown: `cdk destroy` removes everything. Export first if retaining data.
 
 ## 14. Observability & cost

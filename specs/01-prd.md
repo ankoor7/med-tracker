@@ -10,7 +10,7 @@
 ---
 
 ## 1. Overview & problem statement
-Patients on anti-epileptic drugs (AEDs) follow a fixed daily schedule of doses, often several medications grouped at the same times. Taking a dose late requires a one-off **adjusted dose** to keep blood concentration approximately constant until the next scheduled dose, after which the normal schedule resumes. Managing this in a spreadsheet provides no reminders, no encrypted history, no multi-device access, and no correct handling of time zones, flights, or BST/GMT transitions.
+Patients on anti-epileptic drugs (AEDs) follow a fixed daily schedule of doses, often several medications grouped at the same times. Taking a dose late requires a one-off **adjusted dose** to keep blood concentration approximately constant until the next scheduled dose, after which the normal schedule resumes. Managing this in a spreadsheet provides no reminders, no secure synced history, no multi-device access, and no correct handling of time zones, flights, or BST/GMT transitions.
 
 SteadyDose provides the **data, scheduling, logging, safety, history, and reminder** layer around this routine. It does **not** compute the pharmacological adjustment itself; the user supplies that via a documented extension interface.
 
@@ -19,7 +19,7 @@ SteadyDose provides the **data, scheduling, logging, safety, history, and remind
 - G2. Make logging fast for the common case and support **adjusted doses** for late doses.
 - G3. Enforce user-defined **safety caps** on every logged or suggested dose.
 - G4. Be correct across **time zones, flights, and BST/GMT**.
-- G5. Keep **encrypted history** that **syncs across devices**.
+- G5. Keep **secure history** that **syncs across devices** and is **usable by the backend** (not zero-knowledge).
 - G6. Keep all data in the **user's own AWS account**; ship as **open source** with bring-your-own-account deploy.
 - G7. Provide **reminders** and **missed-pattern warnings**.
 
@@ -42,7 +42,7 @@ SteadyDose provides the **data, scheduling, logging, safety, history, and remind
 - US6. As a patient flying abroad, the schedule shows in local time and the real gap between doses is reflected so I can adjust.
 - US7. As a patient, I see my history and get warned if I've missed a pattern of timing-sensitive doses.
 - US8. As a patient, I get reminded when upcoming and adjusted doses are due.
-- US9. As a patient, my data is encrypted and only I can read it; it lives in my own cloud account.
+- US9. As a patient, my data is private and secure (encrypted in transit and at rest, behind my own login) and lives in my own cloud account, where my backend can use it to power features.
 - US10. As a developer-patient, I plug my own pharmacology equations into one interface and they drive suggested adjusted doses.
 
 ## 6. Functional requirements
@@ -92,13 +92,13 @@ IDs are referenced by stage specs.
 - FR-HIS-4. Visualisations: adherence over time, and a blood-level chart fed by the pharmacology extension's output (chart, not calculation).
 - FR-HIS-5. Export all data as JSON and CSV (data portability).
 
-### Sync & encryption (FR-SYNC, FR-ENC)
+### Sync & security (FR-SYNC, FR-SEC)
 - FR-SYNC-1. App is fully usable offline; local store is the source of truth.
 - FR-SYNC-2. Bidirectional sync across devices for the same user.
 - FR-SYNC-3. Conflict resolution defined and deterministic (last-write-wins by record).
-- FR-ENC-1. Data is **end-to-end encrypted**; the cloud stores only ciphertext.
-- FR-ENC-2. Encryption keys derived on-device from a user passphrase; never sent to the server.
-- FR-ENC-3. A recovery mechanism exists for key loss (recovery code), with explicit tradeoffs surfaced.
+- FR-SEC-1. The cloud stores **readable, structured data** the backend can validate and operate on — **not zero-knowledge**. Data is encrypted **in transit** (TLS) and **at rest** (KMS).
+- FR-SEC-2. Per-user authentication (Cognito) and **server-side authorization** isolate each user's data; the server validates every record's schema and ownership.
+- FR-SEC-3. Account recovery is via the identity provider (email reset); an **optional on-device lock** protects the local cache on a shared/lost device.
 
 ### Identity, deploy & open source (FR-OSS)
 - FR-OSS-1. Per-user authentication.
@@ -108,7 +108,7 @@ IDs are referenced by stage specs.
 - FR-OSS-5. Pharmacology extension is a documented, swappable interface.
 
 ## 7. Non-functional requirements
-- NFR-Security. Least-privilege IAM; JWT-authorised API; ciphertext-only at rest; no long-lived keys in code or prompts.
+- NFR-Security. Least-privilege IAM; JWT-authorised API; per-user server-side authorization; TLS in transit and KMS encryption at rest; server-side input validation; optional MFA; no long-lived keys in code or prompts.
 - NFR-Privacy. No analytics/telemetry that leaves the user's account by default.
 - NFR-Offline. Core flows (view today, log, edit schedule/meds) work with no network.
 - NFR-Performance. Today view interactive < 1s on a mid phone; logging action < 100ms perceived.
@@ -121,7 +121,7 @@ IDs are referenced by stage specs.
 ## 8. Success criteria
 - SC1. Author replaces the spreadsheet for daily use.
 - SC2. A late dose can be logged with an adjusted amount in < 15 seconds, cap-checked.
-- SC3. Data verified unreadable in DynamoDB without the passphrase.
+- SC3. Data is verified private and secure: encrypted at rest (KMS) and in transit (TLS), reachable only with a valid login, and no user can read another's records.
 - SC4. A clean AWS account is fully deployed from docs in < 30 minutes.
 - SC5. BST/GMT transition day shows correct intervals (verified by test).
 
@@ -129,7 +129,7 @@ IDs are referenced by stage specs.
 | Risk | Mitigation |
 |---|---|
 | Safety: app misused as dosing authority | App computes no doses; caps + confirmations + disclaimers; clinician validation called out |
-| Key loss = data loss (E2E) | Recovery code; clear backup prompts; optional export |
+| Cloud not zero-knowledge → DB compromise exposes data | Single-user BYO account (bounded blast radius); KMS at rest; least-privilege IAM; CloudTrail audit; optional MFA; optional on-device lock |
 | Background reminders unreliable on web | Document limits; OS notifications via installed PWA; degrade gracefully |
 | Sync conflicts corrupt data | LWW per record + tombstones + idempotent sync + tests |
 | Timezone bugs around DST/flights | UTC storage; two-pass zone conversion; explicit DST test suite |

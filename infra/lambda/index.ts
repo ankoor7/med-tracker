@@ -1,7 +1,8 @@
 // Lambda sync handler — API Gateway HTTP API (v2) adapter over the shared
 // handler-core. The HTTP API JWT authorizer has already validated the token;
 // we read the user id from the verified claims (never from the request body).
-// Stage 3: opaque envelopes. Stage 4 adds encryption (client-side), Stage 5 the
+// Stage 3: opaque pass-through envelopes. Stage 4 adds the readable, typed record
+// model + server-side validation (the cloud is not zero-knowledge); Stage 5 the
 // full sync engine.
 
 import { BadRequestError, handlePull, handlePush } from '../sync/handlerCore';

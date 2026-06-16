@@ -1,7 +1,8 @@
 // Repository interface — the persistence seam. See specs/stage-2 §5.
 //
 // Stage 1 ships a no-op (in-memory) implementation. Stage 2 provides a
-// Dexie/IndexedDB `LocalRepository`; Stages 4/5 wrap it for encryption/sync.
+// Dexie/IndexedDB `LocalRepository`; Stage 5 wraps it for sync (and Stage 4 may
+// add an optional on-device cache lock).
 // Keep this interface STABLE — higher layers depend on it and must not see
 // Dexie types.
 

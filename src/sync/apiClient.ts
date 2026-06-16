@@ -10,7 +10,7 @@ export interface Envelope {
   updatedAt: number;
   version: number;
   deleted?: boolean;
-  ciphertext: string;
+  payload: string; // opaque pass-through at Stage 3; readable, typed record from Stage 4
 }
 
 export interface PullResponse {

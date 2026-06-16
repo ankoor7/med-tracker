@@ -1,6 +1,8 @@
 // SteadyDose backend — one CDK stack, deployable to a fresh AWS account.
-// See specs/02-architecture.md §9 and stage-3 §5. Zero-knowledge: DynamoDB
-// stores only opaque ciphertext envelopes; the JWT authorizer isolates by user.
+// See specs/02-architecture.md §9 and stage-3 §5. The cloud is NOT zero-knowledge:
+// DynamoDB stores readable records (opaque pass-through at Stage 3, typed +
+// server-validated from Stage 4), protected by KMS at rest and a JWT authorizer
+// that isolates by user.
 
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,14 +33,14 @@ export class SteadyDoseStack extends Stack {
   constructor(scope: Construct, id: string, props?: StackProps) {
     super(scope, id, props);
 
-    // --- Encryption key (defence-in-depth atop client-side E2E) ---------------
+    // --- Encryption key (primary at-rest protection for readable records) -----
     const key = new Key(this, 'DataKey', {
       enableKeyRotation: true,
       removalPolicy: RemovalPolicy.RETAIN,
       description: 'SteadyDose DynamoDB at-rest encryption',
     });
 
-    // --- DynamoDB: opaque envelopes -------------------------------------------
+    // --- DynamoDB: per-user records (readable; SSE-KMS at rest) ---------------
     const table = new Table(this, 'SyncTable', {
       partitionKey: { name: 'userId', type: AttributeType.STRING },
       sortKey: { name: 'id', type: AttributeType.STRING },

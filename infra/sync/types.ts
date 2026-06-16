@@ -1,17 +1,19 @@
 // Sync API contract — shared by the Lambda and the local dev server.
 // See specs/02-architecture.md §8 and stage-3 §5.
 //
-// Records are opaque ciphertext envelopes. The server never sees plaintext and,
-// at Stage 3, performs no decryption — it stores and returns bytes. The
-// authenticated `userId` (from the JWT) is the partition; clients cannot read or
-// write another user's data.
+// At Stage 3 the server treats the record `payload` as an opaque pass-through
+// string (it stores and returns it as-is). The cloud is NOT zero-knowledge:
+// Stage 4 widens `payload` to a readable, typed object and adds a `type`
+// discriminator the server validates and can operate on (see
+// specs/stage-4-cloud-data-and-security.md). The authenticated `userId` (from the
+// JWT) is the partition; clients cannot read or write another user's data.
 
 export interface Envelope {
   id: string;
   updatedAt: number; // epoch ms; also the incremental-pull cursor
   version: number;
   deleted?: boolean;
-  ciphertext: string; // base64 / opaque payload
+  payload: string; // opaque pass-through string at Stage 3; widened to a readable, typed object in Stage 4
 }
 
 export interface PullRequest {

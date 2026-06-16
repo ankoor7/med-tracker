@@ -8,11 +8,11 @@
 | **Status** | Ready after Stage 2 |
 
 ## 1. Objective
-Provision the **per-user AWS backend** as infrastructure-as-code and add client authentication. Deliver deployable Cognito auth, a JWT-protected `/sync/*` API over DynamoDB, and static hosting — all in the user's own account. Handlers treat record payloads as opaque (real encryption arrives in Stage 4; full sync logic in Stage 5).
+Provision the **per-user AWS backend** as infrastructure-as-code and add client authentication. Deliver deployable Cognito auth, a JWT-protected `/sync/*` API over DynamoDB, and static hosting — all in the user's own account. Handlers treat record payloads as opaque pass-through blobs at this stage; Stage 4 introduces the **readable, server-validated record model** and Stage 5 the full sync logic.
 
 ## 2. Scope
 **In:** AWS CDK app (TypeScript); Cognito user pool + app client; API Gateway HTTP API; Lambda sync handler (pass-through envelopes); DynamoDB table; S3 + CloudFront hosting; client auth flow; generated app config.
-**Out:** client-side encryption (Stage 4); conflict resolution/offline queue (Stage 5).
+**Out:** the readable record model + server-side validation (Stage 4); conflict resolution/offline queue (Stage 5).
 
 ## 3. Prerequisites
 Stage 2 repository + sync-ready metadata.
@@ -21,7 +21,7 @@ Stage 2 repository + sync-ready metadata.
 - FR-3.1. One CDK stack provisions all resources to a fresh account via `cdk deploy`.
 - FR-3.2. Per-user auth (Cognito); client can sign up / sign in / sign out; tokens refreshed.
 - FR-3.3. `/sync/pull` and `/sync/push` exist, JWT-authorised, isolating data by `userId` claim.
-- FR-3.4. DynamoDB stores envelopes `{ userId, id, updatedAt, version, deleted, ciphertext }`; on-demand billing; PITR + SSE-KMS on.
+- FR-3.4. DynamoDB stores envelopes `{ userId, id, updatedAt, version, deleted, payload }` (the `payload` is an opaque pass-through blob at this stage; Stage 4 makes it a readable, typed record); on-demand billing; PITR + SSE-KMS on.
 - FR-3.5. No secrets in code; deploy uses the operator's local credential chain.
 
 ## 5. Technical approach

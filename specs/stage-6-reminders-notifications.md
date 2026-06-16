@@ -12,7 +12,7 @@ Notify the user when **scheduled doses** are due, support follow-up timing for *
 
 ## 2. Scope
 **In:** notification permission UX; service-worker-driven local notifications for upcoming doses; adjusted-dose follow-up reminder; missed-pattern alert (timing-sensitive meds); per-slot reminder settings; zone-aware scheduling; degradation strategy.
-**Out:** server-side push that would require the backend to know dose times (rejected — conflicts with E2E); SMS/WhatsApp channels (future, see note).
+**Out:** server-side push notifications (deferred — now *architecturally possible* since the backend can read dose times, but out of scope here; this stage delivers client/PWA-local notifications); SMS/WhatsApp channels (future, see note).
 
 ## 3. Prerequisites
 Stage 2 (local schedule + log available offline).
@@ -55,7 +55,7 @@ Stage 2 (local schedule + log available offline).
 - Manual: cross-platform behaviour notes captured.
 
 ## 9. Risks / decisions
-- **Decision:** no server-side push using plaintext dose times — would break zero-knowledge. Future opt-in channels (e.g. a self-hosted notifier, or OpenClaw-style messaging) can be added *outside* the E2E boundary if the user chooses, documented separately.
+- **Decision:** this stage ships **client/PWA-local** notifications only. Server-side push is now *possible* (the backend can read dose times) and is a natural future enhancement — e.g. a Lambda/EventBridge scheduler or opt-in SMS/WhatsApp channels — but is deferred and documented separately to keep this stage offline-first and self-contained.
 - Background web scheduling is genuinely limited; set expectations honestly rather than over-promising.
 
 ## 10. Definition of done
