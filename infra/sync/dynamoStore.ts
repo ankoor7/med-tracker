@@ -1,14 +1,17 @@
 // DynamoDB implementation of the SyncStore port.
-// Table: PK=userId, SK=id. GSI `byUpdatedAt`: PK=userId, SK=updatedAt.
-// Works against real DynamoDB and against LocalStack (just a different endpoint).
+// Table: PK=userId, SK=id. GSI `byUpdatedAt`: PK=userId, SK=updatedAt (incremental
+// pulls). GSI `byType`: PK=userId, SK=type (type-scoped server queries, Stage 4+).
+// `type` is a top-level attribute and `payload` a native DynamoDB map — the item
+// is readable, not ciphertext. Works against real DynamoDB and LocalStack.
 
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocument } from '@aws-sdk/lib-dynamodb';
-import type { Envelope, SyncStore } from './types';
+import type { SyncRecord, SyncStore } from './types';
 
 export const UPDATED_AT_INDEX = 'byUpdatedAt';
+export const TYPE_INDEX = 'byType';
 
-interface StoredItem extends Envelope {
+interface StoredItem extends SyncRecord {
   userId: string;
 }
 
@@ -40,8 +43,8 @@ export class DynamoDbSyncStore implements SyncStore {
     }
   }
 
-  async querySince(userId: string, since: number): Promise<Envelope[]> {
-    const out: Envelope[] = [];
+  async querySince(userId: string, since: number): Promise<SyncRecord[]> {
+    const out: SyncRecord[] = [];
     let lastKey: Record<string, unknown> | undefined;
     do {
       const res = await this.doc.query({
@@ -53,21 +56,22 @@ export class DynamoDbSyncStore implements SyncStore {
         ...(lastKey ? { ExclusiveStartKey: lastKey } : {}),
       });
       for (const item of (res.Items ?? []) as StoredItem[]) {
-        out.push(toEnvelope(item));
+        out.push(toRecord(item));
       }
       lastKey = res.LastEvaluatedKey;
     } while (lastKey);
     return out;
   }
 
-  async putIfNewer(userId: string, env: Envelope): Promise<boolean> {
+  async putIfNewer(userId: string, rec: SyncRecord): Promise<boolean> {
     const item: StoredItem = {
       userId,
-      id: env.id,
-      updatedAt: env.updatedAt,
-      version: env.version,
-      payload: env.payload,
-      ...(env.deleted ? { deleted: true } : {}),
+      id: rec.id,
+      type: rec.type,
+      updatedAt: rec.updatedAt,
+      version: rec.version,
+      payload: rec.payload,
+      ...(rec.deleted ? { deleted: true } : {}),
     };
     try {
       await this.doc.put({
@@ -75,7 +79,7 @@ export class DynamoDbSyncStore implements SyncStore {
         Item: item,
         // Accept only if new or strictly newer.
         ConditionExpression: 'attribute_not_exists(id) OR version < :v',
-        ExpressionAttributeValues: { ':v': env.version },
+        ExpressionAttributeValues: { ':v': rec.version },
       });
       return true;
     } catch (err) {
@@ -85,9 +89,10 @@ export class DynamoDbSyncStore implements SyncStore {
   }
 }
 
-function toEnvelope(item: StoredItem): Envelope {
+function toRecord(item: StoredItem): SyncRecord {
   return {
     id: item.id,
+    type: item.type,
     updatedAt: item.updatedAt,
     version: item.version,
     payload: item.payload,

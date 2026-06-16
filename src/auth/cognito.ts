@@ -1,7 +1,8 @@
 // Cognito auth client. Wraps amazon-cognito-identity-js, pointed at cognito-local
-// in dev (via the `endpoint` option) or real Cognito in production. Stage 3:
-// sign up / sign in / sign out / session refresh. Tokens never include the
-// passphrase; E2E keys (Stage 4) are derived separately on-device.
+// in dev (via the `endpoint` option) or real Cognito in production. Provides
+// sign up / sign in / sign out / session refresh. The cloud is server-readable
+// (not zero-knowledge), so there are no client-held data keys; auth is the
+// Cognito session only. `signOut` clears the tokens from local storage (AC5).
 
 import {
   AuthenticationDetails,

@@ -6,3 +6,4 @@ export * from './guardrails';
 export * from './adherence';
 export * from './pharmacology';
 export * from './ids';
+export * from './cloudRecord';

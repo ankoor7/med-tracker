@@ -1,16 +1,19 @@
 // Sync handler core — transport-agnostic business logic for /sync/pull and
 // /sync/push. Reused by the Lambda adapter and the local Express server.
-// Stage 3: opaque pass-through envelopes, per-user isolation, version guard.
-// Stage 4 adds readable, typed payloads + server-side schema validation (not
-// zero-knowledge). Full conflict resolution / offline queue is Stage 5.
+//
+// Stage 4: readable, typed records with server-side schema validation (the cloud
+// is NOT zero-knowledge). Per-user isolation (userId is supplied by the verified
+// JWT, never the body) and a version guard are enforced here. Full conflict
+// resolution / offline queue is Stage 5.
 
+import { validateSyncRecord } from '../../src/core/cloudRecord';
 import type {
-  Envelope,
   PullRequest,
   PullResponse,
   PushRequest,
   PushResponse,
   PushResult,
+  SyncRecord,
   SyncStore,
 } from './types';
 
@@ -37,17 +40,20 @@ export async function handlePush(
     throw new BadRequestError('changes[] required');
   }
   const results: PushResult[] = [];
-  for (const env of body.changes) {
-    const validation = validateEnvelope(env);
-    if (validation) {
-      results.push({ id: env?.id ?? '(missing id)', accepted: false, reason: validation });
+  for (const rec of body.changes) {
+    // Server-side schema + type + size validation (AC3) — same module the client
+    // runs before push, so the contract is enforced identically on both ends.
+    const validation = validateSyncRecord(rec);
+    if (!validation.ok) {
+      results.push({ id: idOf(rec), accepted: false, reason: validation.reason });
       continue;
     }
-    const accepted = await store.putIfNewer(userId, env);
+    // userId comes from the verified JWT (AC2) — the record never names its owner.
+    const accepted = await store.putIfNewer(userId, rec as SyncRecord);
     results.push(
       accepted
-        ? { id: env.id, accepted: true }
-        : { id: env.id, accepted: false, reason: 'stale version' },
+        ? { id: rec.id, accepted: true }
+        : { id: rec.id, accepted: false, reason: 'stale version' },
     );
   }
   return { results };
@@ -59,12 +65,9 @@ function normaliseSince(since: unknown): number {
   return Number.isFinite(n) && n >= 0 ? n : 0;
 }
 
-function validateEnvelope(env: Envelope | undefined): string | null {
-  if (!env || typeof env !== 'object') return 'invalid envelope';
-  if (typeof env.id !== 'string' || env.id.length === 0) return 'missing id';
-  if (typeof env.updatedAt !== 'number' || !Number.isFinite(env.updatedAt))
-    return 'missing updatedAt';
-  if (typeof env.version !== 'number' || !Number.isFinite(env.version)) return 'missing version';
-  if (typeof env.payload !== 'string') return 'missing payload';
-  return null;
+function idOf(rec: unknown): string {
+  if (rec && typeof rec === 'object' && typeof (rec as { id?: unknown }).id === 'string') {
+    return (rec as { id: string }).id;
+  }
+  return '(missing id)';
 }

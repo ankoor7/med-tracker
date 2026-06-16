@@ -1,12 +1,12 @@
 // In-memory SyncStore — used by tests and available as a zero-dependency mode
 // for the local server when DynamoDB isn't running.
 
-import type { Envelope, SyncStore } from './types';
+import type { SyncRecord, SyncStore } from './types';
 
 export class InMemorySyncStore implements SyncStore {
-  private readonly byUser = new Map<string, Map<string, Envelope>>();
+  private readonly byUser = new Map<string, Map<string, SyncRecord>>();
 
-  async querySince(userId: string, since: number): Promise<Envelope[]> {
+  async querySince(userId: string, since: number): Promise<SyncRecord[]> {
     const records = this.byUser.get(userId);
     if (!records) return [];
     return [...records.values()]
@@ -15,15 +15,15 @@ export class InMemorySyncStore implements SyncStore {
       .map((e) => ({ ...e }));
   }
 
-  async putIfNewer(userId: string, env: Envelope): Promise<boolean> {
+  async putIfNewer(userId: string, rec: SyncRecord): Promise<boolean> {
     let records = this.byUser.get(userId);
     if (!records) {
       records = new Map();
       this.byUser.set(userId, records);
     }
-    const existing = records.get(env.id);
-    if (existing && existing.version >= env.version) return false;
-    records.set(env.id, { ...env });
+    const existing = records.get(rec.id);
+    if (existing && existing.version >= rec.version) return false;
+    records.set(rec.id, { ...rec });
     return true;
   }
 }

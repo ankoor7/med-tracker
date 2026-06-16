@@ -1,20 +1,16 @@
 // Authorized sync API client. Attaches the Cognito JWT and calls /sync/*.
-// Stage 3 establishes the authorized surface; the full sync engine (offline
-// queue, LWW, change tracking) arrives in Stage 5.
+// Stage 3 established the authorized surface; Stage 4 moves readable, typed
+// records (validated client-side against the shared schema before push). The full
+// sync engine (offline queue, LWW, change tracking) arrives in Stage 5.
 
 import { getBackendConfig } from '../config';
 import { getIdToken } from '../auth/cognito';
+import { validateSyncRecord, type SyncRecord } from '../core/cloudRecord';
 
-export interface Envelope {
-  id: string;
-  updatedAt: number;
-  version: number;
-  deleted?: boolean;
-  payload: string; // opaque pass-through at Stage 3; readable, typed record from Stage 4
-}
+export type { SyncRecord };
 
 export interface PullResponse {
-  changes: Envelope[];
+  changes: SyncRecord[];
   token: number;
 }
 
@@ -77,7 +73,13 @@ export async function pull(since = 0): Promise<PullResponse> {
   return syncRequest<PullResponse>(baseUrl, token, '/sync/pull', { since });
 }
 
-export async function push(changes: Envelope[]): Promise<PushResponse> {
+export async function push(changes: SyncRecord[]): Promise<PushResponse> {
+  // Validate against the shared schema before we spend a round-trip; the server
+  // re-validates with the same module, so this is a fast-fail convenience.
+  for (const rec of changes) {
+    const result = validateSyncRecord(rec);
+    if (!result.ok) throw new ApiError(`invalid record ${rec.id}: ${result.reason}`, 0);
+  }
   const { baseUrl, token } = await context();
   return syncRequest<PushResponse>(baseUrl, token, '/sync/push', { changes });
 }

@@ -1,9 +1,8 @@
 // Lambda sync handler — API Gateway HTTP API (v2) adapter over the shared
 // handler-core. The HTTP API JWT authorizer has already validated the token;
 // we read the user id from the verified claims (never from the request body).
-// Stage 3: opaque pass-through envelopes. Stage 4 adds the readable, typed record
-// model + server-side validation (the cloud is not zero-knowledge); Stage 5 the
-// full sync engine.
+// Stage 4: readable, typed records validated server-side in the shared handler
+// core (the cloud is not zero-knowledge); Stage 5 adds the full sync engine.
 
 import { BadRequestError, handlePull, handlePush } from '../sync/handlerCore';
 import { DynamoDbSyncStore } from '../sync/dynamoStore';

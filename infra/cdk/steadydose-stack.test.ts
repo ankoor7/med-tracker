@@ -12,7 +12,7 @@ function synth(): Template {
   return Template.fromStack(stack);
 }
 
-describe('SteadyDoseStack synth (stage-3 AC1)', () => {
+describe('SteadyDoseStack synth (stage-3 AC1, stage-4 hardening)', () => {
   const template = synth();
 
   it('provisions Cognito, DynamoDB, Lambda, HTTP API and CloudFront', () => {
@@ -24,14 +24,52 @@ describe('SteadyDoseStack synth (stage-3 AC1)', () => {
     template.resourceCountIs('AWS::CloudFront::Distribution', 1);
   });
 
-  it('DynamoDB has the byUpdatedAt GSI, PITR and customer-managed encryption', () => {
+  it('DynamoDB has byUpdatedAt + byType GSIs, PITR and customer-managed encryption', () => {
     template.hasResourceProperties(
       'AWS::DynamoDB::Table',
       Match.objectLike({
         BillingMode: 'PAY_PER_REQUEST',
         PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true },
         SSESpecification: Match.objectLike({ SSEEnabled: true }),
-        GlobalSecondaryIndexes: Match.arrayWith([Match.objectLike({ IndexName: 'byUpdatedAt' })]),
+        GlobalSecondaryIndexes: Match.arrayWith([
+          Match.objectLike({ IndexName: 'byUpdatedAt' }),
+          Match.objectLike({ IndexName: 'byType' }),
+        ]),
+      }),
+    );
+  });
+
+  it('hardens Cognito: strong password policy + optional TOTP MFA (AC5)', () => {
+    template.hasResourceProperties(
+      'AWS::Cognito::UserPool',
+      Match.objectLike({
+        MfaConfiguration: 'OPTIONAL',
+        EnabledMfas: Match.arrayWith(['SOFTWARE_TOKEN_MFA']),
+        Policies: Match.objectLike({
+          PasswordPolicy: Match.objectLike({
+            MinimumLength: 12,
+            RequireUppercase: true,
+            RequireSymbols: true,
+            RequireNumbers: true,
+            RequireLowercase: true,
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('serves the app with HSTS over HTTPS (AC4 — TLS in transit)', () => {
+    template.hasResourceProperties(
+      'AWS::CloudFront::ResponseHeadersPolicy',
+      Match.objectLike({
+        ResponseHeadersPolicyConfig: Match.objectLike({
+          SecurityHeadersConfig: Match.objectLike({
+            StrictTransportSecurity: Match.objectLike({
+              AccessControlMaxAgeSec: 31536000,
+              IncludeSubdomains: true,
+            }),
+          }),
+        }),
       }),
     );
   });
