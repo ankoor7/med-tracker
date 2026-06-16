@@ -9,6 +9,7 @@ import {
 import { useStore } from '../../store/store';
 import { Card, ColorDot, Field, inputClass } from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
+import { RemindersPanel } from '../components/RemindersPanel';
 import { useNow } from '../lib/useNow';
 
 const COMMON_ZONES = [
@@ -123,6 +124,8 @@ export function HistoryScreen() {
           Current zone: {formatTimeWithZone(now, settings.zone)}
         </p>
       </Card>
+
+      <RemindersPanel />
 
       <Card>
         <h3 className="mb-2 text-sm font-medium">Dose log</h3>
