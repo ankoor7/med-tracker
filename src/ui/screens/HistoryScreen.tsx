@@ -1,15 +1,23 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
+  activeStrategy,
+  adherenceTimeline,
   computeAdherence,
+  filterLog,
   formatDateTimeWithZone,
   formatTimeWithZone,
+  levelSeriesFor,
   type DoseLogEntry,
+  type HistoryFilter,
   type Medication,
 } from '../../core';
 import { useStore } from '../../store/store';
 import { Card, ColorDot, Field, inputClass } from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
+import { AdherenceChart } from '../components/AdherenceChart';
+import { BloodLevelChart } from '../components/BloodLevelChart';
+import { DataTransferPanel } from '../components/DataTransferPanel';
 import { useNow } from '../lib/useNow';
 
 const COMMON_ZONES = [
@@ -32,6 +40,8 @@ export function HistoryScreen() {
 
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
 
+  const [filter, setFilter] = useState<HistoryFilter>({});
+
   const adherence = useMemo(
     () =>
       computeAdherence(
@@ -46,10 +56,45 @@ export function HistoryScreen() {
     [slots, medications, doseLog, settings, now],
   );
 
-  const entries = useMemo(
-    () => doseLog.filter((e) => !e.deleted).sort((a, b) => b.actualInstant - a.actualInstant),
-    [doseLog],
+  const timeline = useMemo(
+    () =>
+      adherenceTimeline(
+        slots,
+        medications,
+        doseLog,
+        settings.zone,
+        settings.adherenceWindowDays,
+        now,
+      ),
+    [slots, medications, doseLog, settings.zone, settings.adherenceWindowDays, now],
   );
+
+  const entries = useMemo(
+    () => filterLog(doseLog, filter, settings.zone),
+    [doseLog, filter, settings.zone],
+  );
+
+  // Blood-level chart: the app renders only what the extension provides. Pick the
+  // filtered med (or the first one) and ask the extension for a series.
+  const levelMed = filter.medId ? medById.get(filter.medId) : medications.find((m) => !m.deleted);
+  const levelDoses = useMemo(
+    () =>
+      levelMed
+        ? doseLog
+            .filter((e) => !e.deleted && e.status === 'taken' && e.medId === levelMed.id)
+            .sort((a, b) => a.actualInstant - b.actualInstant)
+        : [],
+    [doseLog, levelMed],
+  );
+  const levelSeries =
+    levelMed && levelDoses.length > 0
+      ? levelSeriesFor(activeStrategy, {
+          med: levelMed,
+          doses: levelDoses,
+          from: levelDoses[0]!.actualInstant,
+          to: now,
+        })
+      : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -76,6 +121,26 @@ export function HistoryScreen() {
             {adherence.taken} taken · {adherence.missed} missed · {adherence.expected} expected
           </span>
         </div>
+        <div className="mt-3">
+          <AdherenceChart days={timeline} />
+        </div>
+      </Card>
+
+      <Card>
+        <h3 className="mb-2 text-sm font-medium">
+          Predicted blood level{levelMed ? ` — ${levelMed.name}` : ''}
+        </h3>
+        {levelSeries ? (
+          <BloodLevelChart
+            series={levelSeries}
+            doseMarkers={levelDoses.map((d) => d.actualInstant)}
+          />
+        ) : (
+          <p className="text-sm text-slate-400">
+            No predicted curve. SteadyDose computes no pharmacology itself — provide a pharmacology
+            extension with a <code>levelSeries</code> function to chart predicted levels here.
+          </p>
+        )}
       </Card>
 
       <Card>
@@ -127,9 +192,50 @@ export function HistoryScreen() {
 
       <RemindersPanel />
 
+      <DataTransferPanel />
+
       <Card>
         <h3 className="mb-2 text-sm font-medium">Dose log</h3>
-        {entries.length === 0 && <p className="text-sm text-slate-400">No doses logged yet.</p>}
+        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="Medication">
+            <select
+              className={inputClass}
+              value={filter.medId ?? ''}
+              onChange={(e) => setFilter((f) => ({ ...f, medId: e.target.value || undefined }))}
+              aria-label="Filter by medication"
+            >
+              <option value="">All</option>
+              {medications
+                .filter((m) => !m.deleted)
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name}
+                  </option>
+                ))}
+            </select>
+          </Field>
+          <Field label="From">
+            <input
+              type="date"
+              className={inputClass}
+              value={filter.from ?? ''}
+              onChange={(e) => setFilter((f) => ({ ...f, from: e.target.value || undefined }))}
+              aria-label="From date"
+            />
+          </Field>
+          <Field label="To">
+            <input
+              type="date"
+              className={inputClass}
+              value={filter.to ?? ''}
+              onChange={(e) => setFilter((f) => ({ ...f, to: e.target.value || undefined }))}
+              aria-label="To date"
+            />
+          </Field>
+        </div>
+        {entries.length === 0 && (
+          <p className="text-sm text-slate-400">No doses match the current filter.</p>
+        )}
         <ul className="flex flex-col divide-y divide-slate-800">
           {entries.map((entry) => (
             <LogRow key={entry.id} entry={entry} med={medById.get(entry.medId)} />

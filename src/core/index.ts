@@ -6,6 +6,7 @@ export * from './occurrence';
 export * from './guardrails';
 export * from './adherence';
 export * from './reminders';
+export * from './history';
 export * from './pharmacology';
 export * from './ids';
 export * from './cloudRecord';

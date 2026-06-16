@@ -14,6 +14,8 @@ import {
 } from '../core';
 import { getRepository, type TableName } from './repository';
 import { seedDataset } from './seed';
+import { mergeDatasets, type ImportMode } from './transfer';
+import type { Dataset } from '../core/types';
 
 // ---- Input types (UI-facing) --------------------------------------------------
 
@@ -66,6 +68,9 @@ interface StoreState {
   deleteLogEntry: (id: string) => void;
 
   updateSettings: (patch: Partial<Omit<Settings, 'updatedAt' | 'version'>>) => void;
+
+  /** Apply an imported dataset (Stage 7), replacing or LWW-merging the current. */
+  importData: (incoming: Dataset, mode: ImportMode) => void;
 }
 
 // ---- Helpers ------------------------------------------------------------------
@@ -288,5 +293,16 @@ export const useStore = create<StoreState>((set, get) => ({
     const next = stamp({ ...get().settings, ...patch }, now);
     set({ settings: next });
     persistSettings(next);
+  },
+
+  importData: (incoming, mode) => {
+    const { medications, slots, doseLog, settings } = get();
+    const merged = mergeDatasets({ medications, slots, doseLog, settings }, incoming, mode);
+    set({ ...merged });
+    // Persist (and queue for sync) every record so the import propagates.
+    for (const m of merged.medications) persistUpsert('medications', m);
+    for (const s of merged.slots) persistUpsert('slots', s);
+    for (const e of merged.doseLog) persistUpsert('doseLog', e);
+    persistSettings(merged.settings);
   },
 }));
