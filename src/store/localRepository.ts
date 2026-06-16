@@ -3,12 +3,15 @@
 // Dexie upward). Stages 4/5 wrap this for encryption and sync.
 
 import Dexie, { type Table } from 'dexie';
+import { isNewerRecord, type SyncRecord } from '../core/cloudRecord';
 import type { Dataset, DoseLogEntry, Medication, Settings, Slot } from '../core/types';
-import type { Repository, TableName } from './repository';
+import type { OutboxRef, Repository, TableName } from './repository';
+import { fromSyncRecord, toSyncRecord } from '../sync/recordMapping';
 import { CURRENT_SCHEMA_VERSION, runMigrations } from './migrations';
 
 const SETTINGS_ID = 'app';
 const META_SCHEMA_VERSION = 'schemaVersion';
+const META_SYNC_TOKEN = 'lastSyncToken';
 
 type StoredSettings = Settings & { id: string };
 interface MetaRow {
@@ -22,6 +25,7 @@ export class SteadyDoseDB extends Dexie {
   doseLog!: Table<DoseLogEntry, string>;
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
+  outbox!: Table<SyncRecord, string>;
 
   constructor(name = 'steadydose') {
     super(name);
@@ -32,6 +36,11 @@ export class SteadyDoseDB extends Dexie {
       doseLog: 'id, updatedAt, deleted, medId, slotId',
       settings: 'id',
       meta: 'key',
+    });
+    // v2 (Stage 5): durable sync outbox — one row per record id (its latest
+    // pending version), so the queue is bounded and replays idempotently.
+    this.version(2).stores({
+      outbox: 'id',
     });
   }
 }
@@ -69,20 +78,83 @@ export class LocalRepository implements Repository {
   }
 
   async upsert<T extends { id: string }>(table: TableName, record: T): Promise<void> {
-    await this.db.table(table).put(record);
+    await this.db.transaction('rw', this.db.table(table), this.db.outbox, async () => {
+      await this.db.table(table).put(record);
+      await this.enqueue(table, record);
+    });
   }
 
   async remove(table: TableName, id: string): Promise<void> {
     // Soft delete: tombstone the record (FR-2.2). Never a hard delete pre-sync.
     const existing = await this.db
-      .table<{ id: string; updatedAt: number; deleted?: boolean }>(table)
+      .table<{ id: string; updatedAt: number; version?: number; deleted?: boolean }>(table)
       .get(id);
     if (!existing) return;
-    await this.db.table(table).put({ ...existing, deleted: true, updatedAt: Date.now() });
+    const tombstoned = {
+      ...existing,
+      deleted: true,
+      updatedAt: Date.now(),
+      version: (existing.version ?? 0) + 1,
+    };
+    await this.db.transaction('rw', this.db.table(table), this.db.outbox, async () => {
+      await this.db.table(table).put(tombstoned);
+      await this.enqueue(table, tombstoned);
+    });
   }
 
   async putSettings(settings: Settings): Promise<void> {
-    await this.db.settings.put({ ...settings, id: SETTINGS_ID });
+    const row = { ...settings, id: SETTINGS_ID };
+    await this.db.transaction('rw', this.db.settings, this.db.outbox, async () => {
+      await this.db.settings.put(row);
+      await this.enqueue('settings', row);
+    });
+  }
+
+  /** Stage local change of `record` for the next push (one row per record id). */
+  private async enqueue(table: TableName, record: { id: string }): Promise<void> {
+    const rec = toSyncRecord(table, record as never);
+    await this.db.outbox.put(rec);
+  }
+
+  async readOutbox(): Promise<SyncRecord[]> {
+    return this.db.outbox.toArray();
+  }
+
+  async clearOutbox(refs: OutboxRef[]): Promise<void> {
+    if (refs.length === 0) return;
+    await this.db.transaction('rw', this.db.outbox, async () => {
+      for (const ref of refs) {
+        const current = await this.db.outbox.get(ref.id);
+        // Skip if a newer local edit re-enqueued the same id while we were pushing.
+        if (current && current.version === ref.version) {
+          await this.db.outbox.delete(ref.id);
+        }
+      }
+    });
+  }
+
+  async applyRemote(rec: SyncRecord): Promise<boolean> {
+    const { table, entity } = fromSyncRecord(rec);
+    // Write straight to the table (NOT via upsert) so a pulled record is not
+    // re-queued back into the outbox.
+    const dest = this.db.table<{ updatedAt: number; version?: number }, string>(table);
+    const existing = await dest.get(entity.id);
+    const existingOrder = existing
+      ? { updatedAt: existing.updatedAt, version: existing.version ?? 1 }
+      : undefined;
+    if (!isNewerRecord(rec, existingOrder)) return false;
+    await dest.put(entity as never);
+    return true;
+  }
+
+  async getSyncToken(): Promise<number> {
+    const raw = await this.getMeta(META_SYNC_TOKEN);
+    const n = raw == null ? 0 : Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }
+
+  async setSyncToken(token: number): Promise<void> {
+    await this.setMeta(META_SYNC_TOKEN, String(token));
   }
 
   async getMeta(key: string): Promise<string | null> {

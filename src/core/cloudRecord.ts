@@ -139,3 +139,24 @@ function validateSettings(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.missedDayThreshold)) return fail('settings.missedDayThreshold required');
   return ok;
 }
+
+/** The fields the LWW ordering compares — a structural subset of a record. */
+export interface RecordOrder {
+  updatedAt: number;
+  version: number;
+}
+
+/**
+ * Last-write-wins ordering, shared by the server write guard and the client
+ * merge so both ends resolve conflicts identically (Stage 5 FR-5.3/FR-5.4).
+ *
+ * `incoming` is newer when its `updatedAt` is greater, or — for the same
+ * `updatedAt` — its `version` is greater. The version tie-break makes
+ * re-applying an identical record a no-op, which is what keeps sync idempotent
+ * (re-pushed/re-pulled records change nothing).
+ */
+export function isNewerRecord(incoming: RecordOrder, existing: RecordOrder | undefined): boolean {
+  if (!existing) return true;
+  if (incoming.updatedAt !== existing.updatedAt) return incoming.updatedAt > existing.updatedAt;
+  return incoming.version > existing.version;
+}

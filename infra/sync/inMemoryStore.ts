@@ -1,6 +1,7 @@
 // In-memory SyncStore — used by tests and available as a zero-dependency mode
 // for the local server when DynamoDB isn't running.
 
+import { isNewerRecord } from '../../src/core/cloudRecord';
 import type { SyncRecord, SyncStore } from './types';
 
 export class InMemorySyncStore implements SyncStore {
@@ -22,7 +23,9 @@ export class InMemorySyncStore implements SyncStore {
       this.byUser.set(userId, records);
     }
     const existing = records.get(rec.id);
-    if (existing && existing.version >= rec.version) return false;
+    // Last-write-wins on (updatedAt, version) — same guard as the client merge
+    // and the DynamoDB conditional write, so all three ends converge identically.
+    if (!isNewerRecord(rec, existing)) return false;
     records.set(rec.id, { ...rec });
     return true;
   }

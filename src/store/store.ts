@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import {
   checkGuardrails,
+  entryMatchesOccurrence,
+  isoDateInZone,
   newId,
   type DoseLogEntry,
   type Guardrails,
@@ -48,6 +50,8 @@ interface StoreState {
   settings: Settings;
 
   hydrate: () => Promise<void>;
+  /** Re-read the repository into memory after a sync applied remote changes. */
+  reload: () => Promise<void>;
 
   addMedication: (input: MedicationInput) => Medication;
   updateMedication: (id: string, patch: Partial<MedicationInput>) => void;
@@ -115,6 +119,11 @@ export const useStore = create<StoreState>((set, get) => ({
     for (const m of data.medications) persistUpsert('medications', m);
     for (const s of data.slots) persistUpsert('slots', s);
     persistSettings(data.settings);
+  },
+
+  reload: async () => {
+    const loaded = await getRepository().loadAll();
+    if (loaded) set({ ...loaded });
   },
 
   addMedication: (input) => {
@@ -232,20 +241,20 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   takeGroup: (slotId, scheduledInstant) => {
-    const { slots } = get();
+    const { slots, settings } = get();
     const slot = slots.find((s) => s.id === slotId);
     if (!slot) return [];
     const now = Date.now();
+    const date = isoDateInZone(scheduledInstant, settings.zone);
     const created: DoseLogEntry[] = [];
     for (const item of slot.items) {
-      // Skip items already taken for this occurrence.
+      // Skip items already taken for this occurrence (matched on the occurrence
+      // key, so a prior log still counts across a zone change — FR-5.6).
       const exists = get().doseLog.some(
         (e) =>
           !e.deleted &&
           e.status === 'taken' &&
-          e.slotId === slotId &&
-          e.medId === item.medId &&
-          e.scheduledInstant === scheduledInstant,
+          entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
       );
       if (exists) continue;
       created.push(

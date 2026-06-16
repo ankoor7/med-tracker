@@ -6,6 +6,7 @@
 // with a tolerance window for mid-day zone changes (architecture §6).
 
 import { resolveWallTimeToInstant } from './time';
+import { entryMatchesOccurrence } from './occurrence';
 import type {
   DoseLogEntry,
   IanaZone,
@@ -28,14 +29,15 @@ function findLogEntry(
   slotId: string,
   medId: string,
   scheduledInstant: Instant,
+  date: ISODate,
 ): DoseLogEntry | undefined {
+  // Match on the occurrence key (slotId, medId, localDate) so a dose stays mapped
+  // to its slot across a mid-day zone change (FR-5.6), not bare instant equality.
   return log.find(
     (e) =>
       !e.deleted &&
       e.status === 'taken' &&
-      e.slotId === slotId &&
-      e.medId === medId &&
-      e.scheduledInstant === scheduledInstant,
+      entryMatchesOccurrence(e, slotId, medId, scheduledInstant, date),
   );
 }
 
@@ -75,7 +77,7 @@ export function plannedSlotsForDate(
     for (const item of slot.items) {
       const med = activeMed(meds, item.medId);
       if (!med) continue;
-      const entry = findLogEntry(log, slot.id, item.medId, scheduledInstant);
+      const entry = findLogEntry(log, slot.id, item.medId, scheduledInstant, date);
       occurrences.push({
         slotId: slot.id,
         medId: item.medId,

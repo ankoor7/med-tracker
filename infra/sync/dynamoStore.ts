@@ -77,9 +77,12 @@ export class DynamoDbSyncStore implements SyncStore {
       await this.doc.put({
         TableName: this.tableName,
         Item: item,
-        // Accept only if new or strictly newer.
-        ConditionExpression: 'attribute_not_exists(id) OR version < :v',
-        ExpressionAttributeValues: { ':v': rec.version },
+        // Last-write-wins on (updatedAt, version): accept if new, strictly later,
+        // or same instant with a higher version. Mirrors `isNewerRecord` (the
+        // client merge + in-memory store use the identical predicate).
+        ConditionExpression:
+          'attribute_not_exists(id) OR updatedAt < :u OR (updatedAt = :u AND version < :v)',
+        ExpressionAttributeValues: { ':u': rec.updatedAt, ':v': rec.version },
       });
       return true;
     } catch (err) {
