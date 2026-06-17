@@ -18,6 +18,7 @@ Package manager is **pnpm** (pinned via `packageManager` + `.nvmrc`).
 | Format           | `pnpm format`     |
 | Test (run once)  | `pnpm test`       |
 | Test (watch)     | `pnpm test:watch` |
+| E2E (Playwright) | `pnpm test:e2e`   |
 | Production build | `pnpm build`      |
 | Preview build    | `pnpm preview`    |
 
@@ -38,6 +39,13 @@ Dev account: `dev@steadydose.local` / `DevPassw0rd!` (seeded in `supabase/seed.s
 email confirmation is disabled locally). Deploy: `pnpm deploy` runs `supabase db push`,
 the build, and the static-host upload (see `supabase/README.md`). DB-only push:
 `pnpm deploy:db`.
+
+**E2E (Stage 10):** `pnpm test:e2e` runs the Playwright suite (`e2e/`, spec
+`specs/stage-10-e2e-testing.md`). It needs the local stack up (`pnpm local:up` +
+`pnpm local:env`); it boots its own Vite dev server on port 5175 with
+`VITE_DISABLE_SEED=true` (empty first run), signs in as the dev account, drives the
+UI, then asserts the resulting rows in the Supabase `records` table via a direct
+`pg` connection. The Playwright MCP server is registered in `.mcp.json`.
 
 CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build on push/PR,
 plus a separate `db-tests` job that boots Supabase and runs the pgTAP suite.

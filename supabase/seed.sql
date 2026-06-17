@@ -23,13 +23,18 @@ begin
     instance_id, id, aud, role, email,
     encrypted_password, email_confirmed_at,
     raw_app_meta_data, raw_user_meta_data,
-    created_at, updated_at
+    created_at, updated_at,
+    -- GoTrue scans these token columns into non-nullable Go strings; leaving them
+    -- NULL makes sign-in fail with "Database error querying schema" on current
+    -- GoTrue versions. Seed them as empty strings (their normal default).
+    confirmation_token, recovery_token, email_change, email_change_token_new
   ) values (
     '00000000-0000-0000-0000-000000000000',
     dev_id, 'authenticated', 'authenticated', dev_email,
     extensions.crypt('DevPassw0rd!', extensions.gen_salt('bf')), now(),
     '{"provider":"email","providers":["email"]}', '{}',
-    now(), now()
+    now(), now(),
+    '', '', '', ''
   );
 
   insert into auth.identities (

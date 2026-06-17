@@ -30,6 +30,7 @@ Do not start a stage before its prerequisites are met. The domain core (Stage 1)
 | 7 | History & Visualisation | 2 | Charts, adherence, export; blood-level chart via extension |
 | 8 | Re-platform onto Supabase | 3,4,5 | Drop AWS; Supabase (GoTrue + Postgres + RLS) replaces the custom API tier |
 | 9 | Open-Source Packaging & Deploy | 8 | One-command BYO-Supabase deploy + docs + extension guide |
+| 10 | End-to-End Testing | 8 | Browser-driven E2E (Playwright) asserting the UI→Supabase round-trip |
 
 ```mermaid
 flowchart LR
@@ -43,6 +44,7 @@ flowchart LR
   S2 --> S7[7 History + charts]
   S5 --> S8[8 Supabase re-platform]
   S8 --> S9[9 OSS + deploy]
+  S8 --> S10[10 E2E testing]
 ```
 
 ## Sequencing & milestones
@@ -50,7 +52,7 @@ flowchart LR
 - **Milestone B — Multi-device & secure (Stages 3–5).** Cloud backend, server-readable data model + security hardening, sync. Private, multi-device, and ready for future server-side features.
 - **Milestone C — Daily-driver polish (Stages 6–7).** Reminders and history/visualisation.
 - **Milestone D — Re-platform (Stage 8).** Drop AWS; move the cloud onto Supabase (GoTrue + Postgres + RLS), collapsing the custom API tier.
-- **Milestone E — Release (Stage 9).** Open source with bring-your-own-Supabase.
+- **Milestone E — Release (Stages 9–10).** Open source with bring-your-own-Supabase, plus a browser-driven E2E suite that proves UI actions reach the Supabase `records` table.
 
 Stages 6 and 7 can proceed in parallel with the cloud track once Stage 2 lands, if capacity allows; otherwise follow the table order. Stage 4 now depends on the Stage 3 backend. The Supabase re-platform (Stage 8) lands after the feature track and **before** open-source packaging (Stage 9), so the released project ships on Supabase, not AWS.
 
@@ -65,6 +67,7 @@ Stages 6 and 7 can proceed in parallel with the cloud track once Stage 2 lands, 
 7. **History & Visualisation.** Detailed history, adherence charts, and a blood-level chart that renders the extension's output; JSON/CSV export and import.
 8. **Re-platform onto Supabase.** Replace the bring-your-own-AWS stack (Cognito, API Gateway, Lambda, DynamoDB, S3/CloudFront, CDK) with Supabase, collapsing the custom sync API: GoTrue for auth, one Postgres `records` table, per-user isolation via Row-Level Security, incremental pull via PostgREST and a `push_records` RPC carrying the LWW version guard + server-side validation. The domain core, local store, sync engine, record mapping, and UI are unchanged (the swap happens behind existing ports). Local dev becomes a single `supabase start` Docker stack with real GoTrue (no LocalStack/cognito-local split).
 9. **Open-Source Packaging & Deploy.** One-command setup to a fresh Supabase project (`supabase link` → `db push`) + static host; generated client config from the project URL + anon key (service-role key never shipped); setup/teardown docs; LICENSE; security guidance (anon-only-in-client, service-role secret, access-token handling); documented extension guide so others plug in their own equations.
+10. **End-to-End Testing.** A Playwright suite that drives the real UI in a browser against the local Supabase stack and asserts the resulting rows in the `records` table — proving the full UI → store → sync → `push_records` RPC → Postgres round-trip. Flagship scenario: first-run setup (sign in, create three medications, arrange them into mixed time-slot groups across the day). The Playwright MCP server is registered for interactive UI driving during development.
 
 ## Cross-cutting concerns (apply to every stage)
 - **Safety:** the app never originates a dose; guardrails enforced centrally; disclaimers present; clinician validation called out in UI/docs.

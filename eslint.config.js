@@ -8,7 +8,15 @@ import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'dev-dist', 'coverage', 'node_modules', 'supabase/**'],
+    ignores: [
+      'dist',
+      'dev-dist',
+      'coverage',
+      'node_modules',
+      'supabase/**',
+      'playwright-report',
+      'test-results',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -64,6 +72,13 @@ export default tseslint.config(
   // Test files: relax a couple of rules.
   {
     files: ['**/*.{test,spec}.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
+  // E2E (Playwright) sources + config run under Node.
+  {
+    files: ['e2e/**/*.{ts,tsx}', 'playwright.config.ts'],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
     },

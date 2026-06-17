@@ -70,7 +70,10 @@ export function ScheduleScreen() {
 }
 
 function SlotEditor({ initial, onClose }: { initial: Slot | null; onClose: () => void }) {
-  const medications = useStore((s) => s.medications.filter((m) => !m.deleted && m.active));
+  // Select the raw array (stable reference) and filter in render — filtering
+  // inside the selector returns a new array each call, which trips React's
+  // useSyncExternalStore into an infinite re-render loop (Zustand v5 / React 18).
+  const medications = useStore((s) => s.medications).filter((m) => !m.deleted && m.active);
   const addSlot = useStore((s) => s.addSlot);
   const updateSlot = useStore((s) => s.updateSlot);
 

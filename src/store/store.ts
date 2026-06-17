@@ -118,6 +118,13 @@ export const useStore = create<StoreState>((set, get) => ({
       set({ ...loaded, hydrated: true });
       return;
     }
+    // Test seam: the E2E suite needs a genuinely empty first run (no demo data
+    // bleeding into sync assertions), so it sets VITE_DISABLE_SEED. Normal dev
+    // and production are unaffected.
+    if (import.meta.env.VITE_DISABLE_SEED) {
+      set({ hydrated: true });
+      return;
+    }
     // First run: seed.
     const data = seedDataset(Date.now());
     set({ ...data, hydrated: true });

@@ -26,6 +26,12 @@ dist-ssr/
 # Test / coverage
 coverage/
 
+# Playwright (E2E) artifacts
+test-results/
+playwright-report/
+playwright/.cache/
+.last-run.json
+
 # Logs
 *.log
 npm-debug.log*
