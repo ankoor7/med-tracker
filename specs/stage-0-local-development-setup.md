@@ -41,7 +41,7 @@ Keep this project in a **separate repo from corporate code**.
 - **Quality:** ESLint (`typescript-eslint`, `react-hooks`, `import`) + Prettier. Scaffold an import-boundary rule reserving `src/core/` as React-free (enforced in Stage 1).
 - **Hooks:** husky + lint-staged (or `simple-git-hooks`) running lint + typecheck on commit.
 - **Scripts (`pnpm <script>`):** `dev`, `build`, `preview`, `typecheck`, `lint`, `format`, `test`, `test:watch`, `prepare`.
-- **CI:** GitHub Actions on the pinned Node version with dependency caching; run typecheck → lint → test → build. (Dependency audit/CSP land in Stage 8.)
+- **CI:** GitHub Actions on the pinned Node version with dependency caching; run typecheck → lint → test → build. (Dependency audit/CSP land in Stage 9.)
 - **App shell:** minimal `App.tsx` rendering the title and four **tab placeholders** (Today / Schedule / Meds / History) with no logic — enough to install as a PWA and smoke-test.
 - **Claude Code:** `CLAUDE.md` with commands + conventions; optional `.claude/` config consistent with your existing workflow.
 

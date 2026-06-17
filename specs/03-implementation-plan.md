@@ -28,7 +28,8 @@ Do not start a stage before its prerequisites are met. The domain core (Stage 1)
 | 5 | Sync Engine | 3, 4 | Multi-device sync of readable records with conflict handling |
 | 6 | Reminders & Notifications | 2 | Dose reminders + missed-pattern alerts (PWA) |
 | 7 | History & Visualisation | 2 | Charts, adherence, export; blood-level chart via extension |
-| 8 | Open-Source Packaging & Deploy | 3,4,5 | One-command BYO-AWS deploy + docs + extension guide |
+| 8 | Re-platform onto Supabase | 3,4,5 | Drop AWS; Supabase (GoTrue + Postgres + RLS) replaces the custom API tier |
+| 9 | Open-Source Packaging & Deploy | 8 | One-command BYO-Supabase deploy + docs + extension guide |
 
 ```mermaid
 flowchart LR
@@ -40,16 +41,18 @@ flowchart LR
   S4 --> S5
   S2 --> S6[6 Reminders]
   S2 --> S7[7 History + charts]
-  S5 --> S8[8 OSS + deploy]
+  S5 --> S8[8 Supabase re-platform]
+  S8 --> S9[9 OSS + deploy]
 ```
 
 ## Sequencing & milestones
 - **Milestone A — Usable offline app (Stages 0–2).** Reproducible dev setup, then the core app and local store. Replaces the spreadsheet on one device. Highest value, lowest risk; ship and dogfood here.
 - **Milestone B — Multi-device & secure (Stages 3–5).** Cloud backend, server-readable data model + security hardening, sync. Private, multi-device, and ready for future server-side features.
 - **Milestone C — Daily-driver polish (Stages 6–7).** Reminders and history/visualisation.
-- **Milestone D — Release (Stage 8).** Open source with bring-your-own-AWS.
+- **Milestone D — Re-platform (Stage 8).** Drop AWS; move the cloud onto Supabase (GoTrue + Postgres + RLS), collapsing the custom API tier.
+- **Milestone E — Release (Stage 9).** Open source with bring-your-own-Supabase.
 
-Stages 6 and 7 can proceed in parallel with the cloud track once Stage 2 lands, if capacity allows; otherwise follow the table order. Stage 4 now depends on the Stage 3 backend.
+Stages 6 and 7 can proceed in parallel with the cloud track once Stage 2 lands, if capacity allows; otherwise follow the table order. Stage 4 now depends on the Stage 3 backend. The Supabase re-platform (Stage 8) lands after the feature track and **before** open-source packaging (Stage 9), so the released project ships on Supabase, not AWS.
 
 ## Per-stage summary
 0. **Local Development Setup.** Prerequisites and install (Node LTS, Git, Claude Code), repo init, React+TS+Vite scaffold, Tailwind base, PWA baseline, ESLint/Prettier, Vitest, pre-commit hooks, npm scripts, CI, and an empty app shell with one smoke test. Result: a reproducible dev loop that's green in CI, ready for features.
@@ -60,7 +63,8 @@ Stages 6 and 7 can proceed in parallel with the cloud track once Stage 2 lands, 
 5. **Sync Engine.** Pull/push protocol, change tracking + tokens, offline queue, LWW conflict resolution, tombstones, idempotency, server-side validation on push. Tighten timezone-robust occurrence matching. Multi-device sync of readable records.
 6. **Reminders & Notifications.** Service-worker notification scheduling for upcoming/adjusted doses; permission UX; zone-aware timing; missed-pattern alerts; documented graceful degradation where background scheduling is limited.
 7. **History & Visualisation.** Detailed history, adherence charts, and a blood-level chart that renders the extension's output; JSON/CSV export and import.
-8. **Open-Source Packaging & Deploy.** One-command deploy to a fresh account; generated app config; setup/teardown docs; LICENSE; security guidance (SSO/short-lived creds, least privilege); documented extension guide so others plug in their own equations.
+8. **Re-platform onto Supabase.** Replace the bring-your-own-AWS stack (Cognito, API Gateway, Lambda, DynamoDB, S3/CloudFront, CDK) with Supabase, collapsing the custom sync API: GoTrue for auth, one Postgres `records` table, per-user isolation via Row-Level Security, incremental pull via PostgREST and a `push_records` RPC carrying the LWW version guard + server-side validation. The domain core, local store, sync engine, record mapping, and UI are unchanged (the swap happens behind existing ports). Local dev becomes a single `supabase start` Docker stack with real GoTrue (no LocalStack/cognito-local split).
+9. **Open-Source Packaging & Deploy.** One-command setup to a fresh Supabase project (`supabase link` → `db push`) + static host; generated client config from the project URL + anon key (service-role key never shipped); setup/teardown docs; LICENSE; security guidance (anon-only-in-client, service-role secret, access-token handling); documented extension guide so others plug in their own equations.
 
 ## Cross-cutting concerns (apply to every stage)
 - **Safety:** the app never originates a dose; guardrails enforced centrally; disclaimers present; clinician validation called out in UI/docs.
