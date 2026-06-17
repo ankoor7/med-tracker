@@ -1,20 +1,36 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalRepository, SteadyDoseDB } from '../store/localRepository';
-import { handlePull, handlePush } from '../../infra/sync/handlerCore';
-import { InMemorySyncStore } from '../../infra/sync/inMemoryStore';
 import { runSync, type SyncBackend, type SyncLocal } from './syncEngine';
-import type { SyncRecord } from '../core/cloudRecord';
+import { isNewerRecord, validateSyncRecord, type SyncRecord } from '../core/cloudRecord';
 import { med } from '../test/fixtures';
 
-// A backend backed by the real server handler-core + in-memory store, so tests
-// exercise the actual server-side LWW guard and schema validation, not a mock.
-function makeBackend(userId = 'user'): SyncBackend & { store: InMemorySyncStore } {
-  const store = new InMemorySyncStore();
+// A storage-agnostic in-memory SyncBackend that mirrors the server logic now in
+// SQL (supabase/migrations): single-user isolation, the shared schema validation
+// (validateSyncRecord = validate_record), and the LWW version guard
+// (isNewerRecord = the push_records conflict predicate). So these tests exercise
+// the real conflict + validation rules, not a stub.
+function makeBackend(): SyncBackend {
+  const store = new Map<string, SyncRecord>();
   return {
-    store,
-    pull: (since) => handlePull(store, userId, { since }),
-    push: (changes) => handlePush(store, userId, { changes }),
+    pull: async (since) => {
+      const changes = [...store.values()]
+        .filter((r) => r.updatedAt > since)
+        .sort((a, b) => a.updatedAt - b.updatedAt);
+      const token = changes.reduce((max, r) => Math.max(max, r.updatedAt), since);
+      return { changes, token };
+    },
+    push: async (changes) => ({
+      results: changes.map((rec) => {
+        const validation = validateSyncRecord(rec);
+        if (!validation.ok) return { id: rec.id, accepted: false, reason: validation.reason };
+        if (!isNewerRecord(rec, store.get(rec.id))) {
+          return { id: rec.id, accepted: false, reason: 'stale version' };
+        }
+        store.set(rec.id, rec);
+        return { id: rec.id, accepted: true };
+      }),
+    }),
   };
 }
 

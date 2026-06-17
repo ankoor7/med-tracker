@@ -14,27 +14,23 @@
 //    returned without blocking the valid records in the same batch.
 
 import {
-  pull as apiPull,
-  push as apiPush,
+  supabaseBackend,
   type PullResponse,
   type PushResponse,
   type PushResult,
-} from './apiClient';
+} from './supabaseBackend';
 import type { SyncRecord } from '../core/cloudRecord';
 import type { OutboxRef, Repository } from '../store/repository';
 
 export type { PushResult };
 
-/** Network port. Defaults to the authorized API client; injectable for tests. */
+/** Network port. Defaults to the Supabase backend; injectable for tests. */
 export interface SyncBackend {
   pull(since: number): Promise<PullResponse>;
   push(changes: SyncRecord[]): Promise<PushResponse>;
 }
 
-export const defaultBackend: SyncBackend = {
-  pull: (since) => apiPull(since),
-  push: (changes) => apiPush(changes),
-};
+export const defaultBackend: SyncBackend = supabaseBackend;
 
 /** The local side the engine needs — a structural subset of `Repository`. */
 export type SyncLocal = Pick<

@@ -1,5 +1,12 @@
 # Stage 4 Spec — Cloud Data Model & Security Hardening
 
+> **Re-platformed by Stage 8.** The AWS implementation (DynamoDB, Lambda
+> validation, Cognito/KMS hardening) was replaced with **Supabase** in Stage 8
+> (`specs/stage-8-supabase-migration.md`): the readable, typed record model and
+> server-side validation now live in Postgres (RLS + `validate_record` +
+> `push_records`). The deliberate **"server-readable, not zero-knowledge"**
+> decision documented here still holds — Postgres rows are server-readable by design.
+
 | | |
 |---|---|
 | **Depends on** | Stage 3 |

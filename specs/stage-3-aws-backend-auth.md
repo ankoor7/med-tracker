@@ -1,5 +1,11 @@
 # Stage 3 Spec — AWS Backend & Auth
 
+> **Re-platformed by Stage 8.** The AWS surface described here (Cognito, API
+> Gateway, Lambda, DynamoDB, S3/CloudFront, CDK) was replaced with **Supabase** in
+> Stage 8 (`specs/stage-8-supabase-migration.md`). This spec is retained for the
+> rationale and the auth/sync-API contract it established — the **functional**
+> requirements it implements still hold, now on Supabase.
+
 | | |
 |---|---|
 | **Depends on** | Stage 2 |

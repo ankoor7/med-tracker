@@ -38,10 +38,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    // Backend/infra tests run in Node (no DOM); UI/core tests in jsdom.
-    environmentMatchGlobs: [['infra/**', 'node']],
     setupFiles: ['./src/test/setup.ts'],
     css: false,
-    include: ['src/**/*.{test,spec}.{ts,tsx}', 'infra/**/*.{test,spec}.ts'],
+    include: ['src/**/*.{test,spec}.{ts,tsx}'],
   },
 });

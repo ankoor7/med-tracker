@@ -3,9 +3,9 @@
 A **local-first, offline-capable PWA** for people on fixed daily medication
 schedules (built for anti-epileptic regimens). It manages a grouped daily
 schedule, lets you log an **adjusted dose** when you're late, enforces your own
-safety guardrails, and keeps secure history that syncs to **your own AWS
-account** — a backend you own and control (secured by login, TLS, and encryption
-at rest; readable by your own server, not zero-knowledge).
+safety guardrails, and keeps secure history that syncs to **your own Supabase
+project** — a backend you own and control (secured by login, TLS, Row-Level
+Security, and encryption at rest; readable by your own server, not zero-knowledge).
 
 > **Safety:** SteadyDose computes **no pharmacology**. It records and validates
 > doses against caps you set; any dose suggestion comes from a pluggable
@@ -23,6 +23,18 @@ Prerequisites: **Node.js ≥ 20** (22 LTS recommended; see `.nvmrc`) and
 pnpm install
 pnpm dev          # http://localhost:5173
 ```
+
+That's it for offline use. To enable **cloud sync** (auth + multi-device) you
+need the [Supabase CLI](https://supabase.com/docs/guides/cli) + Docker:
+
+```bash
+pnpm local:up     # start Postgres + GoTrue + PostgREST + Studio (supabase start)
+pnpm local:env    # write .env.local from the running stack
+pnpm dev          # sign in with dev@steadydose.local / DevPassw0rd!
+```
+
+See [`supabase/README.md`](./supabase/README.md) for the schema, local dev, and
+bring-your-own-Supabase deploy.
 
 ### Common scripts
 
@@ -42,26 +54,28 @@ pnpm preview      # serve the production build
 | `src/core/`   | Pure TypeScript domain core (no React) — the portable spine.    |
 | `src/store/`  | Zustand store binding the core to the UI.                       |
 | `src/ui/`     | React screens & components (Today / Schedule / Meds / History). |
-| `src/crypto/` | Optional on-device cache lock (stub until Stage 4).             |
-| `src/sync/`   | Sync client (stub until Stage 5).                               |
-| `infra/`      | AWS CDK stack (lands in Stage 3).                               |
+| `src/crypto/` | Optional on-device cache lock (Web Crypto AES-GCM).             |
+| `src/sync/`   | Sync engine + the Supabase `SyncBackend` (PostgREST + RPC).     |
+| `src/auth/`   | Supabase GoTrue auth client + `useAuth` hook.                   |
+| `supabase/`   | Backend: migrations (table + RLS + RPC), seed, pgTAP tests.     |
 | `specs/`      | Source-of-truth specs.                                          |
 
 ## Status
 
-Built in [8 sequenced stages](./specs/03-implementation-plan.md). Currently
-through **Stage 3**:
+Built in [9 sequenced stages](./specs/03-implementation-plan.md). Through
+**Stage 8**:
 
 - **0–2** — reproducible dev setup, domain core + UI, local IndexedDB
   persistence (a usable offline single-device app).
-- **3** — per-user backend (Cognito auth, JWT-protected `/sync/*` over DynamoDB,
-  S3 + CloudFront) as a CDK stack, plus a **local Docker dev environment**
-  (LocalStack + cognito-local) so you can develop without a real AWS account.
-  See [`infra/README.md`](./infra/README.md).
+- **3–5** — per-user cloud backend, readable+validated record model + security
+  hardening, and the bidirectional LWW sync engine.
+- **6–7** — reminders/notifications and history/charts + export.
+- **8** — **re-platformed off AWS onto Supabase** (GoTrue + Postgres + RLS +
+  PostgREST), collapsing the custom sync API into one table, one policy set, and
+  one `push_records` function. See [`supabase/README.md`](./supabase/README.md).
 
-The readable cloud data model + security hardening (4), the full sync engine (5),
-reminders (6), history/charts (7), and open-source packaging (8) are still to come.
+Open-source packaging & one-command deploy (9) is still to come.
 
 ## License
 
-MIT — see [`LICENSE`](./LICENSE) (added in Stage 8).
+MIT — see [`LICENSE`](./LICENSE).

@@ -26,9 +26,9 @@ export function AccountPanel() {
         <h3 className="mb-2 text-sm font-medium">Account &amp; sync</h3>
         <p className="text-sm text-slate-400">
           Cloud sync is off — the app works fully offline. To enable it locally, run{' '}
-          <code className="rounded bg-slate-800 px-1">pnpm local:up</code> then{' '}
-          <code className="rounded bg-slate-800 px-1">pnpm local:bootstrap</code>, or deploy your
-          own AWS backend.
+          <code className="rounded bg-slate-800 px-1">supabase start</code> then{' '}
+          <code className="rounded bg-slate-800 px-1">pnpm local:env</code>, or point it at your own
+          Supabase project.
         </p>
       </Card>
     );

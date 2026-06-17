@@ -8,7 +8,7 @@ import prettier from 'eslint-config-prettier';
 
 export default tseslint.config(
   {
-    ignores: ['dist', 'dev-dist', 'coverage', 'node_modules', 'infra/**', 'cdk.out/**'],
+    ignores: ['dist', 'dev-dist', 'coverage', 'node_modules', 'supabase/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -66,6 +66,15 @@ export default tseslint.config(
     files: ['**/*.{test,spec}.{ts,tsx}', 'src/test/**/*.{ts,tsx}'],
     languageOptions: {
       globals: { ...globals.browser, ...globals.node },
+    },
+  },
+  // Node build scripts (e.g. local:env).
+  {
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: globals.node,
     },
   },
   prettier,

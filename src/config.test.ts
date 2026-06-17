@@ -4,34 +4,18 @@ import { parseBackendConfig } from './config';
 describe('parseBackendConfig', () => {
   it('returns null when required vars are missing (local-first default)', () => {
     expect(parseBackendConfig({})).toBeNull();
-    expect(
-      parseBackendConfig({ VITE_COGNITO_USER_POOL_ID: 'p', VITE_COGNITO_CLIENT_ID: 'c' }),
-    ).toBeNull();
+    expect(parseBackendConfig({ VITE_SUPABASE_URL: 'http://localhost:54321' })).toBeNull();
+    expect(parseBackendConfig({ VITE_SUPABASE_ANON_KEY: 'anon' })).toBeNull();
   });
 
-  it('parses a full config and defaults the region', () => {
+  it('parses a full Supabase config', () => {
     const cfg = parseBackendConfig({
-      VITE_COGNITO_USER_POOL_ID: 'pool',
-      VITE_COGNITO_CLIENT_ID: 'client',
-      VITE_API_BASE_URL: 'http://localhost:3001',
+      VITE_SUPABASE_URL: 'http://localhost:54321',
+      VITE_SUPABASE_ANON_KEY: 'anon-key',
     });
     expect(cfg).toEqual({
-      region: 'us-east-1',
-      userPoolId: 'pool',
-      clientId: 'client',
-      apiBaseUrl: 'http://localhost:3001',
+      supabaseUrl: 'http://localhost:54321',
+      supabaseAnonKey: 'anon-key',
     });
-  });
-
-  it('includes the cognito-local endpoint when provided', () => {
-    const cfg = parseBackendConfig({
-      VITE_COGNITO_USER_POOL_ID: 'pool',
-      VITE_COGNITO_CLIENT_ID: 'client',
-      VITE_API_BASE_URL: 'http://localhost:3001',
-      VITE_COGNITO_REGION: 'eu-west-2',
-      VITE_COGNITO_ENDPOINT: 'http://localhost:9229',
-    });
-    expect(cfg?.region).toBe('eu-west-2');
-    expect(cfg?.cognitoEndpoint).toBe('http://localhost:9229');
   });
 });

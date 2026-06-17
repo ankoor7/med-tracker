@@ -1,0 +1,43 @@
+# Supabase local dev stack — one Docker stack with real GoTrue + Postgres + Studio
+# + PostgREST, started by `supabase start`. This replaces the LocalStack +
+# cognito-local + Express split. Because GoTrue runs for real locally, auth
+# behaviour matches production exactly (the reason cognito-local existed is gone).
+
+project_id = "steadydose"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+# Local SMTP catch-all; confirmation/recovery mails land here (UI on this port).
+enabled = true
+port = 54324
+
+[auth]
+enabled = true
+# The site_url / redirect allow-list the local PWA runs on.
+site_url = "http://localhost:5173"
+additional_redirect_urls = ["http://localhost:5173"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+# D2 = (i): disable email confirmation. A personal/single-user app doesn't need
+# the confirm round-trip, and dropping it removes the Cognito code-entry screen.
+# Flip to true (and wire the email-link flow) if signup is ever opened up.
+enable_confirmations = false

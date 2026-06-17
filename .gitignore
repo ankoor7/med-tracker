@@ -34,15 +34,9 @@ pnpm-debug.log*
 # Vite PWA generated artifacts
 dev-dist/
 
-# Local AWS dev environment (Docker volumes + generated config)
-.localstack/
-.cognito/
-infra/local/local-config.json
-
-# CDK
-cdk.out/
-*.cdk.staging/
-cdk-outputs.json
+# Supabase CLI local stack (Docker volumes + generated artifacts)
+supabase/.temp/
+supabase/.branches/
 
 # Stray local files
 files/

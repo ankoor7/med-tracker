@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   currentAccount,
-  getSession,
-  signIn as cognitoSignIn,
-  signOut as cognitoSignOut,
-  signUp as cognitoSignUp,
+  onAuthStateChange,
+  signIn as supabaseSignIn,
+  signOut as supabaseSignOut,
+  signUp as supabaseSignUp,
   type AccountInfo,
-} from './cognito';
+} from './supabaseAuth';
 
 export interface UseAuth {
   ready: boolean;
@@ -16,36 +16,43 @@ export interface UseAuth {
   signOut: () => void;
 }
 
-/** React binding for the Cognito auth client. */
+/** React binding for the Supabase (GoTrue) auth client. */
 export function useAuth(): UseAuth {
   const [account, setAccount] = useState<AccountInfo | null>(null);
   const [ready, setReady] = useState(false);
 
+  // Resolve the initial session, then let GoTrue drive subsequent changes
+  // (sign-in/out and automatic token refresh) via onAuthStateChange.
   useEffect(() => {
     let live = true;
     void (async () => {
-      const session = await getSession().catch(() => null);
+      const acct = await currentAccount().catch(() => null);
       if (live) {
-        setAccount(session ? currentAccount() : null);
+        setAccount(acct);
         setReady(true);
       }
     })();
+    const unsub = onAuthStateChange((acct) => {
+      if (live) setAccount(acct);
+    });
     return () => {
       live = false;
+      unsub();
     };
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
-    await cognitoSignIn(email, password);
-    setAccount(currentAccount());
+    await supabaseSignIn(email, password);
+    // onAuthStateChange also fires, but set eagerly so callers see it immediately.
+    setAccount(await currentAccount());
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
-    await cognitoSignUp(email, password);
+    await supabaseSignUp(email, password);
   }, []);
 
   const signOut = useCallback(() => {
-    cognitoSignOut();
+    void supabaseSignOut();
     setAccount(null);
   }, []);
 

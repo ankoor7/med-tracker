@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getRepository } from '../store/repository';
 import { useStore } from '../store/store';
-import { ApiError } from './apiClient';
+import { SyncError } from './supabaseBackend';
 import { defaultBackend, runSync, type PushResult, type SyncBackend } from './syncEngine';
 
 export type SyncPhase = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
@@ -64,7 +64,7 @@ export function useSync(enabled: boolean, backend: SyncBackend = defaultBackend)
       }
     } catch (err) {
       // A network failure is an expected offline state, not a hard error.
-      const offline = !(err instanceof ApiError) || err.status === 0;
+      const offline = err instanceof SyncError ? err.offline : true;
       if (live.current) {
         setStatus((s) => ({
           ...s,

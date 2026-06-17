@@ -21,21 +21,26 @@ Package manager is **pnpm** (pinned via `packageManager` + `.nvmrc`).
 | Production build | `pnpm build`      |
 | Preview build    | `pnpm preview`    |
 
-`pnpm typecheck` covers both the app (`tsc -b`) and `infra/` (`tsconfig.infra.json`).
+The backend is **Supabase** (Stage 8 re-platformed off AWS). The app is
+local-first: with no Supabase env configured it runs fully offline.
 
-### Local AWS dev (Stage 3) — needs Docker
+### Local cloud dev (Supabase CLI) — needs Docker
 
-| Task                       | Command                                |
-| -------------------------- | -------------------------------------- |
-| Start LocalStack + Cognito | `pnpm local:up`                        |
-| Create table/pool/dev user | `pnpm local:bootstrap`                 |
-| Run local sync API         | `pnpm local:api`                       |
-| Stop / wipe                | `pnpm local:down` / `pnpm local:reset` |
+| Task                          | Command                                  |
+| ----------------------------- | ---------------------------------------- |
+| Start stack (Postgres+GoTrue) | `pnpm local:up` (`supabase start`)       |
+| Write `.env.local` from stack | `pnpm local:env`                         |
+| Reset (re-apply migrations)   | `pnpm local:reset` (`supabase db reset`) |
+| Run DB (pgTAP) tests          | `pnpm db:test` (`supabase test db`)      |
+| Stop                          | `pnpm local:down` (`supabase stop`)      |
 
-Dev account: `dev@steadydose.local` / `DevPassw0rd!`. Real AWS deploy: `pnpm deploy`
-(see `infra/README.md`). CDK: `pnpm cdk:synth` / `cdk:deploy` / `cdk:destroy`.
+Dev account: `dev@steadydose.local` / `DevPassw0rd!` (seeded in `supabase/seed.sql`;
+email confirmation is disabled locally). Deploy: `pnpm deploy` runs `supabase db push`,
+the build, and the static-host upload (see `supabase/README.md`). DB-only push:
+`pnpm deploy:db`.
 
-CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build on push/PR.
+CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build on push/PR,
+plus a separate `db-tests` job that boots Supabase and runs the pgTAP suite.
 A husky pre-commit hook runs `lint-staged` + `typecheck`.
 
 ## Architecture / conventions
@@ -50,13 +55,15 @@ Folder layout mirrors `specs/02-architecture.md` §4:
 - `src/ui/` — React screens/components; presentation only, no business logic.
 - `src/crypto/` — stub; Stage 4 may use it for an **optional** on-device cache
   lock (Web Crypto). Not zero-knowledge; disabled by default.
-- `src/auth/` — Cognito client (`amazon-cognito-identity-js`) + `useAuth` hook.
-- `src/sync/` — authorized API client (Stage 3); full sync engine in Stage 5.
-- `src/config.ts` — backend config from `VITE_*` env (null = local-first only).
-- `infra/` — backend: shared `sync/` handler-core, `lambda/` adapter, `local/`
-  dev server + bootstrap (LocalStack + cognito-local), `cdk/` stack. See
-  `infra/README.md`. Linted-exempt but typechecked (`tsconfig.infra.json`) and
-  tested (Node env via `environmentMatchGlobs`).
+- `src/supabase/` — singleton `@supabase/supabase-js` client (lazy; only created
+  when a backend is configured).
+- `src/auth/` — Supabase GoTrue client (`supabaseAuth.ts`) + `useAuth` hook.
+- `src/sync/` — `supabaseBackend.ts` (the `SyncBackend` port: PostgREST pull +
+  `push_records` RPC) and the sync engine (`syncEngine.ts`).
+- `src/config.ts` — backend config from `VITE_SUPABASE_*` env (null = local-first only).
+- `supabase/` — the backend: `migrations/` (the `records` table, RLS,
+  `push_records`, `validate_record`), `seed.sql`, `tests/` (pgTAP), `config.toml`.
+  See `supabase/README.md`. The server logic lives in SQL, not TypeScript.
 - `specs/` — product, architecture, and per-stage specs (source of truth).
 
 ### Rules

@@ -34,3 +34,23 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  # Server logic now lives in SQL (RLS + push_records + validate_record), so it's
+  # covered by pgTAP against a real local Postgres. This boots only the DB
+  # container, applies the migrations + seed, and runs the suite. Kept as a
+  # separate job so the fast JS checks above aren't blocked on Docker (D4).
+  db-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local database (applies migrations + seed)
+        run: supabase db start
+
+      - name: Run pgTAP suite
+        run: supabase test db
