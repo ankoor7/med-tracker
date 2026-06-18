@@ -18,6 +18,7 @@ function dataset(over: Partial<Dataset> = {}): Dataset {
     doseLog: over.doseLog ?? [
       logEntry({ id: 'l1', medId: 'm1', slotId: 's1', updatedAt: 1000, version: 1 }),
     ],
+    doseOverrides: over.doseOverrides ?? [],
     settings: over.settings ?? settings({ zone: 'Europe/London', updatedAt: 1000, version: 1 }),
   };
 }
@@ -30,7 +31,13 @@ describe('JSON export/import round-trip (AC5)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // Import into an empty app (replace) reproduces the original exactly.
-    const empty: Dataset = { medications: [], slots: [], doseLog: [], settings: original.settings };
+    const empty: Dataset = {
+      medications: [],
+      slots: [],
+      doseLog: [],
+      doseOverrides: [],
+      settings: original.settings,
+    };
     expect(mergeDatasets(empty, result.data, 'replace')).toEqual(original);
   });
 

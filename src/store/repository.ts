@@ -9,7 +9,7 @@
 import type { SyncRecord } from '../core/cloudRecord';
 import type { Dataset } from '../core/types';
 
-export type TableName = 'medications' | 'slots' | 'doseLog' | 'settings';
+export type TableName = 'medications' | 'slots' | 'doseLog' | 'doseOverrides' | 'settings';
 
 /** Identifies a specific version of a record in the outbox. */
 export interface OutboxRef {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { plannedSlotsForDate } from './schedule';
+import { nextOccurrenceForMed, plannedSlotsForDate } from './schedule';
 import { resolveWallTimeToInstant } from './time';
-import { logEntry, med, slot } from '../test/fixtures';
+import { logEntry, med, override, slot } from '../test/fixtures';
 
 const ZONE = 'Europe/London';
 const DATE = '2026-06-15';
@@ -104,5 +104,67 @@ describe('plannedSlotsForDate', () => {
     const planned = plannedSlotsForDate(DATE, [s, gone], [active, inactive], [], ZONE, at('07:00'));
     expect(planned).toHaveLength(1);
     expect(planned[0]!.occurrences.map((o) => o.medId)).toEqual(['a']);
+  });
+});
+
+describe('plannedSlotsForDate — dose overrides (Stage 12)', () => {
+  const a = med({ id: 'a' });
+  const s = slot({ id: 's1', time: '08:00', items: [{ medId: 'a', dose: 100 }] });
+
+  it('applies a one-time override to an untaken occurrence', () => {
+    const o = override({ slotId: 's1', medId: 'a', scheduledInstant: at('08:00'), dose: 60 });
+    const planned = plannedSlotsForDate(DATE, [s], [a], [], ZONE, at('07:00'), [o]);
+    const occ = planned[0]!.occurrences[0]!;
+    expect(occ.dose).toBe(60);
+    expect(occ.overridden).toBe(true);
+    expect(occ.overrideId).toBe(o.id);
+  });
+
+  it('ignores deleted (consumed) overrides and keeps the normal dose', () => {
+    const o = override({
+      slotId: 's1',
+      medId: 'a',
+      scheduledInstant: at('08:00'),
+      dose: 60,
+      deleted: true,
+    });
+    const occ = plannedSlotsForDate(DATE, [s], [a], [], ZONE, at('07:00'), [o])[0]!.occurrences[0]!;
+    expect(occ.dose).toBe(100);
+    expect(occ.overridden).toBeUndefined();
+  });
+
+  it('does not override an already-taken occurrence', () => {
+    const o = override({ slotId: 's1', medId: 'a', scheduledInstant: at('08:00'), dose: 60 });
+    const entry = logEntry({ slotId: 's1', medId: 'a', scheduledInstant: at('08:00'), zone: ZONE });
+    const occ = plannedSlotsForDate(DATE, [s], [a], [entry], ZONE, at('09:00'), [o])[0]!
+      .occurrences[0]!;
+    expect(occ.status).toBe('taken');
+    expect(occ.dose).toBe(100); // the log entry, not the override, governs a taken dose
+  });
+});
+
+describe('nextOccurrenceForMed (Stage 12)', () => {
+  const a = med({ id: 'a' });
+  const morning = slot({ id: 'am', time: '08:00', items: [{ medId: 'a', dose: 100 }] });
+  const evening = slot({ id: 'pm', time: '20:00', items: [{ medId: 'a', dose: 150 }] });
+
+  it('finds the next occurrence later the same day', () => {
+    const next = nextOccurrenceForMed('a', at('08:00'), [morning, evening], [a], ZONE);
+    expect(next?.slotId).toBe('pm');
+    expect(next?.scheduledInstant).toBe(at('20:00'));
+    expect(next?.dose).toBe(150);
+  });
+
+  it('rolls over to the next day after the last slot', () => {
+    const next = nextOccurrenceForMed('a', at('20:00'), [morning, evening], [a], ZONE);
+    expect(next?.slotId).toBe('am');
+    expect(next?.scheduledInstant).toBe(resolveWallTimeToInstant('2026-06-16', '08:00', ZONE));
+  });
+
+  it('returns undefined for an inactive med', () => {
+    const inactive = med({ id: 'a', active: false });
+    expect(nextOccurrenceForMed('a', at('08:00'), [morning, evening], [inactive], ZONE)).toBe(
+      undefined,
+    );
   });
 });

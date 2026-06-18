@@ -1,5 +1,12 @@
 // Test fixtures — minimal factory helpers for domain entities.
-import type { DoseLogEntry, Guardrails, Medication, Settings, Slot } from '../core/types';
+import type {
+  DoseLogEntry,
+  DoseOverride,
+  Guardrails,
+  Medication,
+  Settings,
+  Slot,
+} from '../core/types';
 
 let seq = 0;
 const id = (prefix: string) => `${prefix}-${++seq}`;
@@ -52,6 +59,21 @@ export function logEntry(over: Partial<DoseLogEntry> = {}): DoseLogEntry {
     status: over.status ?? 'taken',
     adjusted: over.adjusted ?? false,
     warnings: over.warnings ?? [],
+    updatedAt: over.updatedAt ?? 0,
+    version: over.version,
+    deleted: over.deleted,
+  };
+}
+
+export function override(over: Partial<DoseOverride> = {}): DoseOverride {
+  return {
+    id: over.id ?? id('ovr'),
+    slotId: over.slotId ?? 'slot-x',
+    medId: over.medId ?? 'med-x',
+    scheduledInstant: over.scheduledInstant ?? 0,
+    zone: over.zone ?? 'Europe/London',
+    dose: over.dose ?? 50,
+    note: over.note,
     updatedAt: over.updatedAt ?? 0,
     version: over.version,
     deleted: over.deleted,

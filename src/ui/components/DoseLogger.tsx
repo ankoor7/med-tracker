@@ -1,10 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import {
   activeStrategy,
   checkGuardrails,
   datetimeLocalToInstant,
+  describeOffset,
   formatTimeWithZone,
   instantToDatetimeLocal,
+  MINUTE_MS,
+  nextOccurrenceForMed,
+  roundInstantToStep,
   type Instant,
 } from '../../core';
 import { useStore } from '../../store/store';
@@ -20,19 +24,40 @@ export interface LoggerTarget {
 
 export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose: () => void }) {
   const medications = useStore((s) => s.medications);
+  const slots = useStore((s) => s.slots);
   const doseLog = useStore((s) => s.doseLog);
   const zone = useStore((s) => s.settings.zone);
   const logDose = useStore((s) => s.logDose);
+  const setDoseOverride = useStore((s) => s.setDoseOverride);
 
   const med = medications.find((m) => m.id === target.medId);
-  const now = useMemo(() => Date.now(), []);
+  // "Now", rounded to the 5-minute step so the common path needs no adjustment.
+  const now = useMemo(() => roundInstantToStep(Date.now()), []);
 
   const [doseStr, setDoseStr] = useState(String(target.normalDose));
   const [whenStr, setWhenStr] = useState(() => instantToDatetimeLocal(now, zone));
   const [confirmed, setConfirmed] = useState(false);
+  const [adjustNext, setAdjustNext] = useState(false);
+  const [nextDoseStr, setNextDoseStr] = useState('');
+  const [nextConfirmed, setNextConfirmed] = useState(false);
 
   const dose = Number(doseStr);
   const actualInstant = datetimeLocalToInstant(whenStr, zone);
+
+  // The next scheduled occurrence of this med (Stage 12 — adjust next dose).
+  const nextOcc = useMemo(
+    () => nextOccurrenceForMed(target.medId, target.scheduledInstant, slots, medications, zone),
+    [target.medId, target.scheduledInstant, slots, medications, zone],
+  );
+
+  // Quick presets for the "time taken" control (Stage 11 FR-11.2). Relative
+  // nudges count back from the current value and never produce a future time.
+  const setWhen = (instant: Instant) => {
+    setWhenStr(instantToDatetimeLocal(Math.min(instant, now), zone));
+    setConfirmed(false);
+  };
+  const nudge = (deltaMin: number) => setWhen(actualInstant + deltaMin * MINUTE_MS);
+  const offsetLabel = describeOffset(actualInstant, target.scheduledInstant);
 
   // Optional pharmacology extension suggestion (no-op default → null).
   const suggestion = useMemo(() => {
@@ -54,7 +79,28 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   const warnings = validDose ? checkGuardrails(med, dose, actualInstant, doseLog, zone) : [];
   const overCap = warnings.length > 0;
   const isAdjusted = dose !== target.normalDose;
-  const canLog = validDose && (!overCap || confirmed);
+  const isLate = actualInstant > target.scheduledInstant + MINUTE_MS;
+  // Offer the next-dose adjustment when this dose was changed or taken late
+  // (Stage 12 FR-12.1) and there's an upcoming occurrence to adjust.
+  const offerAdjustNext = (isAdjusted || isLate) && nextOcc != null;
+
+  const nextDose = Number(nextDoseStr);
+  const validNextDose = Number.isFinite(nextDose) && nextDose > 0;
+  const nextWarnings =
+    adjustNext && validNextDose && nextOcc
+      ? checkGuardrails(med, nextDose, nextOcc.scheduledInstant, doseLog, zone)
+      : [];
+  const nextOverCap = nextWarnings.length > 0;
+  const canSetNext = !adjustNext || (validNextDose && (!nextOverCap || nextConfirmed));
+
+  const canLog = validDose && (!overCap || confirmed) && canSetNext;
+
+  // Default the next-dose field to the amount just entered for this dose.
+  const toggleAdjustNext = (on: boolean) => {
+    setAdjustNext(on);
+    if (on && nextDoseStr === '') setNextDoseStr(doseStr);
+    setNextConfirmed(false);
+  };
 
   const submit = () => {
     if (!canLog) return;
@@ -65,6 +111,14 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
       dose,
       actualInstant,
     });
+    if (adjustNext && nextOcc && validNextDose) {
+      setDoseOverride({
+        slotId: nextOcc.slotId,
+        medId: target.medId,
+        scheduledInstant: nextOcc.scheduledInstant,
+        dose: nextDose,
+      });
+    }
     onClose();
   };
 
@@ -96,6 +150,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
         <Field label="Time taken">
           <input
             type="datetime-local"
+            step={300}
             className={inputClass}
             value={whenStr}
             onChange={(e) => {
@@ -104,6 +159,20 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
             }}
             aria-label="Time taken"
           />
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <PresetButton onClick={() => setWhen(now)}>Now</PresetButton>
+            <PresetButton onClick={() => setWhen(target.scheduledInstant)}>Scheduled</PresetButton>
+            <PresetButton onClick={() => nudge(-15)}>−15m</PresetButton>
+            <PresetButton onClick={() => nudge(-30)}>−30m</PresetButton>
+            <PresetButton onClick={() => nudge(-60)}>−1h</PresetButton>
+            <span
+              className={`ml-auto text-xs ${
+                offsetLabel === 'on time' ? 'text-slate-400' : 'text-amber-400'
+              }`}
+            >
+              {offsetLabel}
+            </span>
+          </div>
         </Field>
 
         {suggestion && (
@@ -146,6 +215,64 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           </div>
         )}
 
+        {offerAdjustNext && nextOcc && (
+          <div className="rounded-md border border-slate-800 bg-slate-950/40 p-3 text-sm">
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={adjustNext}
+                onChange={(e) => toggleAdjustNext(e.target.checked)}
+              />
+              <span>
+                Adjust next {med.name} dose
+                <span className="block text-xs text-slate-400">
+                  Next: {formatTimeWithZone(nextOcc.scheduledInstant, zone)} · normally{' '}
+                  {nextOcc.dose}
+                  {med.unit}
+                </span>
+              </span>
+            </label>
+
+            {adjustNext && (
+              <div className="mt-3 flex flex-col gap-2">
+                <Field label={`Next dose (${med.unit})`}>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    step="any"
+                    className={inputClass}
+                    value={nextDoseStr}
+                    onChange={(e) => {
+                      setNextDoseStr(e.target.value);
+                      setNextConfirmed(false);
+                    }}
+                    aria-label="Next dose"
+                  />
+                </Field>
+                {nextOverCap && (
+                  <div className="rounded-md border border-red-700 bg-red-950/50 p-2 text-xs">
+                    <ul className="list-disc pl-5 text-red-200">
+                      {nextWarnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                    <label className="mt-2 flex items-center gap-2 text-red-200">
+                      <input
+                        type="checkbox"
+                        checked={nextConfirmed}
+                        onChange={(e) => setNextConfirmed(e.target.checked)}
+                      />
+                      Set this over-cap next dose anyway.
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-1 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel
@@ -156,5 +283,17 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
         </div>
       </div>
     </Modal>
+  );
+}
+
+function PresetButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-accent-muted hover:text-slate-100"
+    >
+      {children}
+    </button>
   );
 }

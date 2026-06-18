@@ -81,13 +81,46 @@ describe('TodayScreen', () => {
     expect(logBtn).toBeDisabled();
     expect(within(dialog).getByText(/max single dose/i)).toBeInTheDocument();
 
-    fireEvent.click(within(dialog).getByRole('checkbox'));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /understand and want to log/i }));
     expect(logBtn).toBeEnabled();
     fireEvent.click(logBtn);
 
     const log = activeLog();
     expect(log).toHaveLength(1);
     expect(log[0]!.warnings.length).toBeGreaterThan(0);
+  });
+
+  it('logging an adjusted dose can set a one-time override for the next dose (Stage 12)', () => {
+    seed(
+      [med({ id: 'a', name: 'Lamotrigine', unit: 'mg', adjustWhenLate: true })],
+      [
+        slot({ id: 'am', time: '08:00', label: 'Morning', items: [{ medId: 'a', dose: 100 }] }),
+        slot({ id: 'pm', time: '20:00', label: 'Evening', items: [{ medId: 'a', dose: 100 }] }),
+      ],
+    );
+    render(<TodayScreen />);
+
+    // The 08:00 slot is first (sorted by time); log it late at an adjusted amount.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Log' })[0]!);
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Dose'), { target: { value: '60' } });
+
+    // The adjust-next-dose section appears; enable it and set the next amount.
+    fireEvent.click(
+      within(dialog).getByRole('checkbox', { name: /adjust next lamotrigine dose/i }),
+    );
+    fireEvent.change(within(dialog).getByLabelText('Next dose'), { target: { value: '80' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: /log dose/i }));
+
+    const overrides = useStore.getState().doseOverrides.filter((o) => !o.deleted);
+    expect(overrides).toHaveLength(1);
+    expect(overrides[0]!.slotId).toBe('pm');
+    expect(overrides[0]!.dose).toBe(80);
+
+    // Today's evening row now shows the override amount, flagged adjusted.
+    const eveningRow = screen.getAllByText('Lamotrigine')[1]!.closest('li')!;
+    expect(within(eveningRow).getByText('adjusted')).toBeInTheDocument();
+    expect(within(eveningRow).getByText(/80mg/)).toBeInTheDocument();
   });
 
   it('partial group: taking one item leaves the other still due (AC5)', () => {

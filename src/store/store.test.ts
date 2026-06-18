@@ -14,6 +14,7 @@ function resetStore() {
     medications: [],
     slots: [],
     doseLog: [],
+    doseOverrides: [],
     settings: {
       zone: 'Europe/London',
       adherenceWindowDays: 7,
@@ -105,6 +106,39 @@ describe('store + LocalRepository', () => {
     const names = useStore.getState().medications.map((m) => m.name);
     expect(names).toContain('Persisted');
     db2.close();
+  });
+
+  it('sets a one-time next-dose override and consumes it when the dose is logged (Stage 12)', async () => {
+    await useStore.getState().hydrate();
+    const scheduledInstant = Date.UTC(2026, 5, 18, 19, 0); // 20:00 BST
+
+    const ovr = useStore.getState().setDoseOverride({
+      slotId: 's-evening',
+      medId: 'm1',
+      scheduledInstant,
+      dose: 75,
+    });
+    expect(useStore.getState().doseOverrides.find((o) => o.id === ovr.id)?.deleted).toBeFalsy();
+
+    // Re-setting the same occurrence updates in place rather than stacking.
+    const ovr2 = useStore.getState().setDoseOverride({
+      slotId: 's-evening',
+      medId: 'm1',
+      scheduledInstant,
+      dose: 80,
+    });
+    expect(ovr2.id).toBe(ovr.id);
+    expect(useStore.getState().doseOverrides.filter((o) => !o.deleted)).toHaveLength(1);
+
+    // Logging that occurrence consumes (tombstones) the override.
+    useStore.getState().logDose({
+      slotId: 's-evening',
+      medId: 'm1',
+      scheduledInstant,
+      dose: 80,
+      actualInstant: scheduledInstant,
+    });
+    expect(useStore.getState().doseOverrides.filter((o) => !o.deleted)).toHaveLength(0);
   });
 
   it('does not re-seed when data already exists', async () => {

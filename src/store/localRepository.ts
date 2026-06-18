@@ -4,7 +4,14 @@
 
 import Dexie, { type Table } from 'dexie';
 import { isNewerRecord, type SyncRecord } from '../core/cloudRecord';
-import type { Dataset, DoseLogEntry, Medication, Settings, Slot } from '../core/types';
+import type {
+  Dataset,
+  DoseLogEntry,
+  DoseOverride,
+  Medication,
+  Settings,
+  Slot,
+} from '../core/types';
 import type { OutboxRef, Repository, TableName } from './repository';
 import { fromSyncRecord, toSyncRecord } from '../sync/recordMapping';
 import { CURRENT_SCHEMA_VERSION, runMigrations } from './migrations';
@@ -23,6 +30,7 @@ export class SteadyDoseDB extends Dexie {
   medications!: Table<Medication, string>;
   slots!: Table<Slot, string>;
   doseLog!: Table<DoseLogEntry, string>;
+  doseOverrides!: Table<DoseOverride, string>;
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<SyncRecord, string>;
@@ -42,22 +50,29 @@ export class SteadyDoseDB extends Dexie {
     this.version(2).stores({
       outbox: 'id',
     });
+    // v3 (Stage 12): one-time next-dose overrides; same index shape as doseLog.
+    this.version(3).stores({
+      doseOverrides: 'id, updatedAt, deleted, medId, slotId',
+    });
   }
 }
 
-const TABLES: TableName[] = ['medications', 'slots', 'doseLog'];
+const TABLES: TableName[] = ['medications', 'slots', 'doseLog', 'doseOverrides'];
 
 export class LocalRepository implements Repository {
   constructor(private readonly db: SteadyDoseDB = new SteadyDoseDB()) {}
 
   async loadAll(): Promise<Dataset | null> {
-    const [medications, slots, doseLog, settingsRow, versionStr] = await Promise.all([
-      this.db.medications.toArray(),
-      this.db.slots.toArray(),
-      this.db.doseLog.toArray(),
-      this.db.settings.get(SETTINGS_ID),
-      this.getMeta(META_SCHEMA_VERSION),
-    ]);
+    const [medications, slots, doseLog, doseOverrides, settingsRow, versionStr] = await Promise.all(
+      [
+        this.db.medications.toArray(),
+        this.db.slots.toArray(),
+        this.db.doseLog.toArray(),
+        this.db.doseOverrides.toArray(),
+        this.db.settings.get(SETTINGS_ID),
+        this.getMeta(META_SCHEMA_VERSION),
+      ],
+    );
 
     // First run: nothing persisted yet.
     if (!settingsRow && medications.length === 0 && slots.length === 0 && doseLog.length === 0) {
@@ -65,7 +80,7 @@ export class LocalRepository implements Repository {
     }
 
     const settings = settingsRow ? stripId(settingsRow) : fallbackSettings();
-    const loaded: Dataset = { medications, slots, doseLog, settings };
+    const loaded: Dataset = { medications, slots, doseLog, doseOverrides, settings };
 
     // Run forward data migrations if the stored version is behind.
     const fromVersion = versionStr ? Number(versionStr) : CURRENT_SCHEMA_VERSION;
@@ -170,11 +185,18 @@ export class LocalRepository implements Repository {
   private async persistDataset(data: Dataset): Promise<void> {
     await this.db.transaction(
       'rw',
-      [this.db.medications, this.db.slots, this.db.doseLog, this.db.settings],
+      [
+        this.db.medications,
+        this.db.slots,
+        this.db.doseLog,
+        this.db.doseOverrides,
+        this.db.settings,
+      ],
       async () => {
         await this.db.medications.bulkPut(data.medications);
         await this.db.slots.bulkPut(data.slots);
         await this.db.doseLog.bulkPut(data.doseLog);
+        await this.db.doseOverrides.bulkPut(data.doseOverrides);
         await this.putSettings(data.settings);
       },
     );

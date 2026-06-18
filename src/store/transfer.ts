@@ -9,7 +9,14 @@
 
 import { isNewerRecord, validateSyncRecord } from '../core/cloudRecord';
 import { formatDateTimeWithZone, formatTimeWithZone } from '../core/time';
-import type { Dataset, DoseLogEntry, Medication, Settings, Slot } from '../core/types';
+import type {
+  Dataset,
+  DoseLogEntry,
+  DoseOverride,
+  Medication,
+  Settings,
+  Slot,
+} from '../core/types';
 import { toSyncRecord } from '../sync/recordMapping';
 import { CURRENT_SCHEMA_VERSION } from './migrations';
 import type { TableName } from './repository';
@@ -70,15 +77,23 @@ export function parseImport(text: string): ImportResult {
     return { ok: false, reason: 'Missing medications, slots, or dose log.' };
   }
   if (!settings || typeof settings !== 'object') return { ok: false, reason: 'Missing settings.' };
+  // doseOverrides is newer than older exports; default to none for back-compat.
+  const doseOverrides = Array.isArray((data as Partial<Dataset>).doseOverrides)
+    ? (data as Dataset).doseOverrides
+    : [];
 
   const error =
     validateEntities('medications', medications) ??
     validateEntities('slots', slots) ??
     validateEntities('doseLog', doseLog) ??
+    validateEntities('doseOverrides', doseOverrides) ??
     validateEntities('settings', [{ ...(settings as Settings), id: 'settings' }]);
   if (error) return { ok: false, reason: error };
 
-  return { ok: true, data: { medications, slots, doseLog, settings: settings as Settings } };
+  return {
+    ok: true,
+    data: { medications, slots, doseLog, doseOverrides, settings: settings as Settings },
+  };
 }
 
 // ---- Merge -------------------------------------------------------------------
@@ -113,6 +128,7 @@ export function mergeDatasets(base: Dataset, incoming: Dataset, mode: ImportMode
     medications: mergeById<Medication>(base.medications, incoming.medications),
     slots: mergeById<Slot>(base.slots, incoming.slots),
     doseLog: mergeById<DoseLogEntry>(base.doseLog, incoming.doseLog),
+    doseOverrides: mergeById<DoseOverride>(base.doseOverrides, incoming.doseOverrides),
     settings,
   };
 }

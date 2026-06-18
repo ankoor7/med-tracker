@@ -158,6 +158,34 @@ export function hoursBetween(a: Instant, b: Instant): number {
   return Math.abs(b - a) / HOUR_MS;
 }
 
+/** Default granularity for "time taken" entry: 5 minutes (Stage 11 FR-11.1). */
+export const TIME_STEP_MS = 5 * MINUTE_MS;
+
+/** Round an instant to the nearest `stepMs` (default 5 min). Ties round up. */
+export function roundInstantToStep(instant: Instant, stepMs: number = TIME_STEP_MS): Instant {
+  return Math.round(instant / stepMs) * stepMs;
+}
+
+/**
+ * Human-readable offset of `actual` from `scheduled`, e.g. "2h 30m late",
+ * "10m early", "on time". Pure and DST-agnostic (compares elapsed ms). Anything
+ * within `toleranceMs` of the schedule reads as "on time" (Stage 11 FR-11.3).
+ */
+export function describeOffset(
+  actual: Instant,
+  scheduled: Instant,
+  toleranceMs: number = MINUTE_MS,
+): string {
+  const delta = actual - scheduled;
+  if (Math.abs(delta) <= toleranceMs) return 'on time';
+  const dir = delta > 0 ? 'late' : 'early';
+  const totalMin = Math.round(Math.abs(delta) / MINUTE_MS);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  const parts = [h > 0 ? `${h}h` : '', m > 0 ? `${m}m` : ''].filter(Boolean);
+  return `${parts.join(' ') || '0m'} ${dir}`;
+}
+
 /** Add days to an ISO date (calendar arithmetic, zone-agnostic). */
 export function addDaysToIsoDate(date: ISODate, days: number): ISODate {
   const [y, mo, d] = parseIsoDate(date);

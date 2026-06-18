@@ -163,6 +163,34 @@ describe('validateSyncRecord — typed payloads', () => {
     expect(res).toMatchObject({ ok: false, reason: /status/ });
   });
 
+  it('accepts a valid doseOverride', () => {
+    const res = validateSyncRecord({
+      id: 'o1',
+      type: 'doseOverride',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: 100,
+        zone: 'Europe/London',
+        dose: 50,
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects a doseOverride missing the dose', () => {
+    const res = validateSyncRecord({
+      id: 'o1',
+      type: 'doseOverride',
+      updatedAt: 1,
+      version: 1,
+      payload: { slotId: 's1', medId: 'm1', scheduledInstant: 100, zone: 'Europe/London' },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /dose/ });
+  });
+
   it('accepts valid settings', () => {
     const res = validateSyncRecord({
       id: 'settings',

@@ -8,7 +8,7 @@
 --   - validate_record parity with src/core/cloudRecord.ts validateSyncRecord.
 
 begin;
-select plan(19);
+select plan(21);
 
 -- Two real auth users (records.user_id FKs auth.users).
 insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at)
@@ -54,6 +54,16 @@ select is(
   validate_record(jsonb_build_object('id','t','type','medication','updatedAt',1,'version',1,
     'deleted',true,'payload',jsonb_build_object())),
   null, 'tombstone skips deep validation');
+
+-- doseOverride parity (Stage 12).
+select is(
+  validate_record('{"id":"o1","type":"doseOverride","updatedAt":1,"version":1,"payload":
+    {"slotId":"s1","medId":"m1","scheduledInstant":1000,"zone":"Europe/London","dose":50}}'::jsonb),
+  null, 'valid doseOverride passes');
+select is(
+  validate_record('{"id":"o1","type":"doseOverride","updatedAt":1,"version":1,"payload":
+    {"slotId":"s1","scheduledInstant":1000,"zone":"Europe/London","dose":50}}'::jsonb),
+  'doseOverride.medId required', 'doseOverride missing medId rejected');
 
 -- ---------------------------------------------------------------------------
 -- push_records — LWW guard, idempotency, mixed batch

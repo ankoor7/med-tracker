@@ -8,7 +8,7 @@ import {
 } from './recordMapping';
 import { validateSyncRecord } from '../core/cloudRecord';
 import type { TableName } from '../store/repository';
-import { med, settings, slot, logEntry } from '../test/fixtures';
+import { med, settings, slot, logEntry, override } from '../test/fixtures';
 
 // Domain entities lack an index signature; production calls `toSyncRecord` with
 // the same `as never` widening. Centralise it so the tests read cleanly.
@@ -34,9 +34,19 @@ describe('record mapping', () => {
       ['medications', med({ id: 'm' })],
       ['slots', slot({ id: 's', items: [{ medId: 'm', dose: 50 }] })],
       ['doseLog', logEntry({ id: 'l', medId: 'm', slotId: 's' })],
+      ['doseOverrides', override({ id: 'o', medId: 'm', slotId: 's' })],
     ] as const) {
       expect(validateSyncRecord(wrap(table, entity)).ok).toBe(true);
     }
+  });
+
+  it('round-trips a doseOverride through the wire envelope', () => {
+    const o = override({ id: 'o1', medId: 'm', slotId: 's', dose: 75, updatedAt: 9, version: 2 });
+    const rec = wrap('doseOverrides', o);
+    expect(rec).toMatchObject({ id: 'o1', type: 'doseOverride', updatedAt: 9, version: 2 });
+    const { table, entity } = fromSyncRecord(rec);
+    expect(table).toBe('doseOverrides');
+    expect(entity).toMatchObject({ id: 'o1', medId: 'm', slotId: 's', dose: 75 });
   });
 
   it('defaults a missing version to 1', () => {

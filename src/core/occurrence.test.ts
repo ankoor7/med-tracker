@@ -4,10 +4,11 @@ import {
   entryMatchesOccurrence,
   logEntryOccurrenceKey,
   occurrenceKey,
+  overrideMatchesOccurrence,
   plannedOccurrenceKey,
 } from './occurrence';
 import { resolveWallTimeToInstant } from './time';
-import { logEntry } from '../test/fixtures';
+import { logEntry, override } from '../test/fixtures';
 
 const LONDON = 'Europe/London';
 const NEW_YORK = 'America/New_York';
@@ -79,5 +80,24 @@ describe('entryMatchesOccurrence', () => {
       zone: LONDON,
     });
     expect(entryMatchesOccurrence(farEntry, 's1', 'm1', planned, DATE)).toBe(false);
+  });
+});
+
+describe('overrideMatchesOccurrence (Stage 12)', () => {
+  it('matches on the occurrence key and rejects a different med/slot', () => {
+    const planned = resolveWallTimeToInstant(DATE, '08:00', LONDON);
+    const o = override({ slotId: 's1', medId: 'm1', scheduledInstant: planned, zone: LONDON });
+    expect(overrideMatchesOccurrence(o, 's1', 'm1', planned, DATE)).toBe(true);
+    expect(overrideMatchesOccurrence(o, 's2', 'm1', planned, DATE)).toBe(false);
+    expect(overrideMatchesOccurrence(o, 's1', 'm2', planned, DATE)).toBe(false);
+  });
+
+  it('stays matched across a zone change via the stored override zone', () => {
+    const planned = resolveWallTimeToInstant(DATE, '08:00', LONDON);
+    const o = override({ slotId: 's1', medId: 'm1', scheduledInstant: planned, zone: LONDON });
+    // Viewing the same occurrence resolved in New York: instants differ, but the
+    // occurrence key (computed in the override's own zone) still matches.
+    const nyPlanned = resolveWallTimeToInstant(DATE, '08:00', NEW_YORK);
+    expect(overrideMatchesOccurrence(o, 's1', 'm1', nyPlanned, DATE)).toBe(true);
   });
 });

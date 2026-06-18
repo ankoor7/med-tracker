@@ -75,6 +75,7 @@ export function seedDataset(now: number): Dataset {
       },
     ],
     doseLog: [],
+    doseOverrides: [],
     settings: {
       zone: hostZone,
       adherenceWindowDays: 7,

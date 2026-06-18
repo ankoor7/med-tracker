@@ -10,6 +10,8 @@ import {
   wallTimeInZone,
   zoneAbbreviation,
   zoneOffsetMs,
+  roundInstantToStep,
+  describeOffset,
 } from './time';
 
 const LONDON = 'Europe/London';
@@ -100,5 +102,33 @@ describe('addDaysToIsoDate', () => {
     expect(addDaysToIsoDate('2026-01-31', 1)).toBe('2026-02-01');
     expect(addDaysToIsoDate('2026-03-01', -1)).toBe('2026-02-28');
     expect(addDaysToIsoDate('2026-06-15', -6)).toBe('2026-06-09');
+  });
+});
+
+const MIN = 60_000;
+
+describe('roundInstantToStep (Stage 11)', () => {
+  it('rounds to the nearest 5 minutes by default', () => {
+    const base = Date.UTC(2026, 6, 15, 8, 0); // 08:00
+    expect(roundInstantToStep(base + 2 * MIN)).toBe(base); // 08:02 → 08:00
+    expect(roundInstantToStep(base + 3 * MIN)).toBe(base + 5 * MIN); // 08:03 → 08:05
+    expect(roundInstantToStep(base + 7 * MIN)).toBe(base + 5 * MIN); // 08:07 → 08:05
+    expect(roundInstantToStep(base)).toBe(base); // exact
+  });
+});
+
+describe('describeOffset (Stage 11)', () => {
+  const sched = Date.UTC(2026, 6, 15, 8, 0);
+  it('labels late, early, and on-time', () => {
+    expect(describeOffset(sched + 150 * MIN, sched)).toBe('2h 30m late');
+    expect(describeOffset(sched - 10 * MIN, sched)).toBe('10m early');
+    expect(describeOffset(sched + 60 * MIN, sched)).toBe('1h late');
+    expect(describeOffset(sched + 30_000, sched)).toBe('on time'); // within 1 min
+  });
+
+  it('is DST-agnostic (compares elapsed ms across a UK spring-forward)', () => {
+    // 2026-03-29 01:00 UTC, 30 real minutes later spans the BST transition.
+    const s = Date.UTC(2026, 2, 29, 0, 30);
+    expect(describeOffset(s + 30 * MIN, s)).toBe('30m late');
   });
 });

@@ -31,6 +31,8 @@ Do not start a stage before its prerequisites are met. The domain core (Stage 1)
 | 8 | Re-platform onto Supabase | 3,4,5 | Drop AWS; Supabase (GoTrue + Postgres + RLS) replaces the custom API tier |
 | 9 | Open-Source Packaging & Deploy | 8 | One-command BYO-Supabase deploy + docs + extension guide |
 | 10 | End-to-End Testing | 8 | Browser-driven E2E (Playwright) asserting the UI→Supabase round-trip |
+| 11 | Logging-Time UX | 1, 2 | Fast custom "time taken" entry: 5-minute steps + quick presets |
+| 12 | Next-Dose Override | 1, 2, 4, 5, 8 | One-time, synced override of the next scheduled dose's amount |
 
 ```mermaid
 flowchart LR

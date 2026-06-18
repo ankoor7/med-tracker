@@ -61,6 +61,23 @@ export interface DoseLogEntry {
   deleted?: boolean;
 }
 
+// A one-time override of the dose for a single future occurrence (Stage 12).
+// The recurring Slot keeps its normal dose; this changes only the occurrence
+// keyed by (slotId, medId, localDate). Consumed (tombstoned) once that
+// occurrence is logged.
+export interface DoseOverride {
+  id: string;
+  slotId: string;
+  medId: string;
+  scheduledInstant: Instant; // the occurrence being overridden
+  zone: IanaZone; // zone in effect when set (stable occurrence keying)
+  dose: number; // the one-time planned amount
+  note?: string;
+  updatedAt: Instant;
+  version?: number;
+  deleted?: boolean;
+}
+
 export interface Settings {
   zone: IanaZone;
   adherenceWindowDays: number;
@@ -74,6 +91,7 @@ export interface Dataset {
   medications: Medication[];
   slots: Slot[];
   doseLog: DoseLogEntry[];
+  doseOverrides: DoseOverride[];
   settings: Settings;
 }
 
@@ -90,6 +108,8 @@ export interface PlannedOccurrence {
   dose: number;
   status: OccurrenceStatus;
   logEntryId?: string; // set when taken/skipped
+  overridden?: boolean; // dose came from a one-time DoseOverride (Stage 12)
+  overrideId?: string;
 }
 
 // Today's view: occurrences grouped by slot, sorted by time.

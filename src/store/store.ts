@@ -4,7 +4,9 @@ import {
   entryMatchesOccurrence,
   isoDateInZone,
   newId,
+  overrideMatchesOccurrence,
   type DoseLogEntry,
+  type DoseOverride,
   type Guardrails,
   type Instant,
   type Medication,
@@ -44,11 +46,20 @@ export interface LogDoseInput {
   actualInstant: Instant;
 }
 
+export interface DoseOverrideInput {
+  slotId: string;
+  medId: string;
+  scheduledInstant: Instant;
+  dose: number;
+  note?: string;
+}
+
 interface StoreState {
   hydrated: boolean;
   medications: Medication[];
   slots: Slot[];
   doseLog: DoseLogEntry[];
+  doseOverrides: DoseOverride[];
   settings: Settings;
 
   hydrate: () => Promise<void>;
@@ -66,6 +77,10 @@ interface StoreState {
   logDose: (input: LogDoseInput) => DoseLogEntry;
   takeGroup: (slotId: string, scheduledInstant: Instant) => DoseLogEntry[];
   deleteLogEntry: (id: string) => void;
+
+  /** Set/replace a one-time override of a future occurrence's dose (Stage 12). */
+  setDoseOverride: (input: DoseOverrideInput) => DoseOverride;
+  clearDoseOverride: (id: string) => void;
 
   updateSettings: (patch: Partial<Omit<Settings, 'updatedAt' | 'version'>>) => void;
 
@@ -104,6 +119,7 @@ export const useStore = create<StoreState>((set, get) => ({
   medications: [],
   slots: [],
   doseLog: [],
+  doseOverrides: [],
   settings: {
     zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
     adherenceWindowDays: 7,
@@ -249,6 +265,16 @@ export const useStore = create<StoreState>((set, get) => ({
     );
     set((s) => ({ doseLog: [...s.doseLog, entry] }));
     persistUpsert('doseLog', entry);
+
+    // Consume any one-time override for this occurrence — it's been fulfilled
+    // (Stage 12 FR-12.4), so it must not linger or re-apply.
+    const date = isoDateInZone(input.scheduledInstant, settings.zone);
+    for (const o of get().doseOverrides) {
+      if (o.deleted) continue;
+      if (overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date)) {
+        get().clearDoseOverride(o.id);
+      }
+    }
     return entry;
   },
 
@@ -269,12 +295,18 @@ export const useStore = create<StoreState>((set, get) => ({
           entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
       );
       if (exists) continue;
+      // Honour a one-time override for this occurrence (Stage 12); logDose then
+      // consumes it.
+      const override = get().doseOverrides.find(
+        (o) =>
+          !o.deleted && overrideMatchesOccurrence(o, slotId, item.medId, scheduledInstant, date),
+      );
       created.push(
         get().logDose({
           slotId,
           medId: item.medId,
           scheduledInstant,
-          dose: item.dose,
+          dose: override ? override.dose : item.dose,
           actualInstant: now,
         }),
       );
@@ -295,6 +327,53 @@ export const useStore = create<StoreState>((set, get) => ({
     if (tombstoned) persistUpsert('doseLog', tombstoned);
   },
 
+  setDoseOverride: (input) => {
+    const { doseOverrides, settings } = get();
+    const now = Date.now();
+    const date = isoDateInZone(input.scheduledInstant, settings.zone);
+    // Reuse an existing (non-deleted) override for the same occurrence so a repeat
+    // adjustment updates in place rather than stacking duplicates.
+    const existing = doseOverrides.find(
+      (o) =>
+        !o.deleted &&
+        overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date),
+    );
+    const override: DoseOverride = stamp(
+      {
+        id: existing?.id ?? newId(),
+        slotId: input.slotId,
+        medId: input.medId,
+        scheduledInstant: input.scheduledInstant,
+        zone: settings.zone,
+        dose: input.dose,
+        note: input.note,
+        updatedAt: now,
+        version: existing?.version,
+      },
+      now,
+    );
+    set((s) => ({
+      doseOverrides: existing
+        ? s.doseOverrides.map((o) => (o.id === override.id ? override : o))
+        : [...s.doseOverrides, override],
+    }));
+    persistUpsert('doseOverrides', override);
+    return override;
+  },
+
+  clearDoseOverride: (id) => {
+    const now = Date.now();
+    let tombstoned: DoseOverride | undefined;
+    set((s) => ({
+      doseOverrides: s.doseOverrides.map((o) => {
+        if (o.id !== id) return o;
+        tombstoned = stamp({ ...o, deleted: true }, now);
+        return tombstoned;
+      }),
+    }));
+    if (tombstoned) persistUpsert('doseOverrides', tombstoned);
+  },
+
   updateSettings: (patch) => {
     const now = Date.now();
     const next = stamp({ ...get().settings, ...patch }, now);
@@ -303,13 +382,18 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   importData: (incoming, mode) => {
-    const { medications, slots, doseLog, settings } = get();
-    const merged = mergeDatasets({ medications, slots, doseLog, settings }, incoming, mode);
+    const { medications, slots, doseLog, doseOverrides, settings } = get();
+    const merged = mergeDatasets(
+      { medications, slots, doseLog, doseOverrides, settings },
+      incoming,
+      mode,
+    );
     set({ ...merged });
     // Persist (and queue for sync) every record so the import propagates.
     for (const m of merged.medications) persistUpsert('medications', m);
     for (const s of merged.slots) persistUpsert('slots', s);
     for (const e of merged.doseLog) persistUpsert('doseLog', e);
+    for (const o of merged.doseOverrides) persistUpsert('doseOverrides', o);
     persistSettings(merged.settings);
   },
 }));

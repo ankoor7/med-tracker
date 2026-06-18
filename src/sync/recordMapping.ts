@@ -19,6 +19,7 @@ const TYPE_FOR_TABLE: Record<TableName, RecordType> = {
   medications: 'medication',
   slots: 'slot',
   doseLog: 'doseLog',
+  doseOverrides: 'doseOverride',
   settings: 'settings',
 };
 
@@ -26,6 +27,7 @@ const TABLE_FOR_TYPE: Record<RecordType, TableName> = {
   medication: 'medications',
   slot: 'slots',
   doseLog: 'doseLog',
+  doseOverride: 'doseOverrides',
   settings: 'settings',
 };
 

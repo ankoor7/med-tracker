@@ -7,9 +7,15 @@
 // `type`. There is no client-held-only encryption. This module is pure
 // TypeScript with no DOM/Node dependencies so both sides can import it.
 
-export type RecordType = 'medication' | 'slot' | 'doseLog' | 'settings';
+export type RecordType = 'medication' | 'slot' | 'doseLog' | 'doseOverride' | 'settings';
 
-export const RECORD_TYPES: readonly RecordType[] = ['medication', 'slot', 'doseLog', 'settings'];
+export const RECORD_TYPES: readonly RecordType[] = [
+  'medication',
+  'slot',
+  'doseLog',
+  'doseOverride',
+  'settings',
+];
 
 /**
  * A readable, typed record as stored in the cloud and moved by the sync engine
@@ -90,6 +96,8 @@ function validatePayload(type: RecordType, payload: Record<string, unknown>): Va
       return validateSlot(payload);
     case 'doseLog':
       return validateDoseLog(payload);
+    case 'doseOverride':
+      return validateDoseOverride(payload);
     case 'settings':
       return validateSettings(payload);
   }
@@ -130,6 +138,15 @@ function validateDoseLog(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.actualInstant)) return fail('doseLog.actualInstant required');
   if (!isFiniteNumber(p.dose)) return fail('doseLog.dose required');
   if (p.status !== 'taken' && p.status !== 'skipped') return fail('doseLog.status invalid');
+  return ok;
+}
+
+function validateDoseOverride(p: Record<string, unknown>): ValidationResult {
+  if (!isNonEmptyString(p.slotId)) return fail('doseOverride.slotId required');
+  if (!isNonEmptyString(p.medId)) return fail('doseOverride.medId required');
+  if (!isFiniteNumber(p.scheduledInstant)) return fail('doseOverride.scheduledInstant required');
+  if (!isNonEmptyString(p.zone)) return fail('doseOverride.zone required');
+  if (!isFiniteNumber(p.dose)) return fail('doseOverride.dose required');
   return ok;
 }
 

@@ -18,14 +18,15 @@ export function TodayScreen() {
   const medications = useStore((s) => s.medications);
   const slots = useStore((s) => s.slots);
   const doseLog = useStore((s) => s.doseLog);
+  const doseOverrides = useStore((s) => s.doseOverrides);
   const takeGroup = useStore((s) => s.takeGroup);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
 
   const today = isoDateInZone(now, zone);
   const planned = useMemo(
-    () => plannedSlotsForDate(today, slots, medications, doseLog, zone, now),
-    [today, slots, medications, doseLog, zone, now],
+    () => plannedSlotsForDate(today, slots, medications, doseLog, zone, now, doseOverrides),
+    [today, slots, medications, doseLog, zone, now, doseOverrides],
   );
   const medById = new Map(medications.map((m) => [m.id, m]));
 
@@ -109,6 +110,14 @@ function OccurrenceRow({
           {occ.dose}
           {med?.unit ?? ''}
         </span>
+        {occ.overridden && (
+          <span
+            className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            title="One-time adjusted dose"
+          >
+            adjusted
+          </span>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <StatusBadge status={occ.status} />
