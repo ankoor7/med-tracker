@@ -33,6 +33,7 @@ Do not start a stage before its prerequisites are met. The domain core (Stage 1)
 | 10 | End-to-End Testing | 8 | Browser-driven E2E (Playwright) asserting the UI→Supabase round-trip |
 | 11 | Logging-Time UX | 1, 2 | Fast custom "time taken" entry: 5-minute steps + quick presets |
 | 12 | Next-Dose Override | 1, 2, 4, 5, 8 | One-time, synced override of the next scheduled dose's amount |
+| 13 | Calendar Drag-to-Adjust Dose Times | 1, 2, 11, 12 | Vertical day-calendar; drag dose blocks to re-time (5-min snap, zone-aware) |
 
 ```mermaid
 flowchart LR

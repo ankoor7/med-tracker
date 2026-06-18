@@ -78,6 +78,14 @@ interface StoreState {
   takeGroup: (slotId: string, scheduledInstant: Instant) => DoseLogEntry[];
   deleteLogEntry: (id: string) => void;
 
+  /**
+   * Re-time an already-logged dose (calendar drag, Stage 13). Moves only the
+   * `actualInstant`; the dose amount is untouched (the app never originates a
+   * value). Re-runs the shared guardrail check at the new time and stores the
+   * refreshed warnings.
+   */
+  adjustDoseTime: (id: string, actualInstant: Instant) => DoseLogEntry | undefined;
+
   /** Set/replace a one-time override of a future occurrence's dose (Stage 12). */
   setDoseOverride: (input: DoseOverrideInput) => DoseOverride;
   clearDoseOverride: (id: string) => void;
@@ -325,6 +333,31 @@ export const useStore = create<StoreState>((set, get) => ({
       }),
     }));
     if (tombstoned) persistUpsert('doseLog', tombstoned);
+  },
+
+  adjustDoseTime: (id, actualInstant) => {
+    const { doseLog, medications, settings } = get();
+    const entry = doseLog.find((e) => e.id === id);
+    if (!entry || entry.deleted) return undefined;
+    const now = Date.now();
+    const med = medications.find((m) => m.id === entry.medId);
+    // Re-validate the (unchanged) dose at the new time against the shared
+    // guardrails, excluding this entry from the prior-dose history so it never
+    // counts against itself.
+    const others = doseLog.filter((e) => e.id !== id);
+    const warnings = med
+      ? checkGuardrails(med, entry.dose, actualInstant, others, settings.zone)
+      : entry.warnings;
+    let updated: DoseLogEntry | undefined;
+    set((s) => ({
+      doseLog: s.doseLog.map((e) => {
+        if (e.id !== id) return e;
+        updated = stamp({ ...e, actualInstant, warnings }, now);
+        return updated;
+      }),
+    }));
+    if (updated) persistUpsert('doseLog', updated);
+    return updated;
   },
 
   setDoseOverride: (input) => {

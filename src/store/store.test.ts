@@ -141,6 +141,51 @@ describe('store + LocalRepository', () => {
     expect(useStore.getState().doseOverrides.filter((o) => !o.deleted)).toHaveLength(0);
   });
 
+  it('re-times a logged dose, keeping the amount and refreshing warnings (Stage 13)', async () => {
+    await useStore.getState().hydrate();
+    useStore.setState({
+      medications: [
+        {
+          id: 'm1',
+          name: 'Med',
+          color: '#fff',
+          unit: 'mg',
+          halfLifeHours: 10,
+          adjustWhenLate: true,
+          active: true,
+          guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: 6 },
+          updatedAt: 0,
+        },
+      ],
+      slots: [],
+      doseLog: [],
+    });
+    const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0); // 08:00 BST
+    // A prior dose 3h earlier so the min-interval (6h) guardrail can trip.
+    useStore.getState().logDose({
+      slotId: 's1',
+      medId: 'm1',
+      scheduledInstant: scheduledInstant - 4 * 3_600_000,
+      dose: 100,
+      actualInstant: scheduledInstant - 4 * 3_600_000,
+    });
+    const entry = useStore.getState().logDose({
+      slotId: 's1',
+      medId: 'm1',
+      scheduledInstant,
+      dose: 100,
+      actualInstant: scheduledInstant + 8 * 3_600_000, // far from the prior dose → no warning
+    });
+    expect(entry.warnings).toHaveLength(0);
+
+    // Drag it back to just 1h after the prior dose → below the 6h interval.
+    const updated = useStore.getState().adjustDoseTime(entry.id, scheduledInstant - 3 * 3_600_000);
+    expect(updated?.actualInstant).toBe(scheduledInstant - 3 * 3_600_000);
+    expect(updated?.dose).toBe(100); // amount untouched — never originated
+    expect(updated?.warnings.some((w) => /interval/i.test(w))).toBe(true);
+    expect(updated?.version).toBe((entry.version ?? 0) + 1);
+  });
+
   it('does not re-seed when data already exists', async () => {
     await useStore.getState().hydrate();
     const firstCount = useStore.getState().medications.length;
