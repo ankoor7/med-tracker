@@ -70,6 +70,36 @@ export async function addSlot(page: Page, slot: SlotSpec) {
   await expect(dialog).toBeHidden();
 }
 
+export interface LogDoseSpec {
+  med: string; // medication name (row on Today)
+  dose: number; // actual amount taken (may differ from scheduled)
+  /** When set, also set a one-time override for the next scheduled dose. */
+  nextDose?: number;
+}
+
+/**
+ * Log a dose from the Today tab. Logs the first (earliest-slot) occurrence for
+ * the medication; when `nextDose` is given, enables "Adjust next … dose" and sets
+ * the one-time override amount (Stage 12).
+ */
+export async function logDose(page: Page, spec: LogDoseSpec) {
+  await goToTab(page, 'Today');
+  const row = page.getByRole('listitem').filter({ hasText: spec.med }).first();
+  await row.getByRole('button', { name: 'Log', exact: true }).click();
+
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByLabel('Dose', { exact: true }).fill(String(spec.dose));
+
+  if (spec.nextDose != null) {
+    await dialog.getByRole('checkbox', { name: /adjust next/i }).check();
+    await dialog.getByLabel('Next dose', { exact: true }).fill(String(spec.nextDose));
+  }
+
+  await dialog.getByRole('button', { name: /log dose/i }).click();
+  await expect(dialog).toBeHidden();
+}
+
 /** Trigger a sync and wait for it to settle as "synced". */
 export async function syncNow(page: Page) {
   await goToTab(page, 'History');

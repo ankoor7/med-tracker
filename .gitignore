@@ -31,6 +31,8 @@ test-results/
 playwright-report/
 playwright/.cache/
 .last-run.json
+# Playwright MCP session artifacts (snapshots, console logs, screenshots)
+.playwright-mcp/
 
 # Logs
 *.log
