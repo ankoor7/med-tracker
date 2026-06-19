@@ -8,6 +8,8 @@ import type {
   Dataset,
   DoseLogEntry,
   DoseOverride,
+  EventInstance,
+  EventType,
   Medication,
   Settings,
   Slot,
@@ -31,6 +33,8 @@ export class SteadyDoseDB extends Dexie {
   slots!: Table<Slot, string>;
   doseLog!: Table<DoseLogEntry, string>;
   doseOverrides!: Table<DoseOverride, string>;
+  eventTypes!: Table<EventType, string>;
+  eventInstances!: Table<EventInstance, string>;
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<SyncRecord, string>;
@@ -54,33 +58,69 @@ export class SteadyDoseDB extends Dexie {
     this.version(3).stores({
       doseOverrides: 'id, updatedAt, deleted, medId, slotId',
     });
+    // v4 (Stage 13): user-defined health-condition events — types + instances.
+    this.version(4).stores({
+      eventTypes: 'id, updatedAt, deleted',
+      eventInstances: 'id, updatedAt, deleted, typeId, occurredAt',
+    });
   }
 }
 
-const TABLES: TableName[] = ['medications', 'slots', 'doseLog', 'doseOverrides'];
+const TABLES: TableName[] = [
+  'medications',
+  'slots',
+  'doseLog',
+  'doseOverrides',
+  'eventTypes',
+  'eventInstances',
+];
 
 export class LocalRepository implements Repository {
   constructor(private readonly db: SteadyDoseDB = new SteadyDoseDB()) {}
 
   async loadAll(): Promise<Dataset | null> {
-    const [medications, slots, doseLog, doseOverrides, settingsRow, versionStr] = await Promise.all(
-      [
-        this.db.medications.toArray(),
-        this.db.slots.toArray(),
-        this.db.doseLog.toArray(),
-        this.db.doseOverrides.toArray(),
-        this.db.settings.get(SETTINGS_ID),
-        this.getMeta(META_SCHEMA_VERSION),
-      ],
-    );
+    const [
+      medications,
+      slots,
+      doseLog,
+      doseOverrides,
+      eventTypes,
+      eventInstances,
+      settingsRow,
+      versionStr,
+    ] = await Promise.all([
+      this.db.medications.toArray(),
+      this.db.slots.toArray(),
+      this.db.doseLog.toArray(),
+      this.db.doseOverrides.toArray(),
+      this.db.eventTypes.toArray(),
+      this.db.eventInstances.toArray(),
+      this.db.settings.get(SETTINGS_ID),
+      this.getMeta(META_SCHEMA_VERSION),
+    ]);
 
     // First run: nothing persisted yet.
-    if (!settingsRow && medications.length === 0 && slots.length === 0 && doseLog.length === 0) {
+    if (
+      !settingsRow &&
+      medications.length === 0 &&
+      slots.length === 0 &&
+      doseLog.length === 0 &&
+      eventTypes.length === 0 &&
+      eventInstances.length === 0
+    ) {
       return null;
     }
 
     const settings = settingsRow ? stripId(settingsRow) : fallbackSettings();
-    const loaded: Dataset = { medications, slots, doseLog, doseOverrides, settings };
+    const loaded: Dataset = {
+      medications,
+      slots,
+      doseLog,
+      doseOverrides,
+      eventTypes,
+      eventInstances,
+      settings,
+    };
 
     // Run forward data migrations if the stored version is behind.
     const fromVersion = versionStr ? Number(versionStr) : CURRENT_SCHEMA_VERSION;
@@ -190,13 +230,18 @@ export class LocalRepository implements Repository {
         this.db.slots,
         this.db.doseLog,
         this.db.doseOverrides,
+        this.db.eventTypes,
+        this.db.eventInstances,
         this.db.settings,
+        this.db.outbox,
       ],
       async () => {
         await this.db.medications.bulkPut(data.medications);
         await this.db.slots.bulkPut(data.slots);
         await this.db.doseLog.bulkPut(data.doseLog);
         await this.db.doseOverrides.bulkPut(data.doseOverrides);
+        await this.db.eventTypes.bulkPut(data.eventTypes);
+        await this.db.eventInstances.bulkPut(data.eventInstances);
         await this.putSettings(data.settings);
       },
     );

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { EXPORT_APP_TAG, exportCSV, exportJSON, mergeDatasets, parseImport } from './transfer';
 import type { Dataset } from '../core/types';
-import { logEntry, med, settings, slot } from '../test/fixtures';
+import { eventInstance, eventType, logEntry, med, settings, slot } from '../test/fixtures';
 
 function dataset(over: Partial<Dataset> = {}): Dataset {
   return {
@@ -19,6 +19,10 @@ function dataset(over: Partial<Dataset> = {}): Dataset {
       logEntry({ id: 'l1', medId: 'm1', slotId: 's1', updatedAt: 1000, version: 1 }),
     ],
     doseOverrides: over.doseOverrides ?? [],
+    eventTypes: over.eventTypes ?? [eventType({ id: 'et1', updatedAt: 1000, version: 1 })],
+    eventInstances: over.eventInstances ?? [
+      eventInstance({ id: 'ei1', typeId: 'et1', occurredAt: 1000, updatedAt: 1000, version: 1 }),
+    ],
     settings: over.settings ?? settings({ zone: 'Europe/London', updatedAt: 1000, version: 1 }),
   };
 }
@@ -36,6 +40,8 @@ describe('JSON export/import round-trip (AC5)', () => {
       slots: [],
       doseLog: [],
       doseOverrides: [],
+      eventTypes: [],
+      eventInstances: [],
       settings: original.settings,
     };
     expect(mergeDatasets(empty, result.data, 'replace')).toEqual(original);

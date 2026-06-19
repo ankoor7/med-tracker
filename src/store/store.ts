@@ -7,6 +7,10 @@ import {
   overrideMatchesOccurrence,
   type DoseLogEntry,
   type DoseOverride,
+  type EventInstance,
+  type EventPropertyDef,
+  type EventPropertyValue,
+  type EventType,
   type Guardrails,
   type Instant,
   type Medication,
@@ -54,12 +58,28 @@ export interface DoseOverrideInput {
   note?: string;
 }
 
+export interface EventTypeInput {
+  name: string;
+  color: string;
+  properties: EventPropertyDef[];
+  notes?: string;
+}
+
+export interface EventInstanceInput {
+  typeId: string;
+  occurredAt: Instant;
+  values: Record<string, EventPropertyValue>;
+  note?: string;
+}
+
 interface StoreState {
   hydrated: boolean;
   medications: Medication[];
   slots: Slot[];
   doseLog: DoseLogEntry[];
   doseOverrides: DoseOverride[];
+  eventTypes: EventType[];
+  eventInstances: EventInstance[];
   settings: Settings;
 
   hydrate: () => Promise<void>;
@@ -81,6 +101,15 @@ interface StoreState {
   /** Set/replace a one-time override of a future occurrence's dose (Stage 12). */
   setDoseOverride: (input: DoseOverrideInput) => DoseOverride;
   clearDoseOverride: (id: string) => void;
+
+  // ---- Health-condition event tracking (Stage 13) ---------------------------
+  addEventType: (input: EventTypeInput) => EventType;
+  updateEventType: (id: string, patch: Partial<EventTypeInput>) => void;
+  deleteEventType: (id: string) => void;
+
+  logEvent: (input: EventInstanceInput) => EventInstance;
+  updateEventInstance: (id: string, patch: Partial<EventInstanceInput>) => void;
+  deleteEventInstance: (id: string) => void;
 
   updateSettings: (patch: Partial<Omit<Settings, 'updatedAt' | 'version'>>) => void;
 
@@ -120,6 +149,8 @@ export const useStore = create<StoreState>((set, get) => ({
   slots: [],
   doseLog: [],
   doseOverrides: [],
+  eventTypes: [],
+  eventInstances: [],
   settings: {
     zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
     adherenceWindowDays: 7,
@@ -146,6 +177,7 @@ export const useStore = create<StoreState>((set, get) => ({
     set({ ...data, hydrated: true });
     for (const m of data.medications) persistUpsert('medications', m);
     for (const s of data.slots) persistUpsert('slots', s);
+    for (const t of data.eventTypes) persistUpsert('eventTypes', t);
     persistSettings(data.settings);
   },
 
@@ -374,6 +406,90 @@ export const useStore = create<StoreState>((set, get) => ({
     if (tombstoned) persistUpsert('doseOverrides', tombstoned);
   },
 
+  // ---- Health-condition event tracking (Stage 13) ---------------------------
+
+  addEventType: (input) => {
+    const now = Date.now();
+    const type: EventType = stamp({ id: newId(), updatedAt: now, ...input }, now);
+    set((s) => ({ eventTypes: [...s.eventTypes, type] }));
+    persistUpsert('eventTypes', type);
+    return type;
+  },
+
+  updateEventType: (id, patch) => {
+    const now = Date.now();
+    let updated: EventType | undefined;
+    set((s) => ({
+      eventTypes: s.eventTypes.map((t) => {
+        if (t.id !== id) return t;
+        updated = stamp({ ...t, ...patch }, now);
+        return updated;
+      }),
+    }));
+    if (updated) persistUpsert('eventTypes', updated);
+  },
+
+  deleteEventType: (id) => {
+    // Tombstone the type only — past instances are preserved as history
+    // (FR-13.6); the UI falls back to the stored typeId for a deleted type.
+    const now = Date.now();
+    let tombstoned: EventType | undefined;
+    set((s) => ({
+      eventTypes: s.eventTypes.map((t) => {
+        if (t.id !== id) return t;
+        tombstoned = stamp({ ...t, deleted: true }, now);
+        return tombstoned;
+      }),
+    }));
+    if (tombstoned) persistUpsert('eventTypes', tombstoned);
+  },
+
+  logEvent: (input) => {
+    const now = Date.now();
+    const { settings } = get();
+    const instance: EventInstance = stamp(
+      {
+        id: newId(),
+        typeId: input.typeId,
+        occurredAt: input.occurredAt,
+        zone: settings.zone,
+        values: input.values,
+        note: input.note,
+        updatedAt: now,
+      },
+      now,
+    );
+    set((s) => ({ eventInstances: [...s.eventInstances, instance] }));
+    persistUpsert('eventInstances', instance);
+    return instance;
+  },
+
+  updateEventInstance: (id, patch) => {
+    const now = Date.now();
+    let updated: EventInstance | undefined;
+    set((s) => ({
+      eventInstances: s.eventInstances.map((e) => {
+        if (e.id !== id) return e;
+        updated = stamp({ ...e, ...patch }, now);
+        return updated;
+      }),
+    }));
+    if (updated) persistUpsert('eventInstances', updated);
+  },
+
+  deleteEventInstance: (id) => {
+    const now = Date.now();
+    let tombstoned: EventInstance | undefined;
+    set((s) => ({
+      eventInstances: s.eventInstances.map((e) => {
+        if (e.id !== id) return e;
+        tombstoned = stamp({ ...e, deleted: true }, now);
+        return tombstoned;
+      }),
+    }));
+    if (tombstoned) persistUpsert('eventInstances', tombstoned);
+  },
+
   updateSettings: (patch) => {
     const now = Date.now();
     const next = stamp({ ...get().settings, ...patch }, now);
@@ -382,9 +498,10 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   importData: (incoming, mode) => {
-    const { medications, slots, doseLog, doseOverrides, settings } = get();
+    const { medications, slots, doseLog, doseOverrides, eventTypes, eventInstances, settings } =
+      get();
     const merged = mergeDatasets(
-      { medications, slots, doseLog, doseOverrides, settings },
+      { medications, slots, doseLog, doseOverrides, eventTypes, eventInstances, settings },
       incoming,
       mode,
     );
@@ -394,6 +511,8 @@ export const useStore = create<StoreState>((set, get) => ({
     for (const s of merged.slots) persistUpsert('slots', s);
     for (const e of merged.doseLog) persistUpsert('doseLog', e);
     for (const o of merged.doseOverrides) persistUpsert('doseOverrides', o);
+    for (const t of merged.eventTypes) persistUpsert('eventTypes', t);
+    for (const e of merged.eventInstances) persistUpsert('eventInstances', e);
     persistSettings(merged.settings);
   },
 }));

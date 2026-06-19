@@ -15,6 +15,8 @@ function resetStore() {
     slots: [],
     doseLog: [],
     doseOverrides: [],
+    eventTypes: [],
+    eventInstances: [],
     settings: {
       zone: 'Europe/London',
       adherenceWindowDays: 7,
@@ -139,6 +141,57 @@ describe('store + LocalRepository', () => {
       actualInstant: scheduledInstant,
     });
     expect(useStore.getState().doseOverrides.filter((o) => !o.deleted)).toHaveLength(0);
+  });
+
+  it('defines an event type, logs an instance, and persists both (Stage 13)', async () => {
+    await useStore.getState().hydrate();
+    const type = useStore.getState().addEventType({
+      name: 'Migraine',
+      color: '#9333ea',
+      properties: [{ id: 'severity', name: 'Severity', type: 'scale', min: 1, max: 5 }],
+    });
+    expect(type.version).toBe(1);
+
+    const occurredAt = Date.UTC(2026, 5, 18, 14, 30);
+    const inst = useStore.getState().logEvent({
+      typeId: type.id,
+      occurredAt,
+      values: { severity: 4 },
+      note: 'after lunch',
+    });
+    expect(inst.zone).toBeTruthy();
+    expect(inst.values.severity).toBe(4);
+
+    // Flush async write-through, then reload from a fresh repo on the same DB.
+    await new Promise((r) => setTimeout(r, 50));
+    db.close();
+    const db2 = new SteadyDoseDB(dbName);
+    setRepository(new LocalRepository(db2));
+    resetStore();
+    await useStore.getState().hydrate();
+
+    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.name).toBe('Migraine');
+    expect(useStore.getState().eventInstances.find((e) => e.id === inst.id)?.values.severity).toBe(
+      4,
+    );
+    db2.close();
+  });
+
+  it('tombstones an event type without deleting its instances (Stage 13)', async () => {
+    await useStore.getState().hydrate();
+    const type = useStore.getState().addEventType({
+      name: 'Seizure',
+      color: '#9333ea',
+      properties: [],
+    });
+    const inst = useStore
+      .getState()
+      .logEvent({ typeId: type.id, occurredAt: Date.now(), values: {} });
+
+    useStore.getState().deleteEventType(type.id);
+    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.deleted).toBe(true);
+    // The instance survives (history is preserved).
+    expect(useStore.getState().eventInstances.find((e) => e.id === inst.id)?.deleted).toBeFalsy();
   });
 
   it('does not re-seed when data already exists', async () => {

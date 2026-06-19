@@ -9,6 +9,8 @@ function dataset(): Dataset {
     slots: [slot({ id: 's1', items: [{ medId: 'a', dose: 1 }] })],
     doseLog: [],
     doseOverrides: [],
+    eventTypes: [],
+    eventInstances: [],
     settings: settings(),
   };
 }

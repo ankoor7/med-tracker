@@ -8,7 +8,15 @@ import {
 } from './recordMapping';
 import { validateSyncRecord } from '../core/cloudRecord';
 import type { TableName } from '../store/repository';
-import { med, settings, slot, logEntry, override } from '../test/fixtures';
+import {
+  eventInstance,
+  eventType,
+  med,
+  settings,
+  slot,
+  logEntry,
+  override,
+} from '../test/fixtures';
 
 // Domain entities lack an index signature; production calls `toSyncRecord` with
 // the same `as never` widening. Centralise it so the tests read cleanly.
@@ -35,9 +43,29 @@ describe('record mapping', () => {
       ['slots', slot({ id: 's', items: [{ medId: 'm', dose: 50 }] })],
       ['doseLog', logEntry({ id: 'l', medId: 'm', slotId: 's' })],
       ['doseOverrides', override({ id: 'o', medId: 'm', slotId: 's' })],
+      ['eventTypes', eventType({ id: 'et' })],
+      ['eventInstances', eventInstance({ id: 'ei', typeId: 'et' })],
     ] as const) {
       expect(validateSyncRecord(wrap(table, entity)).ok).toBe(true);
     }
+  });
+
+  it('round-trips an event type and instance through the wire envelope', () => {
+    const t = eventType({ id: 'et1', name: 'Seizure', updatedAt: 5, version: 2 });
+    const tRec = wrap('eventTypes', t);
+    expect(tRec).toMatchObject({ id: 'et1', type: 'eventType', updatedAt: 5, version: 2 });
+    expect(fromSyncRecord(tRec)).toMatchObject({
+      table: 'eventTypes',
+      entity: { id: 'et1', name: 'Seizure' },
+    });
+
+    const i = eventInstance({ id: 'ei1', typeId: 'et1', values: { severity: 4 }, version: 3 });
+    const iRec = wrap('eventInstances', i);
+    expect(iRec).toMatchObject({ id: 'ei1', type: 'eventInstance', version: 3 });
+    expect(fromSyncRecord(iRec)).toMatchObject({
+      table: 'eventInstances',
+      entity: { id: 'ei1', typeId: 'et1', values: { severity: 4 } },
+    });
   });
 
   it('round-trips a doseOverride through the wire envelope', () => {
@@ -77,6 +105,8 @@ describe('record mapping', () => {
     expect(tableForType('medication')).toBe('medications');
     expect(tableForType('slot')).toBe('slots');
     expect(tableForType('doseLog')).toBe('doseLog');
+    expect(tableForType('eventType')).toBe('eventTypes');
+    expect(tableForType('eventInstance')).toBe('eventInstances');
     expect(tableForType('settings')).toBe('settings');
   });
 });

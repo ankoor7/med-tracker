@@ -7,15 +7,30 @@
 // `type`. There is no client-held-only encryption. This module is pure
 // TypeScript with no DOM/Node dependencies so both sides can import it.
 
-export type RecordType = 'medication' | 'slot' | 'doseLog' | 'doseOverride' | 'settings';
+export type RecordType =
+  | 'medication'
+  | 'slot'
+  | 'doseLog'
+  | 'doseOverride'
+  | 'eventType'
+  | 'eventInstance'
+  | 'settings';
 
 export const RECORD_TYPES: readonly RecordType[] = [
   'medication',
   'slot',
   'doseLog',
   'doseOverride',
+  'eventType',
+  'eventInstance',
   'settings',
 ];
+
+/**
+ * The event property-type vocabulary, mirrored from core/events.ts for envelope
+ * validation. Kept in lock-step with EVENT_PROPERTY_TYPES (and validate_record).
+ */
+const EVENT_PROPERTY_TYPE_NAMES: readonly string[] = ['number', 'text', 'scale', 'duration'];
 
 /**
  * A readable, typed record as stored in the cloud and moved by the sync engine
@@ -98,6 +113,10 @@ function validatePayload(type: RecordType, payload: Record<string, unknown>): Va
       return validateDoseLog(payload);
     case 'doseOverride':
       return validateDoseOverride(payload);
+    case 'eventType':
+      return validateEventType(payload);
+    case 'eventInstance':
+      return validateEventInstance(payload);
     case 'settings':
       return validateSettings(payload);
   }
@@ -147,6 +166,31 @@ function validateDoseOverride(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.scheduledInstant)) return fail('doseOverride.scheduledInstant required');
   if (!isNonEmptyString(p.zone)) return fail('doseOverride.zone required');
   if (!isFiniteNumber(p.dose)) return fail('doseOverride.dose required');
+  return ok;
+}
+
+function validateEventType(p: Record<string, unknown>): ValidationResult {
+  if (!isNonEmptyString(p.name)) return fail('eventType.name required');
+  if (!Array.isArray(p.properties)) return fail('eventType.properties required');
+  for (const prop of p.properties) {
+    if (
+      !isPlainObject(prop) ||
+      !isNonEmptyString(prop.id) ||
+      !isNonEmptyString(prop.name) ||
+      typeof prop.type !== 'string' ||
+      !EVENT_PROPERTY_TYPE_NAMES.includes(prop.type)
+    ) {
+      return fail('eventType.properties entry invalid');
+    }
+  }
+  return ok;
+}
+
+function validateEventInstance(p: Record<string, unknown>): ValidationResult {
+  if (!isNonEmptyString(p.typeId)) return fail('eventInstance.typeId required');
+  if (!isFiniteNumber(p.occurredAt)) return fail('eventInstance.occurredAt required');
+  if (!isNonEmptyString(p.zone)) return fail('eventInstance.zone required');
+  if (!isPlainObject(p.values)) return fail('eventInstance.values required');
   return ok;
 }
 
