@@ -20,6 +20,11 @@ export interface LoggerTarget {
   medId: string;
   scheduledInstant: Instant;
   normalDose: number;
+  /**
+   * Optional pre-filled "time taken" (e.g. dragged on the day calendar, Stage
+   * 13). Clamped to ≤ now. Defaults to now-rounded-to-5-min when absent.
+   */
+  actualInstant?: Instant;
 }
 
 export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose: () => void }) {
@@ -35,7 +40,11 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   const now = useMemo(() => roundInstantToStep(Date.now()), []);
 
   const [doseStr, setDoseStr] = useState(String(target.normalDose));
-  const [whenStr, setWhenStr] = useState(() => instantToDatetimeLocal(now, zone));
+  // Seed "time taken" from a dragged calendar time when given (clamped to ≤ now),
+  // otherwise the rounded "now" default.
+  const [whenStr, setWhenStr] = useState(() =>
+    instantToDatetimeLocal(Math.min(target.actualInstant ?? now, now), zone),
+  );
   const [confirmed, setConfirmed] = useState(false);
   const [adjustNext, setAdjustNext] = useState(false);
   const [nextDoseStr, setNextDoseStr] = useState('');
