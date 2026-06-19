@@ -5,20 +5,14 @@
 // auto-refreshed by the supabase-js client.
 //
 // Email confirmation is disabled in local/single-user config (D2 = i), so
-// `signUp` yields a usable account immediately. `getIdToken` returns the GoTrue
-// access token (a JWT) — its `sub` drives `auth.uid()` in Postgres RLS + the
-// push RPC. `confirmSignUp` is intentionally gone: GoTrue uses an email link,
-// not a Cognito-style code, and the AccountPanel no longer surfaces a code step.
+// `signUp` yields a usable account immediately. The GoTrue access token (a JWT)
+// drives `auth.uid()` in Postgres RLS + the push RPC; supabase-js attaches it to
+// requests automatically. `confirmSignUp` is intentionally gone: GoTrue uses an
+// email link, not a Cognito-style code, and the AccountPanel no longer surfaces
+// a code step.
 
 import type { Session } from '@supabase/supabase-js';
 import { getSupabase } from '../supabase/client';
-
-export class AuthNotConfiguredError extends Error {
-  constructor() {
-    super('Backend not configured');
-    this.name = 'AuthNotConfiguredError';
-  }
-}
 
 export interface AccountInfo {
   email: string;
@@ -51,12 +45,6 @@ export async function currentAccount(): Promise<AccountInfo | null> {
   const session = await getSession();
   const email = session?.user.email;
   return email ? { email } : null;
-}
-
-/** A valid JWT (GoTrue access token) for API calls, or null if not signed in. */
-export async function getIdToken(): Promise<string | null> {
-  const session = await getSession();
-  return session?.access_token ?? null;
 }
 
 /**

@@ -8,7 +8,7 @@
 //   2. Timing is always resolved in the active zone, so a zone change simply
 //      recomputes to new instants (FR-6.4).
 
-import { computeAdherence, type AdherenceResult } from './adherence';
+import type { AdherenceResult } from './adherence';
 import { plannedSlotsForDate } from './schedule';
 import { addDaysToIsoDate, isoDateInZone } from './time';
 import type { DoseLogEntry, IanaZone, Instant, Medication, Slot } from './types';
@@ -167,27 +167,4 @@ export function evaluateMissedPattern(
     },
     state,
   };
-}
-
-/** Convenience: evaluate the missed-pattern alert straight from the dataset. */
-export function missedPatternFromDataset(
-  slots: Slot[],
-  medications: Medication[],
-  log: DoseLogEntry[],
-  zone: IanaZone,
-  windowDays: number,
-  missedThreshold: number,
-  now: Instant,
-  prev: MissedPatternState,
-): { reminder: ScheduledReminder | null; state: MissedPatternState; adherence: AdherenceResult } {
-  const adherence = computeAdherence(
-    slots,
-    medications,
-    log,
-    zone,
-    windowDays,
-    missedThreshold,
-    now,
-  );
-  return { ...evaluateMissedPattern(adherence, prev, now), adherence };
 }
