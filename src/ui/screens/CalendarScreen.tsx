@@ -24,28 +24,41 @@ import {
   type OccurrenceStatus,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card } from '../components/ui';
+import { Button, Card, ColorDot } from '../components/ui';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
+import { GroupLogger, type GroupLoggerTarget } from '../components/GroupLogger';
 import { useNow } from '../lib/useNow';
 
 const PX_PER_HOUR = DEFAULT_PX_PER_HOUR;
-const BLOCK_HEIGHT = 38; // visual height of a dose block, in px
+const GROUP_HEIGHT = 46; // visual height of a dose-group block, in px
 const MOVE_THRESHOLD = 3; // px before a press counts as a drag, not a tap
 const SWIPE_THRESHOLD = 60; // horizontal px before a swipe changes the day
 
-// One draggable dose event on the day axis. Taken doses anchor at the time they
-// were actually taken; untaken occurrences anchor at their scheduled time.
-interface CalendarBlock {
-  key: string;
-  slotId: string;
+// One medication within a slot-group on the day axis. Taken doses anchor at the
+// time they were actually taken; untaken occurrences anchor at their scheduled
+// time.
+interface GroupMember {
   medId: string;
+  med?: Medication;
   scheduledInstant: Instant;
   anchorInstant: Instant;
   dose: number;
   status: OccurrenceStatus;
-  overridden: boolean;
   logEntryId?: string;
-  med?: Medication;
+  overridden: boolean;
+}
+
+// A scheduled slot rendered as a single draggable group. Dragging moves every
+// member by the same time delta; the amounts stay with each dose (the app never
+// originates a value).
+interface CalendarGroup {
+  key: string;
+  slotId: string;
+  label?: string;
+  scheduledInstant: Instant;
+  anchorInstant: Instant; // representative position (earliest member)
+  members: GroupMember[];
+  hasLogged: boolean; // at least one member already taken
   lane: number;
   laneCount: number;
 }
@@ -60,6 +73,7 @@ export function CalendarScreen() {
   const adjustDoseTime = useStore((s) => s.adjustDoseTime);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
+  const [groupTarget, setGroupTarget] = useState<GroupLoggerTarget | null>(null);
 
   // The day being viewed/adjusted. Defaults to today but can be moved back or
   // forward (prev/next buttons or a horizontal swipe) so a dose missed late in a
@@ -85,8 +99,8 @@ export function CalendarScreen() {
   }, [isToday, selectedDate, todayDate, zone, dayStart]);
 
   // Horizontal swipe on the day track changes the day. Gestures that start on a
-  // dose block (vertical re-time drags) are ignored, as are vertical-dominant
-  // moves, so block dragging and day swiping never fight each other.
+  // dose group (vertical re-time drags) are ignored, as are vertical-dominant
+  // moves, so group dragging and day swiping never fight each other.
   const swipeRef = useRef<{ x: number; y: number; skip: boolean } | null>(null);
   const onTrackPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     swipeRef.current = {
@@ -107,7 +121,7 @@ export function CalendarScreen() {
 
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
 
-  const blocks = useMemo<CalendarBlock[]>(() => {
+  const groups = useMemo<CalendarGroup[]>(() => {
     const planned = plannedSlotsForDate(
       selectedDate,
       slots,
@@ -117,40 +131,72 @@ export function CalendarScreen() {
       now,
       doseOverrides,
     );
-    const raw: Omit<CalendarBlock, 'lane' | 'laneCount'>[] = [];
+    const raw: Omit<CalendarGroup, 'lane' | 'laneCount'>[] = [];
     for (const slot of planned) {
-      for (const occ of slot.occurrences) {
+      const members: GroupMember[] = slot.occurrences.map((occ) => {
         let anchor = occ.scheduledInstant;
         if (occ.status === 'taken' && occ.logEntryId) {
           const entry = doseLog.find((e) => e.id === occ.logEntryId);
           if (entry) anchor = entry.actualInstant;
         }
-        raw.push({
-          key: `${occ.slotId}:${occ.medId}`,
-          slotId: occ.slotId,
+        return {
           medId: occ.medId,
+          med: medById.get(occ.medId),
           scheduledInstant: occ.scheduledInstant,
           anchorInstant: anchor,
           dose: occ.dose,
           status: occ.status,
-          overridden: occ.overridden ?? false,
           logEntryId: occ.logEntryId,
-          med: medById.get(occ.medId),
-        });
-      }
+          overridden: occ.overridden ?? false,
+        };
+      });
+      if (members.length === 0) continue;
+      raw.push({
+        key: `${slot.slotId}:${slot.scheduledInstant}`,
+        slotId: slot.slotId,
+        label: slot.label,
+        scheduledInstant: slot.scheduledInstant,
+        anchorInstant: Math.min(...members.map((m) => m.anchorInstant)),
+        members,
+        hasLogged: members.some((m) => m.logEntryId),
+      });
     }
     return assignLanes(raw);
   }, [selectedDate, slots, medications, doseLog, zone, now, doseOverrides, medById]);
 
-  const onRetime = (block: CalendarBlock, instant: Instant) => {
-    if (block.logEntryId) adjustDoseTime(block.logEntryId, instant);
+  // Re-time every logged member of a group by the same delta (drag / arrow keys).
+  const onRetimeGroup = (group: CalendarGroup, delta: number) => {
+    const ceil = clampInstant(now, dayStart, dayEnd);
+    for (const m of group.members) {
+      if (!m.logEntryId) continue;
+      const next = clampInstant(roundInstantToStep(m.anchorInstant + delta), dayStart, ceil);
+      adjustDoseTime(m.logEntryId, next);
+    }
   };
-  const onLog = (block: CalendarBlock, instant?: Instant) => {
-    setTarget({
-      slotId: block.slotId,
-      medId: block.medId,
-      scheduledInstant: block.scheduledInstant,
-      normalDose: block.dose,
+
+  // Open a logger for the not-yet-taken members of a group. A single med keeps
+  // the richer DoseLogger (with adjust-next); ≥2 use the group logger so amounts
+  // can be set per medication.
+  const onLogGroup = (group: CalendarGroup, instant?: Instant) => {
+    const untaken = group.members.filter((m) => !m.logEntryId);
+    if (untaken.length === 0) return;
+    const groupLabel = group.label ?? `${wallTimeInZone(group.scheduledInstant, zone)} group`;
+    if (untaken.length === 1) {
+      const m = untaken[0]!;
+      setTarget({
+        slotId: group.slotId,
+        medId: m.medId,
+        scheduledInstant: m.scheduledInstant,
+        normalDose: m.dose,
+        ...(instant != null ? { actualInstant: instant } : {}),
+      });
+      return;
+    }
+    setGroupTarget({
+      slotId: group.slotId,
+      scheduledInstant: group.scheduledInstant,
+      label: groupLabel,
+      members: untaken.map((m) => ({ medId: m.medId, normalDose: m.dose })),
       ...(instant != null ? { actualInstant: instant } : {}),
     });
   };
@@ -182,8 +228,8 @@ export function CalendarScreen() {
 
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-slate-400">
-          Drag a dose up or down to change its time (snaps to 5 minutes); tap an upcoming dose to
-          log it. Swipe left/right to change day.
+          Drag a group up or down to re-time the whole group (snaps to 5 minutes); tap an upcoming
+          group to log it and adjust each amount. Swipe left/right to change day.
         </p>
         {!isToday && (
           <Button
@@ -229,16 +275,16 @@ export function CalendarScreen() {
                   aria-hidden
                 />
               )}
-              {blocks.map((block) => (
-                <DoseBlock
-                  key={block.key}
-                  block={block}
+              {groups.map((group) => (
+                <DoseGroup
+                  key={group.key}
+                  group={group}
                   dayStart={dayStart}
                   dayEnd={dayEnd}
                   now={now}
                   zone={zone}
-                  onRetime={onRetime}
-                  onLog={onLog}
+                  onRetimeGroup={onRetimeGroup}
+                  onLogGroup={onLogGroup}
                 />
               ))}
             </div>
@@ -247,44 +293,53 @@ export function CalendarScreen() {
       </div>
 
       {target && <DoseLogger target={target} onClose={() => setTarget(null)} />}
+      {groupTarget && <GroupLogger target={groupTarget} onClose={() => setGroupTarget(null)} />}
     </div>
   );
 }
 
-function DoseBlock({
-  block,
+function DoseGroup({
+  group,
   dayStart,
   dayEnd,
   now,
   zone,
-  onRetime,
-  onLog,
+  onRetimeGroup,
+  onLogGroup,
 }: {
-  block: CalendarBlock;
+  group: CalendarGroup;
   dayStart: Instant;
   dayEnd: Instant;
   now: Instant;
   zone: string;
-  onRetime: (block: CalendarBlock, instant: Instant) => void;
-  onLog: (block: CalendarBlock, instant?: Instant) => void;
+  onRetimeGroup: (group: CalendarGroup, delta: number) => void;
+  onLogGroup: (group: CalendarGroup, instant?: Instant) => void;
 }) {
-  const [preview, setPreview] = useState<Instant | null>(null);
+  const [preview, setPreview] = useState<Instant | null>(null); // previewed group anchor
   const dragRef = useRef<{ startY: number; origin: Instant; moved: boolean } | null>(null);
 
-  // A taken dose can be re-timed but not into the future; an upcoming dose can be
-  // dragged anywhere in the day (the logger then clamps "time taken" to ≤ now).
-  const maxInstant = block.logEntryId ? clampInstant(now, dayStart, dayEnd) : dayEnd;
+  // The drag range for the group anchor: it can move to the day start, and down
+  // until the first member hits its own ceiling (a logged dose can't move into
+  // the future; an upcoming one is free to the day end — the logger re-clamps).
+  const memberCeil = (m: GroupMember) =>
+    m.logEntryId ? clampInstant(now, dayStart, dayEnd) : dayEnd;
+  const maxDelta = Math.max(
+    0,
+    Math.min(...group.members.map((m) => memberCeil(m) - m.anchorInstant)),
+  );
+  const groupMax = group.anchorInstant + maxDelta;
 
-  const displayInstant = preview ?? block.anchorInstant;
-  const top = instantToDayY(displayInstant, dayStart, PX_PER_HOUR);
-  const wall = wallTimeInZone(displayInstant, zone);
-  const med = block.med;
-  const taken = block.status === 'taken';
+  const displayAnchor = preview ?? group.anchorInstant;
+  const delta = displayAnchor - group.anchorInstant;
+  const top = instantToDayY(displayAnchor, dayStart, PX_PER_HOUR);
+  const wall = wallTimeInZone(displayAnchor, zone);
+  const moved = delta !== 0 && preview != null;
+  const anyMissed = group.members.some((m) => m.status === 'missed');
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
-    dragRef.current = { startY: e.clientY, origin: block.anchorInstant, moved: false };
-    setPreview(block.anchorInstant);
+    dragRef.current = { startY: e.clientY, origin: group.anchorInstant, moved: false };
+    setPreview(group.anchorInstant);
   };
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
@@ -297,7 +352,7 @@ function DoseBlock({
         deltaY,
         pxPerHour: PX_PER_HOUR,
         min: dayStart,
-        max: maxInstant,
+        max: groupMax,
       }),
     );
   };
@@ -305,96 +360,105 @@ function DoseBlock({
     const d = dragRef.current;
     dragRef.current = null;
     e.currentTarget.releasePointerCapture?.(e.pointerId);
-    const committed = preview ?? block.anchorInstant;
+    const committedAnchor = preview ?? group.anchorInstant;
+    const committedDelta = committedAnchor - group.anchorInstant;
     setPreview(null);
     if (!d) return;
     if (d.moved) {
-      if (block.logEntryId) onRetime(block, committed);
-      else onLog(block, committed);
-    } else if (!block.logEntryId) {
-      onLog(block); // tap an upcoming dose → open the logger
+      if (group.hasLogged) onRetimeGroup(group, committedDelta);
+      else onLogGroup(group, committedAnchor);
+    } else if (!group.hasLogged) {
+      onLogGroup(group); // tap an upcoming group → open the logger
     }
   };
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Keyboard re-timing for taken doses (a11y alternative to dragging).
-    if (!block.logEntryId) {
+    if (!group.hasLogged) {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        onLog(block);
+        onLogGroup(group);
       }
       return;
     }
     if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
     e.preventDefault();
-    const delta = e.key === 'ArrowUp' ? -TIME_STEP_MS : TIME_STEP_MS;
-    const next = clampInstant(
-      roundInstantToStep(block.anchorInstant + delta),
-      dayStart,
-      maxInstant,
-    );
-    onRetime(block, next);
+    onRetimeGroup(group, e.key === 'ArrowUp' ? -TIME_STEP_MS : TIME_STEP_MS);
   };
 
-  const color = med?.color ?? '#64748b';
-  const lateOrEarly = taken && block.anchorInstant !== block.scheduledInstant;
+  const summary = group.members
+    .map((m) => `${m.med?.name ?? m.medId} ${m.dose}${m.med?.unit ?? ''}`)
+    .join(', ');
 
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${med?.name ?? block.medId} ${block.dose}${med?.unit ?? ''} at ${wall}, ${block.status}. Drag or use arrow keys to change the time.`}
+      aria-label={`${group.label ?? wall} group at ${wall}: ${summary}. Drag or use arrow keys to re-time the group.`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onKeyDown={onKeyDown}
       data-block="true"
-      data-status={block.status}
-      className={`absolute flex touch-none select-none flex-col justify-center overflow-hidden rounded-md border px-2 text-xs shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted ${
+      className={`absolute flex touch-none select-none flex-col gap-0.5 overflow-hidden rounded-md border bg-slate-900/85 px-2 py-1 text-xs shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted ${
         preview != null ? 'z-20 cursor-grabbing ring-2 ring-accent-muted' : 'cursor-grab'
-      } ${taken ? 'border-transparent text-slate-950' : 'border-dashed bg-slate-900/80 text-slate-100'}`}
+      } ${group.hasLogged ? 'border-slate-700' : 'border-dashed border-slate-600'}`}
       style={{
         top,
-        height: BLOCK_HEIGHT,
-        left: `${(block.lane / block.laneCount) * 100}%`,
-        width: `calc(${(1 / block.laneCount) * 100}% - 4px)`,
-        backgroundColor: taken ? color : undefined,
-        borderColor: taken ? undefined : color,
+        height: GROUP_HEIGHT,
+        left: `${(group.lane / group.laneCount) * 100}%`,
+        width: `calc(${(1 / group.laneCount) * 100}% - 4px)`,
       }}
     >
-      <span className="flex items-center gap-1 truncate font-medium">
+      <span className="flex items-center gap-1 font-medium text-slate-100">
         <span className="tabular-nums">{wall}</span>
-        <span className="truncate">{med?.name ?? block.medId}</span>
+        {group.label && <span className="truncate text-slate-300">{group.label}</span>}
+        {group.members.length > 1 && (
+          <span className="text-[10px] text-slate-500">· {group.members.length} meds</span>
+        )}
+        {moved && <span className="text-[10px] text-accent-muted">· moving</span>}
+        {!group.hasLogged && anyMissed && !moved && (
+          <span className="text-[10px] text-status-missed">· missed</span>
+        )}
       </span>
-      <span className="truncate opacity-80">
-        {block.dose}
-        {med?.unit ?? ''}
-        {block.overridden ? ' · adjusted' : ''}
-        {lateOrEarly && preview == null ? ' · moved' : ''}
+      <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden">
+        {group.members.map((m) => (
+          <span key={m.medId} className="inline-flex items-center gap-1 truncate text-[11px]">
+            <ColorDot color={m.med?.color ?? '#64748b'} />
+            <span className={m.logEntryId ? 'text-slate-300' : 'text-slate-200'}>
+              {m.med?.name ?? m.medId}
+            </span>
+            <span className="tabular-nums opacity-70">
+              {m.dose}
+              {m.med?.unit ?? ''}
+            </span>
+            {m.logEntryId && <span className="text-[10px] text-status-taken">✓</span>}
+            {m.overridden && <span className="text-[10px] text-amber-400">·adj</span>}
+          </span>
+        ))}
       </span>
     </div>
   );
 }
 
 /**
- * Greedy lane packing so time-overlapping blocks sit side by side instead of on
- * top of each other. Pure layout (presentation only). Blocks are laid out from
- * their anchor instants; the dragged block floats above the rest transiently.
+ * Greedy lane packing so time-overlapping groups sit side by side instead of on
+ * top of each other. Pure layout (presentation only). Groups are laid out from
+ * their anchor instants; the dragged group floats above the rest transiently.
  */
-function assignLanes(raw: Omit<CalendarBlock, 'lane' | 'laneCount'>[]): CalendarBlock[] {
+function assignLanes(raw: Omit<CalendarGroup, 'lane' | 'laneCount'>[]): CalendarGroup[] {
   const sorted = [...raw].sort((a, b) => a.anchorInstant - b.anchorInstant);
   const laneEndY: number[] = []; // last occupied bottom-Y per lane
-  const placed: CalendarBlock[] = [];
-  for (const b of sorted) {
-    const topY = b.anchorInstant; // relative ordering is all that matters here
+  const placed: CalendarGroup[] = [];
+  for (const g of sorted) {
+    const topY = g.anchorInstant; // relative ordering is all that matters here
     let lane = laneEndY.findIndex((end) => end <= topY);
     if (lane === -1) {
       lane = laneEndY.length;
       laneEndY.push(0);
     }
-    // Reserve roughly BLOCK_HEIGHT worth of time so near-simultaneous doses split.
-    laneEndY[lane] = topY + (BLOCK_HEIGHT / PX_PER_HOUR) * 3_600_000;
-    placed.push({ ...b, lane, laneCount: 1 });
+    // Reserve roughly GROUP_HEIGHT worth of time so near-simultaneous groups split.
+    laneEndY[lane] = topY + (GROUP_HEIGHT / PX_PER_HOUR) * 3_600_000;
+    placed.push({ ...g, lane, laneCount: 1 });
   }
   const laneCount = Math.max(1, laneEndY.length);
-  return placed.map((b) => ({ ...b, laneCount }));
+  return placed.map((g) => ({ ...g, laneCount }));
 }
