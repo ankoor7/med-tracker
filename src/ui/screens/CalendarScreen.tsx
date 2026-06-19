@@ -9,6 +9,7 @@ import {
   DEFAULT_PX_PER_HOUR,
   HOURS_IN_DAY,
   TIME_STEP_MS,
+  addDaysToIsoDate,
   clampInstant,
   dayEndInstant,
   dayStartInstant,
@@ -23,13 +24,14 @@ import {
   type OccurrenceStatus,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Card } from '../components/ui';
+import { Button, Card } from '../components/ui';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { useNow } from '../lib/useNow';
 
 const PX_PER_HOUR = DEFAULT_PX_PER_HOUR;
 const BLOCK_HEIGHT = 38; // visual height of a dose block, in px
 const MOVE_THRESHOLD = 3; // px before a press counts as a drag, not a tap
+const SWIPE_THRESHOLD = 60; // horizontal px before a swipe changes the day
 
 // One draggable dose event on the day axis. Taken doses anchor at the time they
 // were actually taken; untaken occurrences anchor at their scheduled time.
@@ -59,15 +61,55 @@ export function CalendarScreen() {
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
 
-  const today = isoDateInZone(now, zone);
-  const dayStart = useMemo(() => dayStartInstant(today, zone), [today, zone]);
-  const dayEnd = useMemo(() => dayEndInstant(today, zone), [today, zone]);
+  // The day being viewed/adjusted. Defaults to today but can be moved back or
+  // forward (prev/next buttons or a horizontal swipe) so a dose missed late in a
+  // day can be logged the next morning.
+  const todayDate = isoDateInZone(now, zone);
+  const [selectedDate, setSelectedDate] = useState(todayDate);
+  const isToday = selectedDate === todayDate;
+  const goToDay = (delta: number) => setSelectedDate((d) => addDaysToIsoDate(d, delta));
+
+  const dayStart = useMemo(() => dayStartInstant(selectedDate, zone), [selectedDate, zone]);
+  const dayEnd = useMemo(() => dayEndInstant(selectedDate, zone), [selectedDate, zone]);
+
+  const dayLabel = useMemo(() => {
+    if (isToday) return 'Today';
+    if (selectedDate === addDaysToIsoDate(todayDate, -1)) return 'Yesterday';
+    if (selectedDate === addDaysToIsoDate(todayDate, 1)) return 'Tomorrow';
+    return new Intl.DateTimeFormat('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      timeZone: zone,
+    }).format(dayStart);
+  }, [isToday, selectedDate, todayDate, zone, dayStart]);
+
+  // Horizontal swipe on the day track changes the day. Gestures that start on a
+  // dose block (vertical re-time drags) are ignored, as are vertical-dominant
+  // moves, so block dragging and day swiping never fight each other.
+  const swipeRef = useRef<{ x: number; y: number; skip: boolean } | null>(null);
+  const onTrackPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    swipeRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      skip: Boolean((e.target as HTMLElement).closest('[data-block="true"]')),
+    };
+  };
+  const onTrackPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || s.skip) return;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) <= Math.abs(dy)) return;
+    goToDay(dx < 0 ? 1 : -1); // swipe left → next day, swipe right → previous day
+  };
 
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
 
   const blocks = useMemo<CalendarBlock[]>(() => {
     const planned = plannedSlotsForDate(
-      today,
+      selectedDate,
       slots,
       medications,
       doseLog,
@@ -98,7 +140,7 @@ export function CalendarScreen() {
       }
     }
     return assignLanes(raw);
-  }, [today, slots, medications, doseLog, zone, now, doseOverrides, medById]);
+  }, [selectedDate, slots, medications, doseLog, zone, now, doseOverrides, medById]);
 
   const onRetime = (block: CalendarBlock, instant: Instant) => {
     if (block.logEntryId) adjustDoseTime(block.logEntryId, instant);
@@ -115,63 +157,94 @@ export function CalendarScreen() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Day calendar</h2>
-        <span className="text-xs text-slate-400">{today}</span>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={() => goToDay(-1)}
+          aria-label="Previous day"
+          className="rounded-md px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted"
+        >
+          ‹
+        </button>
+        <div className="flex flex-col items-center">
+          <h2 className="text-base font-semibold">{dayLabel}</h2>
+          <span className="text-xs tabular-nums text-slate-400">{selectedDate}</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => goToDay(1)}
+          aria-label="Next day"
+          className="rounded-md px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted"
+        >
+          ›
+        </button>
       </div>
 
-      <p className="text-xs text-slate-400">
-        Drag a dose up or down to change its time (snaps to 5 minutes). Taken doses re-time in
-        place; tap an upcoming dose to log it.
-      </p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-slate-400">
+          Drag a dose up or down to change its time (snaps to 5 minutes); tap an upcoming dose to
+          log it. Swipe left/right to change day.
+        </p>
+        {!isToday && (
+          <Button
+            variant="secondary"
+            onClick={() => setSelectedDate(todayDate)}
+            className="shrink-0 px-2 py-1 text-xs"
+          >
+            Today
+          </Button>
+        )}
+      </div>
 
-      <Card className="overflow-hidden p-0">
-        <div className="flex" style={{ height: HOURS_IN_DAY * PX_PER_HOUR }}>
-          {/* Hour gutter */}
-          <div className="relative w-12 shrink-0 border-r border-slate-800">
-            {Array.from({ length: HOURS_IN_DAY }, (_, h) => (
-              <div
-                key={h}
-                className="absolute right-1 -translate-y-1/2 text-[10px] tabular-nums text-slate-500"
-                style={{ top: h * PX_PER_HOUR }}
-              >
-                {String(h).padStart(2, '0')}:00
-              </div>
-            ))}
-          </div>
+      <div onPointerDown={onTrackPointerDown} onPointerUp={onTrackPointerUp}>
+        <Card className="overflow-hidden p-0">
+          <div className="flex" style={{ height: HOURS_IN_DAY * PX_PER_HOUR }}>
+            {/* Hour gutter */}
+            <div className="relative w-12 shrink-0 border-r border-slate-800">
+              {Array.from({ length: HOURS_IN_DAY }, (_, h) => (
+                <div
+                  key={h}
+                  className="absolute right-1 -translate-y-1/2 text-[10px] tabular-nums text-slate-500"
+                  style={{ top: h * PX_PER_HOUR }}
+                >
+                  {String(h).padStart(2, '0')}:00
+                </div>
+              ))}
+            </div>
 
-          {/* Track */}
-          <div className="relative flex-1">
-            {Array.from({ length: HOURS_IN_DAY }, (_, h) => (
-              <div
-                key={h}
-                className="absolute inset-x-0 border-t border-slate-800/60"
-                style={{ top: h * PX_PER_HOUR }}
-              />
-            ))}
-            {/* "Now" marker */}
-            {now >= dayStart && now <= dayEnd && (
-              <div
-                className="absolute inset-x-0 z-10 border-t border-accent-muted/70"
-                style={{ top: instantToDayY(now, dayStart, PX_PER_HOUR) }}
-                aria-hidden
-              />
-            )}
-            {blocks.map((block) => (
-              <DoseBlock
-                key={block.key}
-                block={block}
-                dayStart={dayStart}
-                dayEnd={dayEnd}
-                now={now}
-                zone={zone}
-                onRetime={onRetime}
-                onLog={onLog}
-              />
-            ))}
+            {/* Track */}
+            <div className="relative flex-1">
+              {Array.from({ length: HOURS_IN_DAY }, (_, h) => (
+                <div
+                  key={h}
+                  className="absolute inset-x-0 border-t border-slate-800/60"
+                  style={{ top: h * PX_PER_HOUR }}
+                />
+              ))}
+              {/* "Now" marker */}
+              {now >= dayStart && now <= dayEnd && (
+                <div
+                  className="absolute inset-x-0 z-10 border-t border-accent-muted/70"
+                  style={{ top: instantToDayY(now, dayStart, PX_PER_HOUR) }}
+                  aria-hidden
+                />
+              )}
+              {blocks.map((block) => (
+                <DoseBlock
+                  key={block.key}
+                  block={block}
+                  dayStart={dayStart}
+                  dayEnd={dayEnd}
+                  now={now}
+                  zone={zone}
+                  onRetime={onRetime}
+                  onLog={onLog}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      </Card>
+        </Card>
+      </div>
 
       {target && <DoseLogger target={target} onClose={() => setTarget(null)} />}
     </div>
@@ -274,6 +347,7 @@ function DoseBlock({
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onKeyDown={onKeyDown}
+      data-block="true"
       data-status={block.status}
       className={`absolute flex touch-none select-none flex-col justify-center overflow-hidden rounded-md border px-2 text-xs shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted ${
         preview != null ? 'z-20 cursor-grabbing ring-2 ring-accent-muted' : 'cursor-grab'
