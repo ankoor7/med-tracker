@@ -64,6 +64,30 @@ supabase stop         # stop the stack (pnpm local:down)
    the static host's env as `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY`.
 4. Build and deploy the static PWA (`pnpm deploy` defaults to Cloudflare Pages).
 
+## Background Web Push (optional)
+
+Reminders work offline with no backend (in-app catch-up). To deliver push
+notifications when the app is **closed**, enable the relay added in migration
+`0005_push_notifications.sql` + the `send-push` Edge Function:
+
+1. Generate a VAPID keypair: `npx web-push generate-vapid-keys`.
+2. Ship the **public** key to the client as `VITE_VAPID_PUBLIC_KEY` (not secret).
+3. Deploy the function and set its secrets (the private key never leaves the server):
+   ```sh
+   supabase functions deploy send-push
+   supabase secrets set VAPID_PUBLIC_KEY=<public> VAPID_PRIVATE_KEY=<private> \
+     VAPID_SUBJECT=mailto:you@example.com
+   ```
+4. Schedule it ~every minute (pg_cron + pg_net) — see the commented `cron.schedule`
+   block at the bottom of the migration (needs your project ref + a Vault secret).
+
+How it works: the client computes reminder timing (`src/core/reminders.ts`) and
+mirrors upcoming reminders into `scheduled_pushes`, registering each device in
+`push_subscriptions`. `send-push` delivers what is due. The server does **no**
+schedule math, so there is no timing logic to keep in parity with the client. A
+push carries only that a dose is due — never an amount — and its "Mark taken"
+action records the dose the user already scheduled.
+
 ### Security notes
 
 - The **anon key is publishable** — it only lets the client reach PostgREST/GoTrue;

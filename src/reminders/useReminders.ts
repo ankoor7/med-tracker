@@ -32,6 +32,7 @@ import {
   saveRuntimeState,
   type ReminderRuntimeState,
 } from './prefs';
+import { disablePush, ensurePushSubscription, pushConfigured, syncScheduledPushes } from './push';
 
 // setTimeout is unreliable for very long delays; cap scheduling and let the
 // periodic re-process pick up anything beyond the cap as its time approaches.
@@ -47,6 +48,8 @@ export interface UseReminders {
   enableNotifications: () => Promise<void>;
   catchUp: ScheduledReminder[];
   dismissCatchUp: () => void;
+  /** True when background Web Push is available (backend + VAPID configured). */
+  backgroundPushAvailable: boolean;
 }
 
 export function useReminders(): UseReminders {
@@ -202,10 +205,44 @@ export function useReminders(): UseReminders {
     now,
   ]);
 
+  // Background push relay: when enabled + permitted + configured, register this
+  // device and mirror the upcoming reminders to the server so they deliver while
+  // the app is closed. Recomputes only when the data/prefs change (not every
+  // tick) to keep server writes minimal — `now` is read fresh inside instead.
+  useEffect(() => {
+    if (!hydrated || !prefs?.enabled || permission !== 'granted' || !pushConfigured()) return;
+    let live = true;
+    void (async () => {
+      const ok = await ensurePushSubscription();
+      if (!ok || !live) return;
+      const at = Date.now();
+      const dose = computeDoseReminders(slots, medications, doseLog, settings.zone, at, prefs);
+      const followUps: ScheduledReminder[] = [];
+      if (prefs.followUpEnabled) {
+        const medById = new Map(medications.map((m) => [m.id, m]));
+        for (const entry of doseLog) {
+          if (entry.deleted || entry.status !== 'taken') continue;
+          const med = medById.get(entry.medId);
+          if (!med) continue;
+          const r = followUpReminder(entry, med, at, prefs);
+          if (r) followUps.push(r);
+        }
+      }
+      await syncScheduledPushes([...dose, ...followUps]);
+    })();
+    return () => {
+      live = false;
+    };
+    // Reads `Date.now()` fresh inside rather than depending on the ticking `now`,
+    // so the relay re-runs on plan/pref changes — not every 30s tick.
+  }, [hydrated, prefs, permission, slots, medications, doseLog, settings.zone]);
+
   const setPrefs = useCallback((patch: Partial<ReminderPrefs>) => {
     setPrefsState((prev) => {
       const next = { ...(prev ?? ({} as ReminderPrefs)), ...patch } as ReminderPrefs;
       void savePrefs(next);
+      // Turning reminders off on this device tears down its push subscription.
+      if (patch.enabled === false) void disablePush();
       return next;
     });
   }, []);
@@ -239,5 +276,6 @@ export function useReminders(): UseReminders {
     enableNotifications,
     catchUp,
     dismissCatchUp,
+    backgroundPushAvailable: pushConfigured(),
   };
 }
