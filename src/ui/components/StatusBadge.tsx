@@ -1,10 +1,10 @@
 import type { OccurrenceStatus } from '../../core';
 
 const STYLES: Record<OccurrenceStatus, string> = {
-  taken: 'bg-green-950 text-status-taken border-green-800',
-  due: 'bg-yellow-950 text-status-due border-yellow-800',
-  missed: 'bg-red-950 text-status-missed border-red-800',
-  upcoming: 'bg-slate-800 text-status-upcoming border-slate-700',
+  taken: 'bg-status-taken/15 text-status-taken border-status-taken/30',
+  due: 'bg-status-due/15 text-status-due border-status-due/30',
+  missed: 'bg-status-missed/15 text-status-missed border-status-missed/30',
+  upcoming: 'bg-slate-700/40 text-slate-300 border-white/10',
 };
 
 const LABELS: Record<OccurrenceStatus, string> = {

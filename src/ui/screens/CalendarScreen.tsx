@@ -208,19 +208,19 @@ export function CalendarScreen() {
           type="button"
           onClick={() => goToDay(-1)}
           aria-label="Previous day"
-          className="rounded-md px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted"
+          className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted"
         >
           ‹
         </button>
         <div className="flex flex-col items-center">
-          <h2 className="text-base font-semibold">{dayLabel}</h2>
+          <h2 className="text-lg font-semibold tracking-tight">{dayLabel}</h2>
           <span className="text-xs tabular-nums text-slate-400">{selectedDate}</span>
         </div>
         <button
           type="button"
           onClick={() => goToDay(1)}
           aria-label="Next day"
-          className="rounded-md px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted"
+          className="rounded-full px-3 py-1 text-xl leading-none text-slate-400 hover:bg-slate-800 hover:text-slate-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted"
         >
           ›
         </button>

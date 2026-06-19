@@ -7,7 +7,7 @@ import {
   type PlannedOccurrence,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card, ColorDot } from '../components/ui';
+import { Button, Card, ColorDot, Ring, Stat } from '../components/ui';
 import { StatusBadge } from '../components/StatusBadge';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { useNow } from '../lib/useNow';
@@ -30,12 +30,43 @@ export function TodayScreen() {
   );
   const medById = new Map(medications.map((m) => [m.id, m]));
 
+  const occurrences = planned.flatMap((s) => s.occurrences);
+  const total = occurrences.length;
+  const taken = occurrences.filter((o) => o.status === 'taken').length;
+  const missed = occurrences.filter((o) => o.status === 'missed').length;
+  const remaining = total - taken;
+  const pct = total > 0 ? taken / total : 0;
+  const ringColor = total > 0 && taken === total ? '#4ade80' : '#2cb1a6';
+
+  const dateLabel = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    timeZone: zone,
+  }).format(now);
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Today</h2>
-        <span className="text-xs text-slate-400">{today}</span>
+        <h2 className="text-2xl font-semibold tracking-tight">Today</h2>
+        <span className="text-xs text-slate-400">{dateLabel}</span>
       </div>
+
+      {total > 0 && (
+        <Card className="flex flex-col items-center gap-5 py-7">
+          <Ring value={pct} color={ringColor} aria-label={`${taken} of ${total} doses taken today`}>
+            <span className="text-4xl font-semibold tabular-nums text-slate-50">
+              {taken}
+              <span className="text-2xl text-slate-500">/{total}</span>
+            </span>
+            <span className="mt-1 text-xs uppercase tracking-wide text-slate-400">doses taken</span>
+          </Ring>
+          <div className="flex items-center gap-8">
+            <Stat value={remaining} label="Remaining" />
+            {missed > 0 && <Stat value={missed} label="Missed" />}
+          </div>
+        </Card>
+      )}
 
       {planned.length === 0 && (
         <Card>

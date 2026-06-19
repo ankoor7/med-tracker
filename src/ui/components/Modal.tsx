@@ -30,16 +30,16 @@ export function Modal({ title, onClose, children }: ModalProps) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="w-full max-w-md rounded-t-xl border border-slate-800 bg-slate-900 p-4 shadow-xl outline-none sm:rounded-xl"
+        className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-900/95 p-5 shadow-soft outline-none backdrop-blur-md sm:rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold">{title}</h2>
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-semibold">{title}</h2>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close"
-            className="rounded-md px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+            className="rounded-full px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
           >
             ✕
           </button>
