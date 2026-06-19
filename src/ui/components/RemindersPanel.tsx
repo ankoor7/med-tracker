@@ -5,8 +5,15 @@ import { Button, Card, Field, inputClass } from './ui';
 // Reminder settings (Stage 6): permission UX, global enable + lead time,
 // per-slot mute toggles, and an honest note on platform limits (FR-6.5).
 export function RemindersPanel() {
-  const { prefs, permission, supported, setPrefs, toggleSlotMuted, enableNotifications } =
-    useRemindersContext();
+  const {
+    prefs,
+    permission,
+    supported,
+    setPrefs,
+    toggleSlotMuted,
+    enableNotifications,
+    backgroundPushAvailable,
+  } = useRemindersContext();
   const slots = useStore((s) => s.slots).filter((s) => !s.deleted);
 
   return (
@@ -90,9 +97,17 @@ export function RemindersPanel() {
         </div>
       )}
 
+      {permission === 'granted' && prefs.enabled && (
+        <p className="mt-3 text-xs text-accent-muted">
+          {backgroundPushAvailable
+            ? 'Background push is on — reminders are delivered to this device even when the app is closed.'
+            : 'Background push is not configured for this deployment; reminders fire while the app is open and appear as in-app catch-up otherwise.'}
+        </p>
+      )}
+
       <p className="mt-3 text-xs text-slate-500">
-        Web notifications only fire while the app is open or installed; background delivery is
-        limited and varies by platform. Missed reminders appear as in-app catch-up on reopen.
+        Reminders never mention how much to take. Without background push, web notifications only
+        fire while the app is open or installed and missed ones appear as in-app catch-up on reopen.
       </p>
     </Card>
   );

@@ -8,8 +8,14 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Stage 0 baseline: precache the app shell only. No notifications (Stage 6).
-      workbox: {
+      // injectManifest (Stage 6 follow-up): a custom service worker (src/sw.ts)
+      // adds `push` + `notificationclick` handlers for background Web Push while
+      // still precaching the app shell via the injected manifest.
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
+      injectRegister: 'auto',
+      injectManifest: {
         globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
       },
       manifest: {

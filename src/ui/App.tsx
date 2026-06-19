@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store/store';
+import { parseTakeParam } from '../reminders/push';
 import { RemindersProvider } from '../reminders/context';
 import { Disclaimer } from './components/Disclaimer';
 import { CatchUpBanner } from './components/CatchUpBanner';
@@ -21,6 +22,31 @@ export default function App() {
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  // "Mark taken" from a push notification (Stage 6 follow-up). A cold-started app
+  // carries the instruction in `?take=slotId|scheduledInstant`; a running app
+  // receives it as a message from the service worker. Both record the dose the
+  // user already scheduled (the app never originates an amount). Runs after
+  // hydration so the slot/group is loaded.
+  useEffect(() => {
+    if (!hydrated) return;
+    const take = parseTakeParam(window.location.search);
+    if (take) {
+      useStore.getState().takeGroup(take.slotId, take.scheduledInstant);
+      const url = new URL(window.location.href);
+      url.searchParams.delete('take');
+      window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+    }
+    if (!('serviceWorker' in navigator)) return;
+    const onMessage = (e: MessageEvent) => {
+      const data = e.data as { type?: string; url?: string } | null;
+      if (data?.type !== 'steadydose:take' || !data.url) return;
+      const t = parseTakeParam(new URL(data.url, window.location.origin).search);
+      if (t) useStore.getState().takeGroup(t.slotId, t.scheduledInstant);
+    };
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => navigator.serviceWorker.removeEventListener('message', onMessage);
+  }, [hydrated]);
 
   return (
     <RemindersProvider>
