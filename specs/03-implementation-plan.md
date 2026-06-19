@@ -34,6 +34,10 @@ Do not start a stage before its prerequisites are met. The domain core (Stage 1)
 | 11 | Logging-Time UX | 1, 2 | Fast custom "time taken" entry: 5-minute steps + quick presets |
 | 12 | Next-Dose Override | 1, 2, 4, 5, 8 | One-time, synced override of the next scheduled dose's amount |
 | 13 | Calendar Drag-to-Adjust Dose Times | 1, 2, 11, 12 | Vertical day-calendar; drag dose blocks to re-time (5-min snap, zone-aware) |
+| 14 | Oura Ring Health Data & Correlations | 1, 2, 7 | Oura metrics overlaid on adherence for eyeball correlation |
+| 15 | Health-Condition Event Tracking | 1, 2, 4, 5, 8 | User-defined event types + synced flare-up logging |
+| 16 | Regimen Change Markers | 1, 2, 4, 5, 7, 8 | Synced prescription/schedule change records as dated, grouped, tappable markers on charts |
+| 17 | GP Adherence Summary | 1, 2, 7, 15, (16) | On-device clinician report of adherence + flare-ups; print/PDF/share, optional opt-in email |
 
 ```mermaid
 flowchart LR
