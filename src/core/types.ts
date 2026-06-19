@@ -78,6 +78,44 @@ export interface DoseOverride {
   deleted?: boolean;
 }
 
+// --- Regimen change markers (Stage 16) ---------------------------------------
+// A dated record of a prescription or schedule edit, derived by diffing the
+// previous vs next entity inside the store action that performs the edit. The
+// app never originates a change — it records the edits the user makes. Surfaced
+// as same-day-grouped, tappable markers on the timeline charts.
+
+export type RegimenChangeKind =
+  | 'medication-added'
+  | 'medication-updated' // name, unit, half-life, timing-sensitivity, guardrails, notes
+  | 'medication-retired' // active → false (or deleted)
+  | 'slot-added'
+  | 'slot-updated' // time, label, or a per-med amount in the slot
+  | 'slot-removed';
+
+// One concrete field that changed, in display-ready form. `from`/`to` are
+// pre-formatted strings (e.g. "100mg", "08:00") so rendering needs no schema;
+// null means the value was newly set (`from`) or cleared/removed (`to`).
+export interface RegimenFieldChange {
+  field: string; // e.g. "Morning dose", "Name", "Max single dose", "Time"
+  from: string | null;
+  to: string | null;
+}
+
+export interface RegimenChange {
+  id: string;
+  changedAt: Instant; // when the edit happened (UTC ms) — places the marker
+  zone: IanaZone; // zone in effect when changed (stable date placement)
+  kind: RegimenChangeKind;
+  medId?: string; // affected medication, when applicable
+  slotId?: string; // affected slot, when applicable
+  summary: string; // one-line human summary
+  changes: RegimenFieldChange[]; // the field-level diff (>= 1)
+  note?: string; // optional free-text the user can add
+  updatedAt: Instant; // sync metadata (equal to changedAt at creation)
+  version?: number;
+  deleted?: boolean;
+}
+
 export interface Settings {
   zone: IanaZone;
   adherenceWindowDays: number;

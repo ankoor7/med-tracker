@@ -12,6 +12,7 @@ import {
   type Instant,
 } from '../../core';
 import { useStore } from '../../store/store';
+import { useScheduleData } from '../lib/useScheduleData';
 import { Button, Field, inputClass } from './ui';
 import { Modal } from './Modal';
 
@@ -28,10 +29,7 @@ export interface LoggerTarget {
 }
 
 export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose: () => void }) {
-  const medications = useStore((s) => s.medications);
-  const slots = useStore((s) => s.slots);
-  const doseLog = useStore((s) => s.doseLog);
-  const zone = useStore((s) => s.settings.zone);
+  const { medications, slots, doseLog, zone } = useScheduleData();
   const logDose = useStore((s) => s.logDose);
   const setDoseOverride = useStore((s) => s.setDoseOverride);
 
