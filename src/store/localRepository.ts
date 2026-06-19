@@ -4,6 +4,7 @@
 
 import Dexie, { type Table } from 'dexie';
 import { isNewerRecord, type SyncRecord } from '../core/cloudRecord';
+import type { OuraDaySummary } from '../core/oura';
 import type {
   Dataset,
   DoseLogEntry,
@@ -34,6 +35,7 @@ export class SteadyDoseDB extends Dexie {
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<SyncRecord, string>;
+  ouraDaily!: Table<OuraDaySummary, string>;
 
   constructor(name = 'steadydose') {
     super(name);
@@ -53,6 +55,11 @@ export class SteadyDoseDB extends Dexie {
     // v3 (Stage 12): one-time next-dose overrides; same index shape as doseLog.
     this.version(3).stores({
       doseOverrides: 'id, updatedAt, deleted, medId, slotId',
+    });
+    // v4 (Stage 13): cached Oura health data, one row per calendar day. Not a
+    // synced `record`; replaced wholesale on each fetch.
+    this.version(4).stores({
+      ouraDaily: 'day',
     });
   }
 }
@@ -179,6 +186,19 @@ export class LocalRepository implements Repository {
 
   async setMeta(key: string, value: string): Promise<void> {
     await this.db.meta.put({ key, value });
+  }
+
+  async loadOura(): Promise<OuraDaySummary[]> {
+    const rows = await this.db.ouraDaily.toArray();
+    return rows.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+  }
+
+  async saveOura(summaries: OuraDaySummary[]): Promise<void> {
+    // The cache is a full-replacement snapshot of the last fetch window.
+    await this.db.transaction('rw', this.db.ouraDaily, async () => {
+      await this.db.ouraDaily.clear();
+      await this.db.ouraDaily.bulkPut(summaries);
+    });
   }
 
   /** Write a whole dataset (used after a migration). */
