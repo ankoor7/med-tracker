@@ -6,7 +6,7 @@
     },
     "supabase": {
       "type": "http",
-      "url": "http://localhost:54321/mcp?features=docs%2Cdatabase%2Cdevelopment%2Cdebugging"
+      "url": "https://mcp.supabase.com/mcp?project_ref=wrkwygwzycgukwhsiokz"
     }
   }
 }
