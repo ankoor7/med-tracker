@@ -16,7 +16,7 @@ export function ScheduleScreen() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Schedule</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Schedule</h2>
         <Button onClick={() => setEditing('new')}>Add time-slot</Button>
       </div>
 

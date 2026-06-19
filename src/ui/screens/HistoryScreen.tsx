@@ -99,7 +99,7 @@ export function HistoryScreen() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">History</h2>
+      <h2 className="text-2xl font-semibold tracking-tight">History</h2>
 
       <AccountPanel />
 

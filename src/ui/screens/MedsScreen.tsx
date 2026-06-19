@@ -25,7 +25,7 @@ export function MedsScreen() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Medications</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Medications</h2>
         <Button onClick={() => setEditing('new')}>Add medication</Button>
       </div>
 

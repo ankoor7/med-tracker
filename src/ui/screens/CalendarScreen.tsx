@@ -116,7 +116,7 @@ export function CalendarScreen() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-baseline justify-between">
-        <h2 className="text-lg font-semibold">Day calendar</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Day calendar</h2>
         <span className="text-xs text-slate-400">{today}</span>
       </div>
 

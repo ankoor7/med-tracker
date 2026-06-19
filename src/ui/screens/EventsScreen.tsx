@@ -50,7 +50,7 @@ export function EventsScreen() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Events</h2>
+        <h2 className="text-2xl font-semibold tracking-tight">Events</h2>
         <div className="flex gap-2">
           <Button variant="secondary" onClick={() => setEditingType('new')}>
             New type
