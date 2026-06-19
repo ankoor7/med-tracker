@@ -1,10 +1,68 @@
 // Safety disclaimer — the app originates no dose and is not a medical device.
 // PRD §9 risk mitigation; cross-cutting safety concern.
+//
+// The banner is dismissable and stays hidden across reloads. The dismissal is a
+// per-device UI preference, so it persists in the repository `meta` table (not
+// synced) — same channel as reminder prefs (`reminders/prefs.ts`).
+
+import { useEffect, useState } from 'react';
+import { getRepository } from '../../store/repository';
+
+const DISMISS_KEY = 'disclaimerDismissed';
+
 export function Disclaimer() {
+  // 'loading' renders nothing so the banner never flashes in then out once we
+  // learn it was previously dismissed.
+  const [state, setState] = useState<'loading' | 'shown' | 'hidden'>('loading');
+
+  useEffect(() => {
+    let live = true;
+    void getRepository()
+      .getMeta(DISMISS_KEY)
+      .then((v) => {
+        if (live) setState(v === 'true' ? 'hidden' : 'shown');
+      })
+      .catch(() => {
+        if (live) setState('shown');
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  if (state !== 'shown') return null;
+
+  const dismiss = () => {
+    setState('hidden');
+    void getRepository()
+      .setMeta(DISMISS_KEY, 'true')
+      .catch((e) => console.error('persist disclaimer dismissal failed', e));
+  };
+
   return (
-    <p className="border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-xs text-amber-300/90">
-      SteadyDose records and checks doses against limits you set — it does not calculate doses or
-      give medical advice. Confirm your regimen with a clinician.
-    </p>
+    <div className="flex items-start gap-2 border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-xs text-amber-300/90">
+      <p className="flex-1">
+        SteadyDose records and checks doses against limits you set — it does not calculate doses or
+        give medical advice. Confirm your regimen with a clinician.
+      </p>
+      <button
+        type="button"
+        onClick={dismiss}
+        aria-label="Dismiss disclaimer"
+        className="-mr-1 shrink-0 rounded p-0.5 text-amber-300/70 hover:bg-amber-900/40 hover:text-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400/60"
+      >
+        <svg
+          viewBox="0 0 20 20"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          className="h-4 w-4"
+          aria-hidden
+        >
+          <path d="M5 5l10 10M15 5L5 15" />
+        </svg>
+      </button>
+    </div>
   );
 }
