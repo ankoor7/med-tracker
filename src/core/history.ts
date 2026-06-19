@@ -73,6 +73,7 @@ export function adherenceTimeline(
   zone: IanaZone,
   windowDays: number,
   now: Instant,
+  assumeTakenOnTime = false,
 ): AdherenceDay[] {
   const timingSensitive = medications.filter((m) => m.adjustWhenLate && m.active && !m.deleted);
   const today = isoDateInZone(now, zone);
@@ -82,7 +83,16 @@ export function adherenceTimeline(
   const timeline: AdherenceDay[] = [];
   for (let i = 0; i < days; i++) {
     const date = addDaysToIsoDate(from, i);
-    const planned = plannedSlotsForDate(date, slots, timingSensitive, log, zone, now);
+    const planned = plannedSlotsForDate(
+      date,
+      slots,
+      timingSensitive,
+      log,
+      zone,
+      now,
+      [],
+      assumeTakenOnTime,
+    );
     let taken = 0;
     let missed = 0;
     for (const slot of planned) {

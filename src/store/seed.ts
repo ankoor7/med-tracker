@@ -98,6 +98,7 @@ export function seedDataset(now: number): Dataset {
       zone: hostZone,
       adherenceWindowDays: 7,
       missedDayThreshold: 3,
+      assumeTakenOnTime: true,
       updatedAt: now,
       version: 1,
     },

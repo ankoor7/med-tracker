@@ -29,6 +29,7 @@ export function computeAdherence(
   windowDays: number,
   missedThreshold: number,
   now: Instant,
+  assumeTakenOnTime = false,
 ): AdherenceResult {
   const timingSensitive = medications.filter((m) => m.adjustWhenLate && m.active && !m.deleted);
   const today = isoDateInZone(now, zone);
@@ -40,7 +41,16 @@ export function computeAdherence(
 
   for (let i = 0; i < windowDays; i++) {
     const date = addDaysToIsoDate(from, i);
-    const planned = plannedSlotsForDate(date, slots, timingSensitive, log, zone, now);
+    const planned = plannedSlotsForDate(
+      date,
+      slots,
+      timingSensitive,
+      log,
+      zone,
+      now,
+      [],
+      assumeTakenOnTime,
+    );
     for (const slot of planned) {
       for (const occ of slot.occurrences) {
         if (occ.status === 'taken') {

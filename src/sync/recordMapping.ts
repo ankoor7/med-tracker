@@ -67,6 +67,7 @@ export function toSyncRecord(table: TableName, entity: StoredEntity): SyncRecord
         zone: s.zone,
         adherenceWindowDays: s.adherenceWindowDays,
         missedDayThreshold: s.missedDayThreshold,
+        assumeTakenOnTime: s.assumeTakenOnTime,
       },
     };
   }
@@ -108,6 +109,7 @@ export function fromSyncRecord(rec: SyncRecord): MappedEntity {
         zone: p.zone,
         adherenceWindowDays: p.adherenceWindowDays,
         missedDayThreshold: p.missedDayThreshold,
+        assumeTakenOnTime: p.assumeTakenOnTime,
         updatedAt: rec.updatedAt,
         version: rec.version,
       } as StoredEntity,

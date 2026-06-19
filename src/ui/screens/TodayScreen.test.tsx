@@ -18,7 +18,9 @@ function seed(
     medications: meds,
     slots,
     doseLog: [],
-    settings: settings({ zone: ZONE }),
+    // These scenarios exercise the explicit log/missed/due flow, so opt out of the
+    // assume-taken-on-time policy (default on); its own behaviour is covered below.
+    settings: settings({ zone: ZONE, assumeTakenOnTime: false }),
   });
 }
 
@@ -151,5 +153,50 @@ describe('TodayScreen', () => {
     expect(within(rowAAfter).getByText('Taken')).toBeInTheDocument();
     const rowB = screen.getByText('MedB').closest('li')!;
     expect(within(rowB).getByRole('button', { name: 'Log' })).toBeInTheDocument();
+  });
+
+  describe('assume taken on time (default on)', () => {
+    function seedAssumed() {
+      useStore.setState({
+        hydrated: true,
+        medications: [med({ id: 'a', name: 'Lamotrigine', unit: 'mg', adjustWhenLate: true })],
+        slots: [
+          slot({ id: 's1', time: '08:00', label: 'Morning', items: [{ medId: 'a', dose: 100 }] }),
+        ],
+        doseLog: [],
+        settings: settings({ zone: ZONE, assumeTakenOnTime: true }),
+      });
+    }
+
+    it('a past, unlogged dose reads as "On time" with an Edit affordance, not Missed', () => {
+      seedAssumed();
+      render(<TodayScreen />);
+
+      const row = screen.getByText('Lamotrigine').closest('li')!;
+      expect(within(row).getByText('On time')).toBeInTheDocument();
+      expect(within(row).queryByText('Missed')).not.toBeInTheDocument();
+      // No real entry exists yet — it is assumed, not logged.
+      expect(activeLog()).toHaveLength(0);
+      // It stays editable so the user can correct it to a late/different dose.
+      expect(within(row).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    });
+
+    it('editing an assumed dose writes a real log entry (the only way it becomes late)', () => {
+      seedAssumed();
+      render(<TodayScreen />);
+
+      const row = screen.getByText('Lamotrigine').closest('li')!;
+      fireEvent.click(within(row).getByRole('button', { name: 'Edit' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: /log dose/i }),
+      );
+
+      // It is now an explicitly-logged dose: a real entry, and the badge flips
+      // from "On time" (assumed) to "Taken".
+      expect(activeLog().map((e) => e.status)).toEqual(['taken']);
+      const after = screen.getByText('Lamotrigine').closest('li')!;
+      expect(within(after).getByText('Taken')).toBeInTheDocument();
+      expect(within(after).queryByText('On time')).not.toBeInTheDocument();
+    });
   });
 });

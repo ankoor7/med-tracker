@@ -28,6 +28,7 @@ import { Button, Card, ColorDot } from '../components/ui';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { GroupLogger, type GroupLoggerTarget } from '../components/GroupLogger';
 import { useNow } from '../lib/useNow';
+import { useScheduleData } from '../lib/useScheduleData';
 
 const PX_PER_HOUR = DEFAULT_PX_PER_HOUR;
 const GROUP_HEIGHT = 46; // visual height of a dose-group block, in px
@@ -65,11 +66,7 @@ interface CalendarGroup {
 
 export function CalendarScreen() {
   const now = useNow();
-  const zone = useStore((s) => s.settings.zone);
-  const medications = useStore((s) => s.medications);
-  const slots = useStore((s) => s.slots);
-  const doseLog = useStore((s) => s.doseLog);
-  const doseOverrides = useStore((s) => s.doseOverrides);
+  const { zone, assumeTakenOnTime, medications, slots, doseLog, doseOverrides } = useScheduleData();
   const adjustDoseTime = useStore((s) => s.adjustDoseTime);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
@@ -130,6 +127,7 @@ export function CalendarScreen() {
       zone,
       now,
       doseOverrides,
+      assumeTakenOnTime,
     );
     const raw: Omit<CalendarGroup, 'lane' | 'laneCount'>[] = [];
     for (const slot of planned) {
@@ -162,7 +160,17 @@ export function CalendarScreen() {
       });
     }
     return assignLanes(raw);
-  }, [selectedDate, slots, medications, doseLog, zone, now, doseOverrides, medById]);
+  }, [
+    selectedDate,
+    slots,
+    medications,
+    doseLog,
+    zone,
+    now,
+    doseOverrides,
+    assumeTakenOnTime,
+    medById,
+  ]);
 
   // Re-time every logged member of a group by the same delta (drag / arrow keys).
   const onRetimeGroup = (group: CalendarGroup, delta: number) => {

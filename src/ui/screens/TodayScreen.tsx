@@ -11,22 +11,29 @@ import { Button, Card, ColorDot, Ring, Stat } from '../components/ui';
 import { StatusBadge } from '../components/StatusBadge';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { useNow } from '../lib/useNow';
+import { useScheduleData } from '../lib/useScheduleData';
 
 export function TodayScreen() {
   const now = useNow();
-  const zone = useStore((s) => s.settings.zone);
-  const medications = useStore((s) => s.medications);
-  const slots = useStore((s) => s.slots);
-  const doseLog = useStore((s) => s.doseLog);
-  const doseOverrides = useStore((s) => s.doseOverrides);
+  const { zone, assumeTakenOnTime, medications, slots, doseLog, doseOverrides } = useScheduleData();
   const takeGroup = useStore((s) => s.takeGroup);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
 
   const today = isoDateInZone(now, zone);
   const planned = useMemo(
-    () => plannedSlotsForDate(today, slots, medications, doseLog, zone, now, doseOverrides),
-    [today, slots, medications, doseLog, zone, now, doseOverrides],
+    () =>
+      plannedSlotsForDate(
+        today,
+        slots,
+        medications,
+        doseLog,
+        zone,
+        now,
+        doseOverrides,
+        assumeTakenOnTime,
+      ),
+    [today, slots, medications, doseLog, zone, now, doseOverrides, assumeTakenOnTime],
   );
   const medById = new Map(medications.map((m) => [m.id, m]));
 
@@ -150,14 +157,23 @@ function OccurrenceRow({
           </span>
         )}
       </div>
-      <div className="flex shrink-0 items-center gap-2">
-        <StatusBadge status={occ.status} />
-        {occ.status !== 'taken' && (
-          <Button variant="secondary" onClick={onLog}>
-            Log
-          </Button>
-        )}
-      </div>
+      <OccurrenceActions occ={occ} onLog={onLog} />
     </li>
+  );
+}
+
+// An assumed-taken dose stays editable (so the user can mark it late/missed); an
+// explicitly-taken one is done. Anything else (upcoming/due/missed) can be logged.
+function OccurrenceActions({ occ, onLog }: { occ: PlannedOccurrence; onLog: () => void }) {
+  const editable = occ.status !== 'taken' || occ.assumed === true;
+  return (
+    <div className="flex shrink-0 items-center gap-2">
+      <StatusBadge status={occ.status} assumed={occ.assumed} />
+      {editable && (
+        <Button variant="secondary" onClick={onLog}>
+          {occ.assumed ? 'Edit' : 'Log'}
+        </Button>
+      )}
+    </div>
   );
 }

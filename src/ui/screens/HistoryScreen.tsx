@@ -43,6 +43,8 @@ export function HistoryScreen() {
 
   const [filter, setFilter] = useState<HistoryFilter>({});
 
+  const assumeTakenOnTime = settings.assumeTakenOnTime ?? true;
+
   const adherence = useMemo(
     () =>
       computeAdherence(
@@ -53,8 +55,9 @@ export function HistoryScreen() {
         settings.adherenceWindowDays,
         settings.missedDayThreshold,
         now,
+        assumeTakenOnTime,
       ),
-    [slots, medications, doseLog, settings, now],
+    [slots, medications, doseLog, settings, now, assumeTakenOnTime],
   );
 
   const timeline = useMemo(
@@ -66,8 +69,17 @@ export function HistoryScreen() {
         settings.zone,
         settings.adherenceWindowDays,
         now,
+        assumeTakenOnTime,
       ),
-    [slots, medications, doseLog, settings.zone, settings.adherenceWindowDays, now],
+    [
+      slots,
+      medications,
+      doseLog,
+      settings.zone,
+      settings.adherenceWindowDays,
+      now,
+      assumeTakenOnTime,
+    ],
   );
 
   const entries = useMemo(
@@ -188,7 +200,23 @@ export function HistoryScreen() {
             />
           </Field>
         </div>
-        <p className="mt-2 text-xs text-slate-500">
+        <label className="mt-4 flex items-start gap-3">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 shrink-0 accent-accent-muted"
+            checked={assumeTakenOnTime}
+            onChange={(e) => updateSettings({ assumeTakenOnTime: e.target.checked })}
+            aria-label="Assume doses taken on time"
+          />
+          <span className="text-sm">
+            Assume doses taken on time
+            <span className="mt-0.5 block text-xs text-slate-500">
+              Past scheduled doses count as taken on time unless you log or edit them. Turn off to
+              mark untaken doses as missed/due and track real gaps.
+            </span>
+          </span>
+        </label>
+        <p className="mt-3 text-xs text-slate-500">
           Current zone: {formatTimeWithZone(now, settings.zone)}
         </p>
       </Card>

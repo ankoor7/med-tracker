@@ -82,6 +82,12 @@ export interface Settings {
   zone: IanaZone;
   adherenceWindowDays: number;
   missedDayThreshold: number;
+  // When on (the default), a past scheduled dose with no log entry is assumed to
+  // have been taken on time. The user records only exceptions — a late or missed
+  // dose — by logging/editing that occurrence. Off restores the explicit model
+  // where a past, untaken dose is "missed"/"due". Optional for back-compat with
+  // datasets written before this field existed; read it as `?? true`.
+  assumeTakenOnTime?: boolean;
   updatedAt: Instant;
   version?: number;
 }
@@ -159,6 +165,10 @@ export interface PlannedOccurrence {
   label?: string;
   dose: number;
   status: OccurrenceStatus;
+  // True when `status` is 'taken' only because the assume-taken-on-time policy
+  // filled it in (no real log entry). Lets the UI show a softer badge and keep an
+  // edit affordance so the user can still mark the dose late or missed.
+  assumed?: boolean;
   logEntryId?: string; // set when taken/skipped
   overridden?: boolean; // dose came from a one-time DoseOverride (Stage 12)
   overrideId?: string;

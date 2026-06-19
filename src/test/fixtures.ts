@@ -117,6 +117,7 @@ export function settings(over: Partial<Settings> = {}): Settings {
     zone: over.zone ?? 'Europe/London',
     adherenceWindowDays: over.adherenceWindowDays ?? 7,
     missedDayThreshold: over.missedDayThreshold ?? 2,
+    assumeTakenOnTime: over.assumeTakenOnTime,
     updatedAt: over.updatedAt ?? 0,
     version: over.version,
   };

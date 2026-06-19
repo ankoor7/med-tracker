@@ -48,12 +48,18 @@ function occurrenceStatus(
   scheduledInstant: Instant,
   now: Instant,
   med: Medication,
-): PlannedOccurrence['status'] {
-  if (entry) return 'taken';
-  if (scheduledInstant > now) return 'upcoming';
-  // Past and untaken: timing-sensitive meds are an alert ("missed"); flexible
-  // meds are merely "due" (PRD FR-MED-2, Stage 1 AC6).
-  return med.adjustWhenLate ? 'missed' : 'due';
+  assumeTakenOnTime: boolean,
+): { status: PlannedOccurrence['status']; assumed: boolean } {
+  if (entry) return { status: 'taken', assumed: false };
+  if (scheduledInstant > now) return { status: 'upcoming', assumed: false };
+  // Past and untaken. With the assume-taken-on-time policy on, treat it as taken
+  // on time — the user records only exceptions (late/missed) by logging/editing
+  // that occurrence. `assumed` flags that this "taken" came from the policy, not
+  // a real log entry, so the UI can still offer an edit affordance.
+  if (assumeTakenOnTime) return { status: 'taken', assumed: true };
+  // Otherwise: timing-sensitive meds are an alert ("missed"); flexible meds are
+  // merely "due" (PRD FR-MED-2, Stage 1 AC6).
+  return { status: med.adjustWhenLate ? 'missed' : 'due', assumed: false };
 }
 
 /**
@@ -89,6 +95,7 @@ export function plannedSlotsForDate(
   zone: IanaZone,
   now: Instant,
   overrides: DoseOverride[] = [],
+  assumeTakenOnTime = false,
 ): PlannedSlot[] {
   const meds = new Map(medications.map((m) => [m.id, m]));
 
@@ -102,10 +109,18 @@ export function plannedSlotsForDate(
       const med = activeMed(meds, item.medId);
       if (!med) continue;
       const entry = findLogEntry(log, slot.id, item.medId, scheduledInstant, date);
-      const status = occurrenceStatus(entry, scheduledInstant, now, med);
-      // Apply a one-time override only while the occurrence is still untaken.
+      const { status, assumed } = occurrenceStatus(
+        entry,
+        scheduledInstant,
+        now,
+        med,
+        assumeTakenOnTime,
+      );
+      // Apply a one-time override unless a real log entry already recorded the
+      // dose actually taken. An assumed-taken occurrence still reflects a pending
+      // override (the planned amount the user intended for that day).
       const override =
-        status === 'taken'
+        status === 'taken' && !assumed
           ? undefined
           : findOverride(overrides, slot.id, item.medId, scheduledInstant, date);
       occurrences.push({
@@ -117,6 +132,7 @@ export function plannedSlotsForDate(
         dose: override ? override.dose : item.dose,
         status,
         logEntryId: entry?.id,
+        ...(assumed ? { assumed: true } : {}),
         ...(override ? { overridden: true, overrideId: override.id } : {}),
       });
     }

@@ -165,6 +165,7 @@ export function useReminders(): UseReminders {
         settings.adherenceWindowDays,
         settings.missedDayThreshold,
         now,
+        settings.assumeTakenOnTime ?? true,
       );
       const { reminder, state } = evaluateMissedPattern(
         adherence,

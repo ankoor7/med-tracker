@@ -71,6 +71,51 @@ describe('plannedSlotsForDate', () => {
     expect(byMed.flex).toBe('due');
   });
 
+  it('assumeTakenOnTime: past + untaken → taken (assumed); future stays upcoming', () => {
+    const sensitive = med({ id: 'sens', adjustWhenLate: true });
+    const flexible = med({ id: 'flex', adjustWhenLate: false });
+    const past = slot({
+      id: 'past',
+      time: '08:00',
+      items: [
+        { medId: 'sens', dose: 1 },
+        { medId: 'flex', dose: 1 },
+      ],
+    });
+    const future = slot({ id: 'future', time: '20:00', items: [{ medId: 'sens', dose: 1 }] });
+    // now = 10:00: the 08:00 slot is past, the 20:00 slot is upcoming.
+    const planned = plannedSlotsForDate(
+      DATE,
+      [past, future],
+      [sensitive, flexible],
+      [],
+      ZONE,
+      at('10:00'),
+      [],
+      true,
+    );
+    const pastOccs = planned.find((p) => p.slotId === 'past')!.occurrences;
+    for (const occ of pastOccs) {
+      expect(occ.status).toBe('taken');
+      expect(occ.assumed).toBe(true);
+      expect(occ.logEntryId).toBeUndefined();
+    }
+    const futureOcc = planned.find((p) => p.slotId === 'future')!.occurrences[0]!;
+    expect(futureOcc.status).toBe('upcoming');
+    expect(futureOcc.assumed).toBeUndefined();
+  });
+
+  it('assumeTakenOnTime: a real log entry takes precedence over the assumption', () => {
+    const m = med({ id: 'a', adjustWhenLate: true });
+    const s = slot({ id: 's1', time: '08:00', items: [{ medId: 'a', dose: 1 }] });
+    const entry = logEntry({ slotId: 's1', medId: 'a', scheduledInstant: at('08:00') });
+    const occ = plannedSlotsForDate(DATE, [s], [m], [entry], ZONE, at('10:00'), [], true)[0]!
+      .occurrences[0]!;
+    expect(occ.status).toBe('taken');
+    expect(occ.assumed).toBeUndefined();
+    expect(occ.logEntryId).toBe(entry.id);
+  });
+
   it('partial group: taken item resolved, others still due (AC5)', () => {
     const a = med({ id: 'a', adjustWhenLate: false });
     const b = med({ id: 'b', adjustWhenLate: false });

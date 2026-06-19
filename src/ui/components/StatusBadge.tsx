@@ -14,7 +14,28 @@ const LABELS: Record<OccurrenceStatus, string> = {
   upcoming: 'Upcoming',
 };
 
-export function StatusBadge({ status }: { status: OccurrenceStatus }) {
+export function StatusBadge({
+  status,
+  assumed = false,
+}: {
+  status: OccurrenceStatus;
+  // When the dose is "taken" only because the assume-taken-on-time policy filled
+  // it in (not a real log entry), render a softer "On time" badge so the user can
+  // tell it apart from a dose they explicitly logged — and knows it's editable.
+  assumed?: boolean;
+}) {
+  if (assumed) {
+    return (
+      <span
+        className="rounded-full border border-dashed border-status-taken/40 bg-status-taken/10 px-2 py-0.5 text-xs font-medium text-status-taken/90"
+        data-status="taken"
+        data-assumed="true"
+        title="Assumed taken on time — tap Edit if it was late or missed"
+      >
+        On time
+      </span>
+    );
+  }
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-xs font-medium ${STYLES[status]}`}

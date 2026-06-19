@@ -180,6 +180,7 @@ export const useStore = create<StoreState>((set, get) => ({
     zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
     adherenceWindowDays: 7,
     missedDayThreshold: 3,
+    assumeTakenOnTime: true,
     updatedAt: 0,
   },
 

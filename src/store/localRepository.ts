@@ -279,6 +279,7 @@ function fallbackSettings(): Settings {
     zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
     adherenceWindowDays: 7,
     missedDayThreshold: 3,
+    assumeTakenOnTime: true,
     updatedAt: Date.now(),
     version: 1,
   };
