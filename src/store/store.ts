@@ -130,7 +130,7 @@ interface StoreState {
   // ---- Health-condition event tracking (Stage 13) ---------------------------
   addEventType: (input: EventTypeInput) => EventType;
   updateEventType: (id: string, patch: Partial<EventTypeInput>) => void;
-  deleteEventType: (id: string) => void;
+  setEventTypeArchived: (id: string, archived: boolean) => void;
 
   logEvent: (input: EventInstanceInput) => EventInstance;
   updateEventInstance: (id: string, patch: Partial<EventInstanceInput>) => void;
@@ -516,19 +516,20 @@ export const useStore = create<StoreState>((set, get) => ({
     if (updated) persistUpsert('eventTypes', updated);
   },
 
-  deleteEventType: (id) => {
-    // Tombstone the type only — past instances are preserved as history
-    // (FR-13.6); the UI falls back to the stored typeId for a deleted type.
+  setEventTypeArchived: (id, archived) => {
+    // Event types are never deleted — archiving hides a type from the active
+    // picker while preserving its definition so past instances still resolve
+    // (FR-13.6). The flag rides in the synced payload and is reversible.
     const now = Date.now();
-    let tombstoned: EventType | undefined;
+    let updated: EventType | undefined;
     set((s) => ({
       eventTypes: s.eventTypes.map((t) => {
         if (t.id !== id) return t;
-        tombstoned = stamp({ ...t, deleted: true }, now);
-        return tombstoned;
+        updated = stamp({ ...t, archived }, now);
+        return updated;
       }),
     }));
-    if (tombstoned) persistUpsert('eventTypes', tombstoned);
+    if (updated) persistUpsert('eventTypes', updated);
   },
 
   logEvent: (input) => {

@@ -222,7 +222,7 @@ describe('store + LocalRepository', () => {
     db2.close();
   });
 
-  it('tombstones an event type without deleting its instances (Stage 15)', async () => {
+  it('archives an event type (reversibly) without deleting it or its instances (Stage 15)', async () => {
     await useStore.getState().hydrate();
     const type = useStore.getState().addEventType({
       name: 'Seizure',
@@ -233,10 +233,16 @@ describe('store + LocalRepository', () => {
       .getState()
       .logEvent({ typeId: type.id, occurredAt: Date.now(), values: {} });
 
-    useStore.getState().deleteEventType(type.id);
-    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.deleted).toBe(true);
+    useStore.getState().setEventTypeArchived(type.id, true);
+    const archived = useStore.getState().eventTypes.find((t) => t.id === type.id);
+    expect(archived?.archived).toBe(true);
+    expect(archived?.deleted).toBeFalsy(); // archived, never tombstoned
     // The instance survives (history is preserved).
     expect(useStore.getState().eventInstances.find((e) => e.id === inst.id)?.deleted).toBeFalsy();
+
+    // Archiving is reversible.
+    useStore.getState().setEventTypeArchived(type.id, false);
+    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.archived).toBe(false);
   });
 
   it('does not re-seed when data already exists', async () => {

@@ -62,6 +62,7 @@ interface EventType {
   color: string;          // hex, like Medication.color
   properties: EventPropertyDef[];
   notes?: string;
+  archived?: boolean;     // hidden from the active picker; never deleted
   updatedAt: Instant; version?: number; deleted?: boolean;
 }
 
@@ -106,9 +107,12 @@ interface EventInstance {
 - FR-13.5. **View history.** A reverse-chronological list of logged events shows
   the type (name + colour), the local time it occurred, and a readable summary of
   the filled property values (e.g. "Severity 4/5 · Duration 1m 30s").
-- FR-13.6. **Edit / delete.** Instances and types are editable; delete is a
-  tombstone (soft delete, sync-safe). Deleting a type does not delete its past
-  instances (history is preserved; instances fall back to the stored type id).
+- FR-13.6. **Edit / archive / delete.** Instances and types are editable.
+  Instances may be deleted (a tombstone — soft delete, sync-safe). **Event types
+  are never deleted**: they are *archived* instead — a reversible `archived` flag
+  that hides the type from the active picker while keeping its definition live and
+  synced. Past instances are always preserved (history); they resolve names via
+  the stored type id, including for archived types.
 - FR-13.7. **Synced + portable.** Event types and instances sync via the same
   push/pull/LWW path as other records, validate structurally and identically on
   client and server, and round-trip through JSON export/import.
@@ -131,7 +135,7 @@ interface EventInstance {
 - **Sync/store/repo:** extend the table↔type maps, `TableName`, the Dexie schema
   (v4), `loadAll`/`persistDataset`/`TABLES`, and `transfer.ts`
   (validate/merge, default `[]` for older files).
-- **Store actions:** `addEventType` / `updateEventType` / `deleteEventType`,
+- **Store actions:** `addEventType` / `updateEventType` / `setEventTypeArchived`,
   `logEvent` / `updateEventInstance` / `deleteEventInstance`; hydrate/reload/import
   wiring; the first-run seed gains one example "Seizure" type.
 - **UI:** a new **Events** tab/screen — define & edit types (with a property
@@ -163,7 +167,8 @@ interface EventInstance {
   history with a readable summary.
 - AC3. Saving is blocked when a required property is missing or a scale value is
   out of range (validation runs); the app never fills a value itself.
-- AC4. Deleting a type tombstones it without deleting its past instances.
+- AC4. Archiving a type hides it from the active picker and is reversible
+  (unarchive) without deleting the type or its past instances.
 - AC5. Event types and instances round-trip through JSON export → import.
 - AC6. `validate_record` accepts a valid `eventType` / `eventInstance` and rejects
   malformed ones, matching `validateSyncRecord` (pgTAP); a pushed event obeys the

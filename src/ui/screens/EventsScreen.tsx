@@ -32,13 +32,14 @@ export function EventsScreen() {
   const eventTypes = useStore((s) => s.eventTypes);
   const eventInstances = useStore((s) => s.eventInstances);
   const settings = useStore((s) => s.settings);
-  const deleteEventType = useStore((s) => s.deleteEventType);
+  const setEventTypeArchived = useStore((s) => s.setEventTypeArchived);
   const deleteEventInstance = useStore((s) => s.deleteEventInstance);
 
   const [editingType, setEditingType] = useState<EventType | 'new' | null>(null);
   const [logging, setLogging] = useState<EventInstance | 'new' | null>(null);
 
-  const types = eventTypes.filter((t) => !t.deleted);
+  const types = eventTypes.filter((t) => !t.deleted && !t.archived);
+  const archivedTypes = eventTypes.filter((t) => !t.deleted && t.archived);
   const typeById = useMemo(() => new Map(eventTypes.map((t) => [t.id, t])), [eventTypes]);
 
   const history = useMemo(
@@ -92,8 +93,8 @@ export function EventsScreen() {
                   <Button variant="secondary" onClick={() => setEditingType(t)}>
                     Edit
                   </Button>
-                  <Button variant="ghost" onClick={() => deleteEventType(t.id)}>
-                    Delete
+                  <Button variant="ghost" onClick={() => setEventTypeArchived(t.id, true)}>
+                    Archive
                   </Button>
                 </div>
               </li>
@@ -101,6 +102,26 @@ export function EventsScreen() {
           </ul>
         )}
       </Card>
+
+      {/* Archived types */}
+      {archivedTypes.length > 0 && (
+        <Card>
+          <h3 className="mb-2 text-sm font-medium">Archived types</h3>
+          <ul className="flex flex-col divide-y divide-slate-800">
+            {archivedTypes.map((t) => (
+              <li key={t.id} className="flex items-center justify-between gap-2 py-2">
+                <div className="flex items-center gap-2">
+                  <ColorDot color={t.color} />
+                  <span className="font-medium text-slate-400">{t.name}</span>
+                </div>
+                <Button variant="secondary" onClick={() => setEventTypeArchived(t.id, false)}>
+                  Unarchive
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
 
       {/* History */}
       <Card>

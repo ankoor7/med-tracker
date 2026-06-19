@@ -112,6 +112,10 @@ export interface EventType {
   color: string; // hex
   properties: EventPropertyDef[];
   notes?: string;
+  // Event types are never deleted (their instances are kept as history); they are
+  // archived instead — hidden from the active picker but still resolvable and
+  // reversible via unarchive.
+  archived?: boolean;
   updatedAt: Instant;
   version?: number;
   deleted?: boolean;
