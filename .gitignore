@@ -46,6 +46,11 @@ dev-dist/
 supabase/.temp/
 supabase/.branches/
 
+# Claude Code — commit shared project config (.claude/settings.json, which
+# carries enabledPlugins) but never personal or transient local state.
+.claude/settings.local.json
+.claude/worktrees/
+
 # Stray local files
 files/
 files.zip
