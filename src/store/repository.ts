@@ -7,6 +7,7 @@
 // Dexie types.
 
 import type { SyncRecord } from '../core/cloudRecord';
+import type { OuraDaySummary } from '../core/oura';
 import type { Dataset } from '../core/types';
 
 export type TableName = 'medications' | 'slots' | 'doseLog' | 'doseOverrides' | 'settings';
@@ -43,6 +44,15 @@ export interface Repository {
   /** Sync cursor: the server high-water mark from the last successful pull. */
   getSyncToken(): Promise<number>;
   setSyncToken(token: number): Promise<void>;
+
+  // ---- Oura health-data cache (Stage 13) ------------------------------------
+  // Externally-sourced health data, cached locally so correlations render
+  // offline. NOT part of the synced `records` set — it has its own table and its
+  // own server mirror (supabase/migrations 0003), keyed by calendar day.
+  /** Load the cached Oura day summaries (empty when none fetched yet). */
+  loadOura(): Promise<OuraDaySummary[]>;
+  /** Replace the whole Oura cache with `summaries`. */
+  saveOura(summaries: OuraDaySummary[]): Promise<void>;
 }
 
 /** No-op repository: Stage 1 in-memory mode. Nothing persists. */
@@ -68,6 +78,10 @@ export const nullRepository: Repository = {
     return 0;
   },
   async setSyncToken() {},
+  async loadOura() {
+    return [];
+  },
+  async saveOura() {},
 };
 
 // The active repository. Stage 2 swaps this for the LocalRepository at boot.

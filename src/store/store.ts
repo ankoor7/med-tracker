@@ -1,23 +1,31 @@
 import { create } from 'zustand';
 import {
+  addDaysToIsoDate,
   checkGuardrails,
   entryMatchesOccurrence,
   isoDateInZone,
   newId,
+  normalizeOuraData,
   overrideMatchesOccurrence,
   type DoseLogEntry,
   type DoseOverride,
   type Guardrails,
   type Instant,
   type Medication,
+  type OuraDaySummary,
   type ScheduleItem,
   type Settings,
   type Slot,
 } from '../core';
 import { getRepository, type TableName } from './repository';
+import { getOuraClient } from '../oura/registry';
 import { seedDataset } from './seed';
 import { mergeDatasets, type ImportMode } from './transfer';
 import type { Dataset } from '../core/types';
+
+/** Days of Oura history to fetch/overlay; at least two weeks for a useful chart. */
+const OURA_WINDOW_DAYS = 30;
+export type OuraStatus = 'idle' | 'syncing' | 'synced' | 'error';
 
 // ---- Input types (UI-facing) --------------------------------------------------
 
@@ -62,9 +70,18 @@ interface StoreState {
   doseOverrides: DoseOverride[];
   settings: Settings;
 
+  // ---- Oura health data (Stage 13) -----------------------------------------
+  ouraSummaries: OuraDaySummary[];
+  ouraStatus: OuraStatus;
+  ouraLastSyncedAt: number | null;
+  ouraError: string | null;
+
   hydrate: () => Promise<void>;
   /** Re-read the repository into memory after a sync applied remote changes. */
   reload: () => Promise<void>;
+
+  /** Fetch the last `OURA_WINDOW_DAYS` of Oura data via the active client. */
+  syncOura: () => Promise<void>;
 
   addMedication: (input: MedicationInput) => Medication;
   updateMedication: (id: string, patch: Partial<MedicationInput>) => void;
@@ -127,8 +144,15 @@ export const useStore = create<StoreState>((set, get) => ({
     updatedAt: 0,
   },
 
+  ouraSummaries: [],
+  ouraStatus: 'idle',
+  ouraLastSyncedAt: null,
+  ouraError: null,
+
   hydrate: async () => {
     const repo = getRepository();
+    const oura = await repo.loadOura();
+    if (oura.length > 0) set({ ouraSummaries: oura });
     const loaded = await repo.loadAll();
     if (loaded) {
       set({ ...loaded, hydrated: true });
@@ -152,6 +176,36 @@ export const useStore = create<StoreState>((set, get) => ({
   reload: async () => {
     const loaded = await getRepository().loadAll();
     if (loaded) set({ ...loaded });
+  },
+
+  syncOura: async () => {
+    const { settings } = get();
+    set({ ouraStatus: 'syncing', ouraError: null });
+    try {
+      const endDate = isoDateInZone(Date.now(), settings.zone);
+      const startDate = addDaysToIsoDate(endDate, -(OURA_WINDOW_DAYS - 1));
+      const range = { startDate, endDate };
+      const client = getOuraClient();
+      const [readiness, stress] = await Promise.all([
+        client.getDailyReadiness(range),
+        client.getDailyStress(range),
+      ]);
+      const summaries = normalizeOuraData(readiness, stress, settings.zone);
+      // Persist before flipping to 'synced' so a reload sees the cache; a save
+      // failure is non-fatal (the in-memory data is still good).
+      try {
+        await getRepository().saveOura(summaries);
+      } catch (e) {
+        console.error('persist oura failed', e);
+      }
+      set({
+        ouraSummaries: summaries,
+        ouraStatus: 'synced',
+        ouraLastSyncedAt: Date.now(),
+      });
+    } catch (e) {
+      set({ ouraStatus: 'error', ouraError: e instanceof Error ? e.message : String(e) });
+    }
   },
 
   addMedication: (input) => {

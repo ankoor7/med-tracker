@@ -17,6 +17,7 @@ import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
 import { BloodLevelChart } from '../components/BloodLevelChart';
+import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
 import { useNow } from '../lib/useNow';
 
@@ -142,6 +143,8 @@ export function HistoryScreen() {
           </p>
         )}
       </Card>
+
+      <OuraPanel />
 
       <Card>
         <h3 className="mb-2 text-sm font-medium">Settings</h3>
