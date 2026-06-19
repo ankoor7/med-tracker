@@ -7,9 +7,10 @@ import { TodayScreen } from './screens/TodayScreen';
 import { CalendarScreen } from './screens/CalendarScreen';
 import { ScheduleScreen } from './screens/ScheduleScreen';
 import { MedsScreen } from './screens/MedsScreen';
+import { EventsScreen } from './screens/EventsScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
 
-const TABS = ['Today', 'Calendar', 'Schedule', 'Meds', 'History'] as const;
+const TABS = ['Today', 'Calendar', 'Schedule', 'Meds', 'Events', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function App() {
@@ -41,6 +42,7 @@ export default function App() {
               {tab === 'Calendar' && <CalendarScreen />}
               {tab === 'Schedule' && <ScheduleScreen />}
               {tab === 'Meds' && <MedsScreen />}
+              {tab === 'Events' && <EventsScreen />}
               {tab === 'History' && <HistoryScreen />}
             </>
           )}
@@ -48,7 +50,7 @@ export default function App() {
 
         <nav
           aria-label="Primary"
-          className="sticky bottom-0 grid grid-cols-5 border-t border-slate-800 bg-slate-950"
+          className="sticky bottom-0 grid grid-cols-6 border-t border-slate-800 bg-slate-950"
         >
           {TABS.map((t) => (
             <button

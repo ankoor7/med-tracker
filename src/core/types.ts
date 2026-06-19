@@ -86,12 +86,60 @@ export interface Settings {
   version?: number;
 }
 
+// --- Health-condition event tracking (Stage 13) -------------------------------
+// User-definable events (e.g. seizures): a type carries a schema of custom
+// properties; an instance records that an event of that type happened at an
+// `Instant`, with values filled in for the type's properties. The app never
+// originates an event — it records and validates user-entered occurrences.
+
+export type EventPropertyType = 'number' | 'text' | 'scale' | 'duration';
+
+// One custom property in an event type's schema. `scale` uses min/max as an
+// inclusive integer range (defaults 1..5); `duration` values are seconds.
+export interface EventPropertyDef {
+  id: string; // stable; instance values are keyed by it
+  name: string; // e.g. "Severity"
+  type: EventPropertyType;
+  required?: boolean;
+  min?: number; // scale lower bound (default 1)
+  max?: number; // scale upper bound (default 5)
+  unit?: string; // optional display hint for `number`
+}
+
+export interface EventType {
+  id: string;
+  name: string; // e.g. "Seizure"
+  color: string; // hex
+  properties: EventPropertyDef[];
+  notes?: string;
+  updatedAt: Instant;
+  version?: number;
+  deleted?: boolean;
+}
+
+// A filled-in property value: a number (number/scale/duration) or a string (text).
+export type EventPropertyValue = number | string;
+
+export interface EventInstance {
+  id: string;
+  typeId: string; // references EventType.id
+  occurredAt: Instant; // when the event happened (UTC ms)
+  zone: IanaZone; // zone in effect when logged (stable display)
+  values: Record<string, EventPropertyValue>; // keyed by EventPropertyDef.id
+  note?: string;
+  updatedAt: Instant;
+  version?: number;
+  deleted?: boolean;
+}
+
 // Aggregate of all syncable records — used by the store and (Stage 2) repository.
 export interface Dataset {
   medications: Medication[];
   slots: Slot[];
   doseLog: DoseLogEntry[];
   doseOverrides: DoseOverride[];
+  eventTypes: EventType[];
+  eventInstances: EventInstance[];
   settings: Settings;
 }
 

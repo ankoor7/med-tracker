@@ -20,6 +20,8 @@ const TYPE_FOR_TABLE: Record<TableName, RecordType> = {
   slots: 'slot',
   doseLog: 'doseLog',
   doseOverrides: 'doseOverride',
+  eventTypes: 'eventType',
+  eventInstances: 'eventInstance',
   settings: 'settings',
 };
 
@@ -28,6 +30,8 @@ const TABLE_FOR_TYPE: Record<RecordType, TableName> = {
   slot: 'slots',
   doseLog: 'doseLog',
   doseOverride: 'doseOverrides',
+  eventType: 'eventTypes',
+  eventInstance: 'eventInstances',
   settings: 'settings',
 };
 

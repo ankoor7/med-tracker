@@ -13,6 +13,8 @@ import type {
   Dataset,
   DoseLogEntry,
   DoseOverride,
+  EventInstance,
+  EventType,
   Medication,
   Settings,
   Slot,
@@ -77,9 +79,16 @@ export function parseImport(text: string): ImportResult {
     return { ok: false, reason: 'Missing medications, slots, or dose log.' };
   }
   if (!settings || typeof settings !== 'object') return { ok: false, reason: 'Missing settings.' };
-  // doseOverrides is newer than older exports; default to none for back-compat.
+  // doseOverrides / eventTypes / eventInstances are newer than older exports;
+  // default to none for back-compat.
   const doseOverrides = Array.isArray((data as Partial<Dataset>).doseOverrides)
     ? (data as Dataset).doseOverrides
+    : [];
+  const eventTypes = Array.isArray((data as Partial<Dataset>).eventTypes)
+    ? (data as Dataset).eventTypes
+    : [];
+  const eventInstances = Array.isArray((data as Partial<Dataset>).eventInstances)
+    ? (data as Dataset).eventInstances
     : [];
 
   const error =
@@ -87,12 +96,22 @@ export function parseImport(text: string): ImportResult {
     validateEntities('slots', slots) ??
     validateEntities('doseLog', doseLog) ??
     validateEntities('doseOverrides', doseOverrides) ??
+    validateEntities('eventTypes', eventTypes) ??
+    validateEntities('eventInstances', eventInstances) ??
     validateEntities('settings', [{ ...(settings as Settings), id: 'settings' }]);
   if (error) return { ok: false, reason: error };
 
   return {
     ok: true,
-    data: { medications, slots, doseLog, doseOverrides, settings: settings as Settings },
+    data: {
+      medications,
+      slots,
+      doseLog,
+      doseOverrides,
+      eventTypes,
+      eventInstances,
+      settings: settings as Settings,
+    },
   };
 }
 
@@ -129,6 +148,8 @@ export function mergeDatasets(base: Dataset, incoming: Dataset, mode: ImportMode
     slots: mergeById<Slot>(base.slots, incoming.slots),
     doseLog: mergeById<DoseLogEntry>(base.doseLog, incoming.doseLog),
     doseOverrides: mergeById<DoseOverride>(base.doseOverrides, incoming.doseOverrides),
+    eventTypes: mergeById<EventType>(base.eventTypes, incoming.eventTypes),
+    eventInstances: mergeById<EventInstance>(base.eventInstances, incoming.eventInstances),
     settings,
   };
 }

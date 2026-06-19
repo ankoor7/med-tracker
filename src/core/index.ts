@@ -9,6 +9,7 @@ export * from './adherence';
 export * from './reminders';
 export * from './history';
 export * from './pharmacology';
+export * from './events';
 export * from './ids';
 export * from './cloudRecord';
 export * from './oura';

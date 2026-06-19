@@ -10,7 +10,14 @@ import type { SyncRecord } from '../core/cloudRecord';
 import type { OuraDaySummary } from '../core/oura';
 import type { Dataset } from '../core/types';
 
-export type TableName = 'medications' | 'slots' | 'doseLog' | 'doseOverrides' | 'settings';
+export type TableName =
+  | 'medications'
+  | 'slots'
+  | 'doseLog'
+  | 'doseOverrides'
+  | 'eventTypes'
+  | 'eventInstances'
+  | 'settings';
 
 /** Identifies a specific version of a record in the outbox. */
 export interface OutboxRef {

@@ -201,4 +201,57 @@ describe('validateSyncRecord — typed payloads', () => {
     });
     expect(res).toEqual({ ok: true });
   });
+
+  it('accepts a valid eventType', () => {
+    const res = validateSyncRecord({
+      id: 'et1',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        name: 'Seizure',
+        color: '#9333ea',
+        properties: [{ id: 'severity', name: 'Severity', type: 'scale', min: 1, max: 5 }],
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects an eventType property with an unknown type', () => {
+    const res = validateSyncRecord({
+      id: 'et1',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: { name: 'X', properties: [{ id: 'p', name: 'P', type: 'bogus' }] },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /properties entry invalid/ });
+  });
+
+  it('accepts a valid eventInstance', () => {
+    const res = validateSyncRecord({
+      id: 'ei1',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        typeId: 'et1',
+        occurredAt: 1000,
+        zone: 'Europe/London',
+        values: { severity: 4, duration: 90 },
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects an eventInstance missing typeId', () => {
+    const res = validateSyncRecord({
+      id: 'ei1',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: { occurredAt: 1000, zone: 'Europe/London', values: {} },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /typeId/ });
+  });
 });

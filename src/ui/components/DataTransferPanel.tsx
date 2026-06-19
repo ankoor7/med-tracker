@@ -27,6 +27,8 @@ export function DataTransferPanel() {
     slots: store.slots,
     doseLog: store.doseLog,
     doseOverrides: store.doseOverrides,
+    eventTypes: store.eventTypes,
+    eventInstances: store.eventInstances,
     settings: store.settings,
   });
 

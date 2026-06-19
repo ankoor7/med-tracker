@@ -2,6 +2,8 @@
 import type {
   DoseLogEntry,
   DoseOverride,
+  EventInstance,
+  EventType,
   Guardrails,
   Medication,
   Settings,
@@ -73,6 +75,36 @@ export function override(over: Partial<DoseOverride> = {}): DoseOverride {
     scheduledInstant: over.scheduledInstant ?? 0,
     zone: over.zone ?? 'Europe/London',
     dose: over.dose ?? 50,
+    note: over.note,
+    updatedAt: over.updatedAt ?? 0,
+    version: over.version,
+    deleted: over.deleted,
+  };
+}
+
+export function eventType(over: Partial<EventType> = {}): EventType {
+  return {
+    id: over.id ?? id('etype'),
+    name: over.name ?? 'Seizure',
+    color: over.color ?? '#9333ea',
+    properties: over.properties ?? [
+      { id: 'severity', name: 'Severity', type: 'scale', min: 1, max: 5 },
+      { id: 'duration', name: 'Duration', type: 'duration' },
+    ],
+    notes: over.notes,
+    updatedAt: over.updatedAt ?? 0,
+    version: over.version,
+    deleted: over.deleted,
+  };
+}
+
+export function eventInstance(over: Partial<EventInstance> = {}): EventInstance {
+  return {
+    id: over.id ?? id('einst'),
+    typeId: over.typeId ?? 'etype-x',
+    occurredAt: over.occurredAt ?? 0,
+    zone: over.zone ?? 'Europe/London',
+    values: over.values ?? { severity: 3, duration: 90 },
     note: over.note,
     updatedAt: over.updatedAt ?? 0,
     version: over.version,

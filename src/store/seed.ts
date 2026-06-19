@@ -47,6 +47,22 @@ export function seedDataset(now: number): Dataset {
     version: 1,
   };
 
+  // One example health-condition event type so the feature is discoverable on
+  // first run (Stage 13). Its properties are ordinary, editable/removable defs.
+  const seizureType = {
+    id: 'seed-event-seizure',
+    name: 'Seizure',
+    color: '#9333ea',
+    properties: [
+      { id: 'severity', name: 'Severity', type: 'scale' as const, min: 1, max: 5 },
+      { id: 'duration', name: 'Duration', type: 'duration' as const },
+      { id: 'notes', name: 'What happened', type: 'text' as const },
+    ],
+    notes: 'Log a seizure with its severity and how long it lasted.',
+    updatedAt: now,
+    version: 1,
+  };
+
   return {
     medications: [lamotrigine, levetiracetam, vitaminD],
     slots: [
@@ -76,6 +92,8 @@ export function seedDataset(now: number): Dataset {
     ],
     doseLog: [],
     doseOverrides: [],
+    eventTypes: [seizureType],
+    eventInstances: [],
     settings: {
       zone: hostZone,
       adherenceWindowDays: 7,
