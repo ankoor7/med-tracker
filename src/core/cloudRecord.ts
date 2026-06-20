@@ -14,6 +14,7 @@ export type RecordType =
   | 'doseOverride'
   | 'eventType'
   | 'eventInstance'
+  | 'regimenChange'
   | 'settings';
 
 export const RECORD_TYPES: readonly RecordType[] = [
@@ -23,7 +24,21 @@ export const RECORD_TYPES: readonly RecordType[] = [
   'doseOverride',
   'eventType',
   'eventInstance',
+  'regimenChange',
   'settings',
+];
+
+/**
+ * Coarse regimen-change kinds, mirrored from core/types.ts (RegimenChangeKind)
+ * for envelope validation. Kept in lock-step with the SQL validate_record.
+ */
+const REGIMEN_CHANGE_KIND_NAMES: readonly string[] = [
+  'medication-added',
+  'medication-updated',
+  'medication-retired',
+  'slot-added',
+  'slot-updated',
+  'slot-removed',
 ];
 
 /**
@@ -117,6 +132,8 @@ function validatePayload(type: RecordType, payload: Record<string, unknown>): Va
       return validateEventType(payload);
     case 'eventInstance':
       return validateEventInstance(payload);
+    case 'regimenChange':
+      return validateRegimenChange(payload);
     case 'settings':
       return validateSettings(payload);
   }
@@ -191,6 +208,29 @@ function validateEventInstance(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.occurredAt)) return fail('eventInstance.occurredAt required');
   if (!isNonEmptyString(p.zone)) return fail('eventInstance.zone required');
   if (!isPlainObject(p.values)) return fail('eventInstance.values required');
+  return ok;
+}
+
+/** A diff entry is `{ field: string, from: string|null, to: string|null }`. */
+function isValidFieldChange(c: unknown): boolean {
+  const isStrOrNull = (v: unknown) => v === null || typeof v === 'string';
+  return isPlainObject(c) && isNonEmptyString(c.field) && isStrOrNull(c.from) && isStrOrNull(c.to);
+}
+
+function validateRegimenChange(p: Record<string, unknown>): ValidationResult {
+  if (!isFiniteNumber(p.changedAt)) return fail('regimenChange.changedAt required');
+  if (!isNonEmptyString(p.zone)) return fail('regimenChange.zone required');
+  if (typeof p.kind !== 'string' || !REGIMEN_CHANGE_KIND_NAMES.includes(p.kind)) {
+    return fail('regimenChange.kind invalid');
+  }
+  if (!isNonEmptyString(p.summary)) return fail('regimenChange.summary required');
+  if (!Array.isArray(p.changes) || p.changes.length === 0) {
+    return fail('regimenChange.changes required');
+  }
+  if (!p.changes.every(isValidFieldChange)) return fail('regimenChange.changes entry invalid');
+  if ('note' in p && p.note !== undefined && typeof p.note !== 'string') {
+    return fail('regimenChange.note must be a string');
+  }
   return ok;
 }
 

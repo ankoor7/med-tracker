@@ -1,14 +1,26 @@
-import type { LevelSeries } from '../../core';
+import {
+  resolveWallTimeToInstant,
+  type IanaZone,
+  type ISODate,
+  type LevelSeries,
+  type RegimenChange,
+} from '../../core';
+import { ChangeMarkers } from './ChangeMarkers';
 
 // Renders ONLY the predicted level series supplied by the pharmacology extension
 // (FR-7.3). The app never synthesises a curve: when the extension returns null,
 // the parent shows an explanatory empty state instead of calling this (AC4).
+// Optionally overlays regimen-change markers placed on the time axis (Stage 16).
 export function BloodLevelChart({
   series,
   doseMarkers,
+  changes,
+  zone,
 }: {
   series: LevelSeries;
   doseMarkers: number[]; // dose instants, drawn as ticks
+  changes?: RegimenChange[];
+  zone?: IanaZone;
 }) {
   const W = 320;
   const H = 140;
@@ -31,11 +43,20 @@ export function BloodLevelChart({
   const x = (t: number) => pad.left + ((t - tMin) / tSpan) * plotW;
   const y = (v: number) => pad.top + plotH - (v / yMax) * plotH;
 
+  // Place a change at midday of its local date on the time axis, as a % of the
+  // chart width; null when that day falls outside the plotted range.
+  const xForDate = (date: ISODate): number | null => {
+    if (!zone) return null;
+    const t = resolveWallTimeToInstant(date, '12:00', zone);
+    if (t < tMin || t > tMax) return null;
+    return (x(t) / W) * 100;
+  };
+
   const path = pts
     .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(1)},${y(p.level).toFixed(1)}`)
     .join(' ');
 
-  return (
+  const svg = (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       className="h-36 w-full"
@@ -73,5 +94,13 @@ export function BloodLevelChart({
         </text>
       )}
     </svg>
+  );
+
+  if (!changes || changes.length === 0 || !zone) return svg;
+  return (
+    <div className="relative">
+      {svg}
+      <ChangeMarkers changes={changes} zone={zone} xForDate={xForDate} />
+    </div>
   );
 }

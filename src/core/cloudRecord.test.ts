@@ -254,4 +254,78 @@ describe('validateSyncRecord — typed payloads', () => {
     });
     expect(res).toMatchObject({ ok: false, reason: /typeId/ });
   });
+
+  const regimenChangeRecord = (payload: object): unknown => ({
+    id: 'rc1',
+    type: 'regimenChange',
+    updatedAt: 1,
+    version: 1,
+    payload,
+  });
+
+  it('accepts a valid regimenChange', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        slotId: 's1',
+        summary: 'Morning: Lamotrigine dose 100mg → 150mg',
+        changes: [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts a regimenChange whose diff has null (added/cleared) values', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-added',
+        summary: 'Added 20:00 Evening',
+        changes: [{ field: 'Time', from: null, to: '20:00' }],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects a regimenChange with an unknown kind', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'dose-doubled',
+        summary: 'x',
+        changes: [{ field: 'Time', from: null, to: '20:00' }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /kind/ });
+  });
+
+  it('rejects a regimenChange with an empty changes list', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        summary: 'x',
+        changes: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /changes/ });
+  });
+
+  it('rejects a regimenChange whose diff entry has a non-string field', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        summary: 'x',
+        changes: [{ field: 42, from: null, to: '20:00' }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /changes entry/ });
+  });
 });

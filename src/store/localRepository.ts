@@ -12,6 +12,7 @@ import type {
   EventInstance,
   EventType,
   Medication,
+  RegimenChange,
   Settings,
   Slot,
 } from '../core/types';
@@ -36,6 +37,7 @@ export class SteadyDoseDB extends Dexie {
   doseOverrides!: Table<DoseOverride, string>;
   eventTypes!: Table<EventType, string>;
   eventInstances!: Table<EventInstance, string>;
+  regimenChanges!: Table<RegimenChange, string>;
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<SyncRecord, string>;
@@ -70,6 +72,11 @@ export class SteadyDoseDB extends Dexie {
       eventTypes: 'id, updatedAt, deleted',
       eventInstances: 'id, updatedAt, deleted, typeId, occurredAt',
     });
+    // v6 (Stage 16): derived regimen-change markers; indexed by changedAt for
+    // date-placed marker queries.
+    this.version(6).stores({
+      regimenChanges: 'id, updatedAt, deleted, changedAt',
+    });
   }
 }
 
@@ -80,6 +87,7 @@ const TABLES: TableName[] = [
   'doseOverrides',
   'eventTypes',
   'eventInstances',
+  'regimenChanges',
 ];
 
 export class LocalRepository implements Repository {
@@ -93,6 +101,7 @@ export class LocalRepository implements Repository {
       doseOverrides,
       eventTypes,
       eventInstances,
+      regimenChanges,
       settingsRow,
       versionStr,
     ] = await Promise.all([
@@ -102,6 +111,7 @@ export class LocalRepository implements Repository {
       this.db.doseOverrides.toArray(),
       this.db.eventTypes.toArray(),
       this.db.eventInstances.toArray(),
+      this.db.regimenChanges.toArray(),
       this.db.settings.get(SETTINGS_ID),
       this.getMeta(META_SCHEMA_VERSION),
     ]);
@@ -113,7 +123,8 @@ export class LocalRepository implements Repository {
       slots.length === 0 &&
       doseLog.length === 0 &&
       eventTypes.length === 0 &&
-      eventInstances.length === 0
+      eventInstances.length === 0 &&
+      regimenChanges.length === 0
     ) {
       return null;
     }
@@ -126,6 +137,7 @@ export class LocalRepository implements Repository {
       doseOverrides,
       eventTypes,
       eventInstances,
+      regimenChanges,
       settings,
     };
 
@@ -252,6 +264,7 @@ export class LocalRepository implements Repository {
         this.db.doseOverrides,
         this.db.eventTypes,
         this.db.eventInstances,
+        this.db.regimenChanges,
         this.db.settings,
         this.db.outbox,
       ],
@@ -262,6 +275,7 @@ export class LocalRepository implements Repository {
         await this.db.doseOverrides.bulkPut(data.doseOverrides);
         await this.db.eventTypes.bulkPut(data.eventTypes);
         await this.db.eventInstances.bulkPut(data.eventInstances);
+        await this.db.regimenChanges.bulkPut(data.regimenChanges);
         await this.putSettings(data.settings);
       },
     );

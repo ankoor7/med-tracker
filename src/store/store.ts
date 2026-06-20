@@ -1,12 +1,19 @@
 import { create } from 'zustand';
 import {
   addDaysToIsoDate,
+  buildRegimenChange,
   checkGuardrails,
+  describeMedicationAdded,
+  describeMedicationRetired,
+  describeSlot,
+  diffMedication,
+  diffSlot,
   entryMatchesOccurrence,
   isoDateInZone,
   newId,
   normalizeOuraData,
   overrideMatchesOccurrence,
+  slotSubject,
   type DoseLogEntry,
   type DoseOverride,
   type EventInstance,
@@ -17,6 +24,7 @@ import {
   type Instant,
   type Medication,
   type OuraDaySummary,
+  type RegimenChange,
   type ScheduleItem,
   type Settings,
   type Slot,
@@ -88,6 +96,7 @@ interface StoreState {
   doseOverrides: DoseOverride[];
   eventTypes: EventType[];
   eventInstances: EventInstance[];
+  regimenChanges: RegimenChange[];
   settings: Settings;
 
   // ---- Oura health data (Stage 13) -----------------------------------------
@@ -138,6 +147,12 @@ interface StoreState {
 
   updateSettings: (patch: Partial<Omit<Settings, 'updatedAt' | 'version'>>) => void;
 
+  // ---- Regimen change markers (Stage 16) ------------------------------------
+  /** Attach/replace a free-text note on a derived regimen change. */
+  addChangeNote: (id: string, note: string) => void;
+  /** Soft-delete (tombstone) a regimen change so its marker disappears. */
+  deleteChange: (id: string) => void;
+
   /** Apply an imported dataset (Stage 7), replacing or LWW-merging the current. */
   importData: (incoming: Dataset, mode: ImportMode) => void;
 }
@@ -168,440 +183,608 @@ function scheduledDoseFor(slots: Slot[], slotId: string, medId: string): number 
 
 // ---- Store --------------------------------------------------------------------
 
-export const useStore = create<StoreState>((set, get) => ({
-  hydrated: false,
-  medications: [],
-  slots: [],
-  doseLog: [],
-  doseOverrides: [],
-  eventTypes: [],
-  eventInstances: [],
-  settings: {
-    zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
-    adherenceWindowDays: 7,
-    missedDayThreshold: 3,
-    assumeTakenOnTime: true,
-    updatedAt: 0,
-  },
+export const useStore = create<StoreState>((set, get) => {
+  // Append a derived regimen change to state and queue it for sync. Centralises
+  // the "derive, don't author" path so every edit site records identically.
+  const recordChange = (change: RegimenChange): void => {
+    set((s) => ({ regimenChanges: [...s.regimenChanges, change] }));
+    persistUpsert('regimenChanges', change);
+  };
 
-  ouraSummaries: [],
-  ouraStatus: 'idle',
-  ouraLastSyncedAt: null,
-  ouraError: null,
+  return {
+    hydrated: false,
+    medications: [],
+    slots: [],
+    doseLog: [],
+    doseOverrides: [],
+    eventTypes: [],
+    eventInstances: [],
+    regimenChanges: [],
+    settings: {
+      zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
+      adherenceWindowDays: 7,
+      missedDayThreshold: 3,
+      assumeTakenOnTime: true,
+      updatedAt: 0,
+    },
 
-  hydrate: async () => {
-    const repo = getRepository();
-    const oura = await repo.loadOura();
-    if (oura.length > 0) set({ ouraSummaries: oura });
-    const loaded = await repo.loadAll();
-    if (loaded) {
-      set({ ...loaded, hydrated: true });
-      return;
-    }
-    // Test seam: the E2E suite needs a genuinely empty first run (no demo data
-    // bleeding into sync assertions), so it sets VITE_DISABLE_SEED. Normal dev
-    // and production are unaffected.
-    if (import.meta.env.VITE_DISABLE_SEED) {
-      set({ hydrated: true });
-      return;
-    }
-    // First run: seed.
-    const data = seedDataset(Date.now());
-    set({ ...data, hydrated: true });
-    for (const m of data.medications) persistUpsert('medications', m);
-    for (const s of data.slots) persistUpsert('slots', s);
-    for (const t of data.eventTypes) persistUpsert('eventTypes', t);
-    persistSettings(data.settings);
-  },
+    ouraSummaries: [],
+    ouraStatus: 'idle',
+    ouraLastSyncedAt: null,
+    ouraError: null,
 
-  reload: async () => {
-    const loaded = await getRepository().loadAll();
-    if (loaded) set({ ...loaded });
-  },
+    hydrate: async () => {
+      const repo = getRepository();
+      const oura = await repo.loadOura();
+      if (oura.length > 0) set({ ouraSummaries: oura });
+      const loaded = await repo.loadAll();
+      if (loaded) {
+        set({ ...loaded, hydrated: true });
+        return;
+      }
+      // Test seam: the E2E suite needs a genuinely empty first run (no demo data
+      // bleeding into sync assertions), so it sets VITE_DISABLE_SEED. Normal dev
+      // and production are unaffected.
+      if (import.meta.env.VITE_DISABLE_SEED) {
+        set({ hydrated: true });
+        return;
+      }
+      // First run: seed.
+      const data = seedDataset(Date.now());
+      set({ ...data, hydrated: true });
+      for (const m of data.medications) persistUpsert('medications', m);
+      for (const s of data.slots) persistUpsert('slots', s);
+      for (const t of data.eventTypes) persistUpsert('eventTypes', t);
+      for (const c of data.regimenChanges) persistUpsert('regimenChanges', c);
+      persistSettings(data.settings);
+    },
 
-  syncOura: async () => {
-    const { settings } = get();
-    set({ ouraStatus: 'syncing', ouraError: null });
-    try {
-      const endDate = isoDateInZone(Date.now(), settings.zone);
-      const startDate = addDaysToIsoDate(endDate, -(OURA_WINDOW_DAYS - 1));
-      const range = { startDate, endDate };
-      const client = getOuraClient();
-      const [readiness, stress] = await Promise.all([
-        client.getDailyReadiness(range),
-        client.getDailyStress(range),
-      ]);
-      const summaries = normalizeOuraData(readiness, stress, settings.zone);
-      // Persist before flipping to 'synced' so a reload sees the cache; a save
-      // failure is non-fatal (the in-memory data is still good).
+    reload: async () => {
+      const loaded = await getRepository().loadAll();
+      if (loaded) set({ ...loaded });
+    },
+
+    syncOura: async () => {
+      const { settings } = get();
+      set({ ouraStatus: 'syncing', ouraError: null });
       try {
-        await getRepository().saveOura(summaries);
+        const endDate = isoDateInZone(Date.now(), settings.zone);
+        const startDate = addDaysToIsoDate(endDate, -(OURA_WINDOW_DAYS - 1));
+        const range = { startDate, endDate };
+        const client = getOuraClient();
+        const [readiness, stress] = await Promise.all([
+          client.getDailyReadiness(range),
+          client.getDailyStress(range),
+        ]);
+        const summaries = normalizeOuraData(readiness, stress, settings.zone);
+        // Persist before flipping to 'synced' so a reload sees the cache; a save
+        // failure is non-fatal (the in-memory data is still good).
+        try {
+          await getRepository().saveOura(summaries);
+        } catch (e) {
+          console.error('persist oura failed', e);
+        }
+        set({
+          ouraSummaries: summaries,
+          ouraStatus: 'synced',
+          ouraLastSyncedAt: Date.now(),
+        });
       } catch (e) {
-        console.error('persist oura failed', e);
+        set({ ouraStatus: 'error', ouraError: e instanceof Error ? e.message : String(e) });
       }
-      set({
-        ouraSummaries: summaries,
-        ouraStatus: 'synced',
-        ouraLastSyncedAt: Date.now(),
-      });
-    } catch (e) {
-      set({ ouraStatus: 'error', ouraError: e instanceof Error ? e.message : String(e) });
-    }
-  },
+    },
 
-  addMedication: (input) => {
-    const now = Date.now();
-    const med: Medication = stamp({ id: newId(), updatedAt: now, ...input }, now);
-    set((s) => ({ medications: [...s.medications, med] }));
-    persistUpsert('medications', med);
-    return med;
-  },
-
-  updateMedication: (id, patch) => {
-    const now = Date.now();
-    let updated: Medication | undefined;
-    set((s) => ({
-      medications: s.medications.map((m) => {
-        if (m.id !== id) return m;
-        updated = stamp({ ...m, ...patch }, now);
-        return updated;
-      }),
-    }));
-    if (updated) persistUpsert('medications', updated);
-  },
-
-  deleteMedication: (id) => {
-    const now = Date.now();
-    let tombstoned: Medication | undefined;
-    const affectedSlots: Slot[] = [];
-    set((s) => {
-      const medications = s.medications.map((m) => {
-        if (m.id !== id) return m;
-        tombstoned = stamp({ ...m, deleted: true }, now);
-        return tombstoned;
-      });
-      // FR-MED-4: remove the med from every slot; tombstone now-empty slots.
-      const slots = s.slots.map((slot) => {
-        if (slot.deleted || !slot.items.some((i) => i.medId === id)) return slot;
-        const items = slot.items.filter((i) => i.medId !== id);
-        const next = stamp(
-          items.length === 0 ? { ...slot, items, deleted: true } : { ...slot, items },
+    addMedication: (input) => {
+      const now = Date.now();
+      const zone = get().settings.zone;
+      const med: Medication = stamp({ id: newId(), updatedAt: now, ...input }, now);
+      set((s) => ({ medications: [...s.medications, med] }));
+      persistUpsert('medications', med);
+      recordChange(
+        buildRegimenChange({
+          kind: 'medication-added',
+          subject: med.name,
+          medId: med.id,
+          changes: describeMedicationAdded(med),
           now,
-        );
-        affectedSlots.push(next);
-        return next;
-      });
-      return { medications, slots };
-    });
-    if (tombstoned) persistUpsert('medications', tombstoned);
-    for (const slot of affectedSlots) persistUpsert('slots', slot);
-  },
-
-  addSlot: (input) => {
-    const now = Date.now();
-    const slot: Slot = stamp({ id: newId(), updatedAt: now, ...input }, now);
-    set((s) => ({ slots: [...s.slots, slot] }));
-    persistUpsert('slots', slot);
-    return slot;
-  },
-
-  updateSlot: (id, patch) => {
-    const now = Date.now();
-    let updated: Slot | undefined;
-    set((s) => ({
-      slots: s.slots.map((slot) => {
-        if (slot.id !== id) return slot;
-        updated = stamp({ ...slot, ...patch }, now);
-        return updated;
-      }),
-    }));
-    if (updated) persistUpsert('slots', updated);
-  },
-
-  deleteSlot: (id) => {
-    const now = Date.now();
-    let tombstoned: Slot | undefined;
-    set((s) => ({
-      slots: s.slots.map((slot) => {
-        if (slot.id !== id) return slot;
-        tombstoned = stamp({ ...slot, deleted: true }, now);
-        return tombstoned;
-      }),
-    }));
-    if (tombstoned) persistUpsert('slots', tombstoned);
-  },
-
-  logDose: (input) => {
-    const { medications, slots, doseLog, settings } = get();
-    const now = Date.now();
-    const med = medications.find((m) => m.id === input.medId);
-    const unit = med?.unit ?? '';
-    const warnings = med
-      ? checkGuardrails(med, input.dose, input.actualInstant, doseLog, settings.zone)
-      : [];
-    const normalDose = scheduledDoseFor(slots, input.slotId, input.medId);
-
-    const entry: DoseLogEntry = stamp(
-      {
-        id: newId(),
-        slotId: input.slotId,
-        medId: input.medId,
-        scheduledInstant: input.scheduledInstant,
-        actualInstant: input.actualInstant,
-        dose: input.dose,
-        unit,
-        zone: settings.zone,
-        status: 'taken' as const,
-        adjusted: normalDose != null && input.dose !== normalDose,
-        warnings,
-        updatedAt: now,
-      },
-      now,
-    );
-    set((s) => ({ doseLog: [...s.doseLog, entry] }));
-    persistUpsert('doseLog', entry);
-
-    // Consume any one-time override for this occurrence — it's been fulfilled
-    // (Stage 12 FR-12.4), so it must not linger or re-apply.
-    const date = isoDateInZone(input.scheduledInstant, settings.zone);
-    for (const o of get().doseOverrides) {
-      if (o.deleted) continue;
-      if (overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date)) {
-        get().clearDoseOverride(o.id);
-      }
-    }
-    return entry;
-  },
-
-  takeGroup: (slotId, scheduledInstant) => {
-    const { slots, settings } = get();
-    const slot = slots.find((s) => s.id === slotId);
-    if (!slot) return [];
-    const now = Date.now();
-    const date = isoDateInZone(scheduledInstant, settings.zone);
-    const created: DoseLogEntry[] = [];
-    for (const item of slot.items) {
-      // Skip items already taken for this occurrence (matched on the occurrence
-      // key, so a prior log still counts across a zone change — FR-5.6).
-      const exists = get().doseLog.some(
-        (e) =>
-          !e.deleted &&
-          e.status === 'taken' &&
-          entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
-      );
-      if (exists) continue;
-      // Honour a one-time override for this occurrence (Stage 12); logDose then
-      // consumes it.
-      const override = get().doseOverrides.find(
-        (o) =>
-          !o.deleted && overrideMatchesOccurrence(o, slotId, item.medId, scheduledInstant, date),
-      );
-      created.push(
-        get().logDose({
-          slotId,
-          medId: item.medId,
-          scheduledInstant,
-          dose: override ? override.dose : item.dose,
-          actualInstant: now,
+          zone,
         }),
       );
-    }
-    return created;
-  },
+      return med;
+    },
 
-  deleteLogEntry: (id) => {
-    const now = Date.now();
-    let tombstoned: DoseLogEntry | undefined;
-    set((s) => ({
-      doseLog: s.doseLog.map((e) => {
-        if (e.id !== id) return e;
-        tombstoned = stamp({ ...e, deleted: true }, now);
-        return tombstoned;
-      }),
-    }));
-    if (tombstoned) persistUpsert('doseLog', tombstoned);
-  },
+    updateMedication: (id, patch) => {
+      const now = Date.now();
+      const zone = get().settings.zone;
+      let prev: Medication | undefined;
+      let updated: Medication | undefined;
+      set((s) => ({
+        medications: s.medications.map((m) => {
+          if (m.id !== id) return m;
+          prev = m;
+          updated = stamp({ ...m, ...patch }, now);
+          return updated;
+        }),
+      }));
+      if (!prev || !updated) return;
+      persistUpsert('medications', updated);
+      // Derive a change from the pre-edit entity. An active → inactive transition
+      // is a retirement; the reverse re-introduces the medication; otherwise a
+      // prescription edit records only the fields that actually differ (no-op = none).
+      if (prev.active && !updated.active) {
+        recordChange(
+          buildRegimenChange({
+            kind: 'medication-retired',
+            subject: updated.name,
+            medId: id,
+            changes: describeMedicationRetired(),
+            now,
+            zone,
+          }),
+        );
+      } else if (!prev.active && updated.active) {
+        recordChange(
+          buildRegimenChange({
+            kind: 'medication-added',
+            subject: updated.name,
+            medId: id,
+            changes: describeMedicationAdded(updated),
+            now,
+            zone,
+          }),
+        );
+      } else {
+        const changes = diffMedication(prev, updated);
+        if (changes.length > 0) {
+          recordChange(
+            buildRegimenChange({
+              kind: 'medication-updated',
+              subject: updated.name,
+              medId: id,
+              changes,
+              now,
+              zone,
+            }),
+          );
+        }
+      }
+    },
 
-  adjustDoseTime: (id, actualInstant) => {
-    const { doseLog, medications, settings } = get();
-    const entry = doseLog.find((e) => e.id === id);
-    if (!entry || entry.deleted) return undefined;
-    const now = Date.now();
-    const med = medications.find((m) => m.id === entry.medId);
-    // Re-validate the (unchanged) dose at the new time against the shared
-    // guardrails, excluding this entry from the prior-dose history so it never
-    // counts against itself.
-    const others = doseLog.filter((e) => e.id !== id);
-    const warnings = med
-      ? checkGuardrails(med, entry.dose, actualInstant, others, settings.zone)
-      : entry.warnings;
-    let updated: DoseLogEntry | undefined;
-    set((s) => ({
-      doseLog: s.doseLog.map((e) => {
-        if (e.id !== id) return e;
-        updated = stamp({ ...e, actualInstant, warnings }, now);
-        return updated;
-      }),
-    }));
-    if (updated) persistUpsert('doseLog', updated);
-    return updated;
-  },
+    deleteMedication: (id) => {
+      const now = Date.now();
+      const zone = get().settings.zone;
+      let tombstoned: Medication | undefined;
+      const affectedSlots: Slot[] = [];
+      set((s) => {
+        const medications = s.medications.map((m) => {
+          if (m.id !== id) return m;
+          tombstoned = stamp({ ...m, deleted: true }, now);
+          return tombstoned;
+        });
+        // FR-MED-4: remove the med from every slot; tombstone now-empty slots.
+        const slots = s.slots.map((slot) => {
+          if (slot.deleted || !slot.items.some((i) => i.medId === id)) return slot;
+          const items = slot.items.filter((i) => i.medId !== id);
+          const next = stamp(
+            items.length === 0 ? { ...slot, items, deleted: true } : { ...slot, items },
+            now,
+          );
+          affectedSlots.push(next);
+          return next;
+        });
+        return { medications, slots };
+      });
+      if (tombstoned) persistUpsert('medications', tombstoned);
+      for (const slot of affectedSlots) persistUpsert('slots', slot);
+      // Retiring the medication subsumes the cascade slot edits: one marker.
+      if (tombstoned) {
+        recordChange(
+          buildRegimenChange({
+            kind: 'medication-retired',
+            subject: tombstoned.name,
+            medId: id,
+            changes: describeMedicationRetired(),
+            now,
+            zone,
+          }),
+        );
+      }
+    },
 
-  setDoseOverride: (input) => {
-    const { doseOverrides, settings } = get();
-    const now = Date.now();
-    const date = isoDateInZone(input.scheduledInstant, settings.zone);
-    // Reuse an existing (non-deleted) override for the same occurrence so a repeat
-    // adjustment updates in place rather than stacking duplicates.
-    const existing = doseOverrides.find(
-      (o) =>
-        !o.deleted &&
-        overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date),
-    );
-    const override: DoseOverride = stamp(
-      {
-        id: existing?.id ?? newId(),
-        slotId: input.slotId,
-        medId: input.medId,
-        scheduledInstant: input.scheduledInstant,
-        zone: settings.zone,
-        dose: input.dose,
-        note: input.note,
-        updatedAt: now,
-        version: existing?.version,
-      },
-      now,
-    );
-    set((s) => ({
-      doseOverrides: existing
-        ? s.doseOverrides.map((o) => (o.id === override.id ? override : o))
-        : [...s.doseOverrides, override],
-    }));
-    persistUpsert('doseOverrides', override);
-    return override;
-  },
+    addSlot: (input) => {
+      const now = Date.now();
+      const { settings, medications } = get();
+      const slot: Slot = stamp({ id: newId(), updatedAt: now, ...input }, now);
+      set((s) => ({ slots: [...s.slots, slot] }));
+      persistUpsert('slots', slot);
+      const medsById = new Map(medications.map((m) => [m.id, m]));
+      recordChange(
+        buildRegimenChange({
+          kind: 'slot-added',
+          subject: slotSubject(slot),
+          slotId: slot.id,
+          changes: describeSlot(slot, medsById, 'added'),
+          now,
+          zone: settings.zone,
+        }),
+      );
+      return slot;
+    },
 
-  clearDoseOverride: (id) => {
-    const now = Date.now();
-    let tombstoned: DoseOverride | undefined;
-    set((s) => ({
-      doseOverrides: s.doseOverrides.map((o) => {
-        if (o.id !== id) return o;
-        tombstoned = stamp({ ...o, deleted: true }, now);
-        return tombstoned;
-      }),
-    }));
-    if (tombstoned) persistUpsert('doseOverrides', tombstoned);
-  },
+    updateSlot: (id, patch) => {
+      const now = Date.now();
+      const { settings, medications } = get();
+      let prev: Slot | undefined;
+      let updated: Slot | undefined;
+      set((s) => ({
+        slots: s.slots.map((slot) => {
+          if (slot.id !== id) return slot;
+          prev = slot;
+          updated = stamp({ ...slot, ...patch }, now);
+          return updated;
+        }),
+      }));
+      if (!prev || !updated) return;
+      persistUpsert('slots', updated);
+      const medsById = new Map(medications.map((m) => [m.id, m]));
+      const changes = diffSlot(prev, updated, medsById);
+      if (changes.length > 0) {
+        recordChange(
+          buildRegimenChange({
+            kind: 'slot-updated',
+            subject: slotSubject(updated),
+            slotId: id,
+            changes,
+            now,
+            zone: settings.zone,
+          }),
+        );
+      }
+    },
 
-  // ---- Health-condition event tracking (Stage 13) ---------------------------
+    deleteSlot: (id) => {
+      const now = Date.now();
+      const { settings, medications } = get();
+      let tombstoned: Slot | undefined;
+      set((s) => ({
+        slots: s.slots.map((slot) => {
+          if (slot.id !== id) return slot;
+          tombstoned = stamp({ ...slot, deleted: true }, now);
+          return tombstoned;
+        }),
+      }));
+      if (!tombstoned) return;
+      persistUpsert('slots', tombstoned);
+      const medsById = new Map(medications.map((m) => [m.id, m]));
+      recordChange(
+        buildRegimenChange({
+          kind: 'slot-removed',
+          subject: slotSubject(tombstoned),
+          slotId: id,
+          changes: describeSlot(tombstoned, medsById, 'removed'),
+          now,
+          zone: settings.zone,
+        }),
+      );
+    },
 
-  addEventType: (input) => {
-    const now = Date.now();
-    const type: EventType = stamp({ id: newId(), updatedAt: now, ...input }, now);
-    set((s) => ({ eventTypes: [...s.eventTypes, type] }));
-    persistUpsert('eventTypes', type);
-    return type;
-  },
+    logDose: (input) => {
+      const { medications, slots, doseLog, settings } = get();
+      const now = Date.now();
+      const med = medications.find((m) => m.id === input.medId);
+      const unit = med?.unit ?? '';
+      const warnings = med
+        ? checkGuardrails(med, input.dose, input.actualInstant, doseLog, settings.zone)
+        : [];
+      const normalDose = scheduledDoseFor(slots, input.slotId, input.medId);
 
-  updateEventType: (id, patch) => {
-    const now = Date.now();
-    let updated: EventType | undefined;
-    set((s) => ({
-      eventTypes: s.eventTypes.map((t) => {
-        if (t.id !== id) return t;
-        updated = stamp({ ...t, ...patch }, now);
-        return updated;
-      }),
-    }));
-    if (updated) persistUpsert('eventTypes', updated);
-  },
+      const entry: DoseLogEntry = stamp(
+        {
+          id: newId(),
+          slotId: input.slotId,
+          medId: input.medId,
+          scheduledInstant: input.scheduledInstant,
+          actualInstant: input.actualInstant,
+          dose: input.dose,
+          unit,
+          zone: settings.zone,
+          status: 'taken' as const,
+          adjusted: normalDose != null && input.dose !== normalDose,
+          warnings,
+          updatedAt: now,
+        },
+        now,
+      );
+      set((s) => ({ doseLog: [...s.doseLog, entry] }));
+      persistUpsert('doseLog', entry);
 
-  setEventTypeArchived: (id, archived) => {
-    // Event types are never deleted — archiving hides a type from the active
-    // picker while preserving its definition so past instances still resolve
-    // (FR-13.6). The flag rides in the synced payload and is reversible.
-    const now = Date.now();
-    let updated: EventType | undefined;
-    set((s) => ({
-      eventTypes: s.eventTypes.map((t) => {
-        if (t.id !== id) return t;
-        updated = stamp({ ...t, archived }, now);
-        return updated;
-      }),
-    }));
-    if (updated) persistUpsert('eventTypes', updated);
-  },
+      // Consume any one-time override for this occurrence — it's been fulfilled
+      // (Stage 12 FR-12.4), so it must not linger or re-apply.
+      const date = isoDateInZone(input.scheduledInstant, settings.zone);
+      for (const o of get().doseOverrides) {
+        if (o.deleted) continue;
+        if (overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date)) {
+          get().clearDoseOverride(o.id);
+        }
+      }
+      return entry;
+    },
 
-  logEvent: (input) => {
-    const now = Date.now();
-    const { settings } = get();
-    const instance: EventInstance = stamp(
-      {
-        id: newId(),
-        typeId: input.typeId,
-        occurredAt: input.occurredAt,
-        zone: settings.zone,
-        values: input.values,
-        note: input.note,
-        updatedAt: now,
-      },
-      now,
-    );
-    set((s) => ({ eventInstances: [...s.eventInstances, instance] }));
-    persistUpsert('eventInstances', instance);
-    return instance;
-  },
+    takeGroup: (slotId, scheduledInstant) => {
+      const { slots, settings } = get();
+      const slot = slots.find((s) => s.id === slotId);
+      if (!slot) return [];
+      const now = Date.now();
+      const date = isoDateInZone(scheduledInstant, settings.zone);
+      const created: DoseLogEntry[] = [];
+      for (const item of slot.items) {
+        // Skip items already taken for this occurrence (matched on the occurrence
+        // key, so a prior log still counts across a zone change — FR-5.6).
+        const exists = get().doseLog.some(
+          (e) =>
+            !e.deleted &&
+            e.status === 'taken' &&
+            entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
+        );
+        if (exists) continue;
+        // Honour a one-time override for this occurrence (Stage 12); logDose then
+        // consumes it.
+        const override = get().doseOverrides.find(
+          (o) =>
+            !o.deleted && overrideMatchesOccurrence(o, slotId, item.medId, scheduledInstant, date),
+        );
+        created.push(
+          get().logDose({
+            slotId,
+            medId: item.medId,
+            scheduledInstant,
+            dose: override ? override.dose : item.dose,
+            actualInstant: now,
+          }),
+        );
+      }
+      return created;
+    },
 
-  updateEventInstance: (id, patch) => {
-    const now = Date.now();
-    let updated: EventInstance | undefined;
-    set((s) => ({
-      eventInstances: s.eventInstances.map((e) => {
-        if (e.id !== id) return e;
-        updated = stamp({ ...e, ...patch }, now);
-        return updated;
-      }),
-    }));
-    if (updated) persistUpsert('eventInstances', updated);
-  },
+    deleteLogEntry: (id) => {
+      const now = Date.now();
+      let tombstoned: DoseLogEntry | undefined;
+      set((s) => ({
+        doseLog: s.doseLog.map((e) => {
+          if (e.id !== id) return e;
+          tombstoned = stamp({ ...e, deleted: true }, now);
+          return tombstoned;
+        }),
+      }));
+      if (tombstoned) persistUpsert('doseLog', tombstoned);
+    },
 
-  deleteEventInstance: (id) => {
-    const now = Date.now();
-    let tombstoned: EventInstance | undefined;
-    set((s) => ({
-      eventInstances: s.eventInstances.map((e) => {
-        if (e.id !== id) return e;
-        tombstoned = stamp({ ...e, deleted: true }, now);
-        return tombstoned;
-      }),
-    }));
-    if (tombstoned) persistUpsert('eventInstances', tombstoned);
-  },
+    adjustDoseTime: (id, actualInstant) => {
+      const { doseLog, medications, settings } = get();
+      const entry = doseLog.find((e) => e.id === id);
+      if (!entry || entry.deleted) return undefined;
+      const now = Date.now();
+      const med = medications.find((m) => m.id === entry.medId);
+      // Re-validate the (unchanged) dose at the new time against the shared
+      // guardrails, excluding this entry from the prior-dose history so it never
+      // counts against itself.
+      const others = doseLog.filter((e) => e.id !== id);
+      const warnings = med
+        ? checkGuardrails(med, entry.dose, actualInstant, others, settings.zone)
+        : entry.warnings;
+      let updated: DoseLogEntry | undefined;
+      set((s) => ({
+        doseLog: s.doseLog.map((e) => {
+          if (e.id !== id) return e;
+          updated = stamp({ ...e, actualInstant, warnings }, now);
+          return updated;
+        }),
+      }));
+      if (updated) persistUpsert('doseLog', updated);
+      return updated;
+    },
 
-  updateSettings: (patch) => {
-    const now = Date.now();
-    const next = stamp({ ...get().settings, ...patch }, now);
-    set({ settings: next });
-    persistSettings(next);
-  },
+    setDoseOverride: (input) => {
+      const { doseOverrides, settings } = get();
+      const now = Date.now();
+      const date = isoDateInZone(input.scheduledInstant, settings.zone);
+      // Reuse an existing (non-deleted) override for the same occurrence so a repeat
+      // adjustment updates in place rather than stacking duplicates.
+      const existing = doseOverrides.find(
+        (o) =>
+          !o.deleted &&
+          overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date),
+      );
+      const override: DoseOverride = stamp(
+        {
+          id: existing?.id ?? newId(),
+          slotId: input.slotId,
+          medId: input.medId,
+          scheduledInstant: input.scheduledInstant,
+          zone: settings.zone,
+          dose: input.dose,
+          note: input.note,
+          updatedAt: now,
+          version: existing?.version,
+        },
+        now,
+      );
+      set((s) => ({
+        doseOverrides: existing
+          ? s.doseOverrides.map((o) => (o.id === override.id ? override : o))
+          : [...s.doseOverrides, override],
+      }));
+      persistUpsert('doseOverrides', override);
+      return override;
+    },
 
-  importData: (incoming, mode) => {
-    const { medications, slots, doseLog, doseOverrides, eventTypes, eventInstances, settings } =
-      get();
-    const merged = mergeDatasets(
-      { medications, slots, doseLog, doseOverrides, eventTypes, eventInstances, settings },
-      incoming,
-      mode,
-    );
-    set({ ...merged });
-    // Persist (and queue for sync) every record so the import propagates.
-    for (const m of merged.medications) persistUpsert('medications', m);
-    for (const s of merged.slots) persistUpsert('slots', s);
-    for (const e of merged.doseLog) persistUpsert('doseLog', e);
-    for (const o of merged.doseOverrides) persistUpsert('doseOverrides', o);
-    for (const t of merged.eventTypes) persistUpsert('eventTypes', t);
-    for (const e of merged.eventInstances) persistUpsert('eventInstances', e);
-    persistSettings(merged.settings);
-  },
-}));
+    clearDoseOverride: (id) => {
+      const now = Date.now();
+      let tombstoned: DoseOverride | undefined;
+      set((s) => ({
+        doseOverrides: s.doseOverrides.map((o) => {
+          if (o.id !== id) return o;
+          tombstoned = stamp({ ...o, deleted: true }, now);
+          return tombstoned;
+        }),
+      }));
+      if (tombstoned) persistUpsert('doseOverrides', tombstoned);
+    },
+
+    // ---- Health-condition event tracking (Stage 13) ---------------------------
+
+    addEventType: (input) => {
+      const now = Date.now();
+      const type: EventType = stamp({ id: newId(), updatedAt: now, ...input }, now);
+      set((s) => ({ eventTypes: [...s.eventTypes, type] }));
+      persistUpsert('eventTypes', type);
+      return type;
+    },
+
+    updateEventType: (id, patch) => {
+      const now = Date.now();
+      let updated: EventType | undefined;
+      set((s) => ({
+        eventTypes: s.eventTypes.map((t) => {
+          if (t.id !== id) return t;
+          updated = stamp({ ...t, ...patch }, now);
+          return updated;
+        }),
+      }));
+      if (updated) persistUpsert('eventTypes', updated);
+    },
+
+    setEventTypeArchived: (id, archived) => {
+      // Event types are never deleted — archiving hides a type from the active
+      // picker while preserving its definition so past instances still resolve
+      // (FR-13.6). The flag rides in the synced payload and is reversible.
+      const now = Date.now();
+      let updated: EventType | undefined;
+      set((s) => ({
+        eventTypes: s.eventTypes.map((t) => {
+          if (t.id !== id) return t;
+          updated = stamp({ ...t, archived }, now);
+          return updated;
+        }),
+      }));
+      if (updated) persistUpsert('eventTypes', updated);
+    },
+
+    logEvent: (input) => {
+      const now = Date.now();
+      const { settings } = get();
+      const instance: EventInstance = stamp(
+        {
+          id: newId(),
+          typeId: input.typeId,
+          occurredAt: input.occurredAt,
+          zone: settings.zone,
+          values: input.values,
+          note: input.note,
+          updatedAt: now,
+        },
+        now,
+      );
+      set((s) => ({ eventInstances: [...s.eventInstances, instance] }));
+      persistUpsert('eventInstances', instance);
+      return instance;
+    },
+
+    updateEventInstance: (id, patch) => {
+      const now = Date.now();
+      let updated: EventInstance | undefined;
+      set((s) => ({
+        eventInstances: s.eventInstances.map((e) => {
+          if (e.id !== id) return e;
+          updated = stamp({ ...e, ...patch }, now);
+          return updated;
+        }),
+      }));
+      if (updated) persistUpsert('eventInstances', updated);
+    },
+
+    deleteEventInstance: (id) => {
+      const now = Date.now();
+      let tombstoned: EventInstance | undefined;
+      set((s) => ({
+        eventInstances: s.eventInstances.map((e) => {
+          if (e.id !== id) return e;
+          tombstoned = stamp({ ...e, deleted: true }, now);
+          return tombstoned;
+        }),
+      }));
+      if (tombstoned) persistUpsert('eventInstances', tombstoned);
+    },
+
+    updateSettings: (patch) => {
+      const now = Date.now();
+      const next = stamp({ ...get().settings, ...patch }, now);
+      set({ settings: next });
+      persistSettings(next);
+    },
+
+    addChangeNote: (id, note) => {
+      const now = Date.now();
+      let updated: RegimenChange | undefined;
+      set((s) => ({
+        regimenChanges: s.regimenChanges.map((c) => {
+          if (c.id !== id) return c;
+          // `changedAt` is the event time and stays put; only sync metadata moves.
+          updated = stamp({ ...c, note }, now);
+          return updated;
+        }),
+      }));
+      if (updated) persistUpsert('regimenChanges', updated);
+    },
+
+    deleteChange: (id) => {
+      const now = Date.now();
+      let tombstoned: RegimenChange | undefined;
+      set((s) => ({
+        regimenChanges: s.regimenChanges.map((c) => {
+          if (c.id !== id) return c;
+          tombstoned = stamp({ ...c, deleted: true }, now);
+          return tombstoned;
+        }),
+      }));
+      if (tombstoned) persistUpsert('regimenChanges', tombstoned);
+    },
+
+    importData: (incoming, mode) => {
+      const {
+        medications,
+        slots,
+        doseLog,
+        doseOverrides,
+        eventTypes,
+        eventInstances,
+        regimenChanges,
+        settings,
+      } = get();
+      const merged = mergeDatasets(
+        {
+          medications,
+          slots,
+          doseLog,
+          doseOverrides,
+          eventTypes,
+          eventInstances,
+          regimenChanges,
+          settings,
+        },
+        incoming,
+        mode,
+      );
+      set({ ...merged });
+      // Persist (and queue for sync) every record so the import propagates.
+      for (const m of merged.medications) persistUpsert('medications', m);
+      for (const s of merged.slots) persistUpsert('slots', s);
+      for (const e of merged.doseLog) persistUpsert('doseLog', e);
+      for (const o of merged.doseOverrides) persistUpsert('doseOverrides', o);
+      for (const t of merged.eventTypes) persistUpsert('eventTypes', t);
+      for (const e of merged.eventInstances) persistUpsert('eventInstances', e);
+      for (const c of merged.regimenChanges) persistUpsert('regimenChanges', c);
+      persistSettings(merged.settings);
+    },
+  };
+});

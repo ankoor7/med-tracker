@@ -127,6 +127,54 @@ export function diffSlot(
   return out;
 }
 
+/**
+ * Field changes describing a newly added medication: every non-empty
+ * prescription field as a `null → value` addition. Used when a medication is
+ * introduced (there is no prior entity to diff against).
+ */
+export function describeMedicationAdded(med: Medication): RegimenFieldChange[] {
+  return MED_FIELDS.map((spec) => fieldChange(spec.field, null, spec.display(med))).filter(
+    (c) => c.to != null,
+  );
+}
+
+/** A single field change marking a medication as retired (active → false). */
+export function describeMedicationRetired(): RegimenFieldChange[] {
+  return [fieldChange('Status', 'Active', 'Retired')];
+}
+
+/** Human subject for a slot's marker summary, e.g. `"20:00 Evening"`. */
+export function slotSubject(slot: Slot): string {
+  return slot.label ? `${slot.time} ${slot.label}` : slot.time;
+}
+
+/**
+ * Field changes describing a slot being added (`mode: 'added'`, values appear as
+ * `null → value`) or removed (`mode: 'removed'`, `value → null`): its time, label
+ * and each per-medication dose. `medsById` resolves names/units for formatting.
+ */
+export function describeSlot(
+  slot: Slot,
+  medsById: Map<string, Medication>,
+  mode: 'added' | 'removed',
+): RegimenFieldChange[] {
+  const sides = (value: string | null): [string | null, string | null] =>
+    mode === 'added' ? [null, value] : [value, null];
+  const out: RegimenFieldChange[] = [];
+  out.push(fieldChange('Time', ...sides(slot.time)));
+  if (slot.label) out.push(fieldChange('Label', ...sides(slot.label)));
+  for (const item of [...slot.items].sort((a, b) => (a.medId < b.medId ? -1 : 1))) {
+    const med = medsById.get(item.medId);
+    out.push(
+      fieldChange(
+        `${med?.name ?? item.medId} dose`,
+        ...sides(formatDose(item.dose, med?.unit ?? '')),
+      ),
+    );
+  }
+  return out;
+}
+
 function oneLineChange(c: RegimenFieldChange): string {
   return `${c.field} ${c.from ?? '—'} → ${c.to ?? '—'}`;
 }

@@ -5,6 +5,7 @@ import type { Dataset } from '../core/types';
 
 export function seedDataset(now: number): Dataset {
   const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
+  const fiveDaysAgo = now - 5 * 24 * 60 * 60 * 1000;
 
   const lamotrigine = {
     id: 'seed-med-lamotrigine',
@@ -94,6 +95,22 @@ export function seedDataset(now: number): Dataset {
     doseOverrides: [],
     eventTypes: [seizureType],
     eventInstances: [],
+    // One example regimen change a few days back so the timeline markers are
+    // visible in the demo dataset (Stage 16): the morning Lamotrigine dose was
+    // raised 100mg → 150mg.
+    regimenChanges: [
+      {
+        id: 'seed-change-lamotrigine-dose',
+        changedAt: fiveDaysAgo,
+        zone: hostZone,
+        kind: 'slot-updated' as const,
+        slotId: 'seed-slot-morning',
+        summary: 'Morning: Lamotrigine dose 100mg → 150mg',
+        changes: [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
+        updatedAt: fiveDaysAgo,
+        version: 1,
+      },
+    ],
     settings: {
       zone: hostZone,
       adherenceWindowDays: 7,

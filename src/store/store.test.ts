@@ -17,6 +17,7 @@ function resetStore() {
     doseOverrides: [],
     eventTypes: [],
     eventInstances: [],
+    regimenChanges: [],
     settings: {
       zone: 'Europe/London',
       adherenceWindowDays: 7,
@@ -24,6 +25,21 @@ function resetStore() {
       updatedAt: 0,
     },
   });
+}
+
+const MED_INPUT = {
+  name: 'Test',
+  color: '#fff',
+  unit: 'mg',
+  halfLifeHours: 10,
+  adjustWhenLate: true,
+  active: true,
+  guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
+} as const;
+
+/** Non-deleted changes in the store, for the Stage 16 emission assertions. */
+function liveChanges() {
+  return useStore.getState().regimenChanges.filter((c) => !c.deleted);
 }
 
 beforeEach(() => {
@@ -243,6 +259,67 @@ describe('store + LocalRepository', () => {
     // Archiving is reversible.
     useStore.getState().setEventTypeArchived(type.id, false);
     expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.archived).toBe(false);
+  });
+
+  it('emits one regimen change per meaningful edit and none for a no-op (Stage 16 AC1)', async () => {
+    await useStore.getState().hydrate();
+    // Start from a clean slate so the seed change does not skew counts.
+    useStore.setState({ medications: [], slots: [], regimenChanges: [] });
+
+    const med = useStore.getState().addMedication(MED_INPUT);
+    expect(liveChanges().map((c) => c.kind)).toEqual(['medication-added']);
+
+    // A real prescription edit records a medication-updated change.
+    useStore.getState().updateMedication(med.id, { name: 'Renamed' });
+    expect(liveChanges().map((c) => c.kind)).toEqual(['medication-added', 'medication-updated']);
+    const updated = liveChanges().at(-1)!;
+    expect(updated.summary).toContain('Renamed');
+    expect(updated.changes).toContainEqual({ field: 'Name', from: 'Test', to: 'Renamed' });
+
+    // A no-op save (same name) records nothing further.
+    useStore.getState().updateMedication(med.id, { name: 'Renamed' });
+    expect(liveChanges()).toHaveLength(2);
+
+    // Retiring the medication records a medication-retired change.
+    useStore.getState().deleteMedication(med.id);
+    expect(liveChanges().at(-1)!.kind).toBe('medication-retired');
+  });
+
+  it('emits slot-added / slot-updated / slot-removed for schedule edits (Stage 16 AC2)', async () => {
+    await useStore.getState().hydrate();
+    const med = useStore.getState().addMedication(MED_INPUT);
+    useStore.setState({ slots: [], regimenChanges: [] });
+
+    const slot = useStore
+      .getState()
+      .addSlot({ time: '20:00', label: 'Evening', items: [{ medId: med.id, dose: 100 }] });
+    expect(liveChanges().at(-1)!.kind).toBe('slot-added');
+    expect(liveChanges().at(-1)!.slotId).toBe(slot.id);
+
+    // Raise the dose 100 → 150: one slot-updated whose diff reads "100mg → 150mg".
+    useStore.getState().updateSlot(slot.id, { items: [{ medId: med.id, dose: 150 }] });
+    const updated = liveChanges().at(-1)!;
+    expect(updated.kind).toBe('slot-updated');
+    expect(updated.changes).toContainEqual({ field: 'Test dose', from: '100mg', to: '150mg' });
+
+    useStore.getState().deleteSlot(slot.id);
+    expect(liveChanges().at(-1)!.kind).toBe('slot-removed');
+  });
+
+  it('annotates and soft-deletes a regimen change (Stage 16 AC6)', async () => {
+    await useStore.getState().hydrate();
+    const med = useStore.getState().addMedication(MED_INPUT);
+    const change = useStore.getState().regimenChanges.at(-1)!;
+
+    useStore.getState().addChangeNote(change.id, 'GP-approved');
+    const annotated = useStore.getState().regimenChanges.find((c) => c.id === change.id)!;
+    expect(annotated.note).toBe('GP-approved');
+    expect(annotated.changedAt).toBe(change.changedAt); // event time stays put
+    expect(annotated.version).toBe((change.version ?? 0) + 1);
+
+    useStore.getState().deleteChange(change.id);
+    expect(useStore.getState().regimenChanges.find((c) => c.id === change.id)?.deleted).toBe(true);
+    void med;
   });
 
   it('does not re-seed when data already exists', async () => {

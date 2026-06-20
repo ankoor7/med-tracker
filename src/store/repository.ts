@@ -17,6 +17,7 @@ export type TableName =
   | 'doseOverrides'
   | 'eventTypes'
   | 'eventInstances'
+  | 'regimenChanges'
   | 'settings';
 
 /** Identifies a specific version of a record in the outbox. */

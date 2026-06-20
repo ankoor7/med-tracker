@@ -1,9 +1,19 @@
-import type { AdherenceDay } from '../../core';
+import type { AdherenceDay, IanaZone, ISODate, RegimenChange } from '../../core';
+import { ChangeMarkers } from './ChangeMarkers';
 
 // Hand-rolled SVG bar chart (no chart dependency — keeps the bundle small per
 // NFR-Performance). One stacked bar per day: taken (accent) over missed (red).
-// Mobile-first: scales to its container width via a viewBox.
-export function AdherenceChart({ days }: { days: AdherenceDay[] }) {
+// Mobile-first: scales to its container width via a viewBox. Optionally overlays
+// regimen-change markers placed by day (Stage 16).
+export function AdherenceChart({
+  days,
+  changes,
+  zone,
+}: {
+  days: AdherenceDay[];
+  changes?: RegimenChange[];
+  zone?: IanaZone;
+}) {
   const maxExpected = Math.max(1, ...days.map((d) => d.expected));
   const W = 320;
   const H = 120;
@@ -13,7 +23,13 @@ export function AdherenceChart({ days }: { days: AdherenceDay[] }) {
   const slot = (W - pad.left - pad.right) / n;
   const barW = Math.max(2, slot * 0.7);
 
-  return (
+  // Place a marker at the centre of its day's bar, as a % of the chart width.
+  const xForDate = (date: ISODate): number | null => {
+    const i = days.findIndex((d) => d.date === date);
+    return i < 0 ? null : ((pad.left + i * slot + slot / 2) / W) * 100;
+  };
+
+  const svg = (
     <svg
       viewBox={`0 0 ${W} ${H}`}
       className="h-32 w-full"
@@ -58,5 +74,13 @@ export function AdherenceChart({ days }: { days: AdherenceDay[] }) {
         );
       })}
     </svg>
+  );
+
+  if (!changes || changes.length === 0 || !zone) return svg;
+  return (
+    <div className="relative">
+      {svg}
+      <ChangeMarkers changes={changes} zone={zone} xForDate={xForDate} />
+    </div>
   );
 }

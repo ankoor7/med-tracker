@@ -188,6 +188,7 @@ export interface Dataset {
   doseOverrides: DoseOverride[];
   eventTypes: EventType[];
   eventInstances: EventInstance[];
+  regimenChanges: RegimenChange[];
   settings: Settings;
 }
 

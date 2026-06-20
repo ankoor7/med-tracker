@@ -16,6 +16,7 @@ import type {
   EventInstance,
   EventType,
   Medication,
+  RegimenChange,
   Settings,
   Slot,
 } from '../core/types';
@@ -79,17 +80,16 @@ export function parseImport(text: string): ImportResult {
     return { ok: false, reason: 'Missing medications, slots, or dose log.' };
   }
   if (!settings || typeof settings !== 'object') return { ok: false, reason: 'Missing settings.' };
-  // doseOverrides / eventTypes / eventInstances are newer than older exports;
-  // default to none for back-compat.
-  const doseOverrides = Array.isArray((data as Partial<Dataset>).doseOverrides)
-    ? (data as Dataset).doseOverrides
-    : [];
-  const eventTypes = Array.isArray((data as Partial<Dataset>).eventTypes)
-    ? (data as Dataset).eventTypes
-    : [];
-  const eventInstances = Array.isArray((data as Partial<Dataset>).eventInstances)
-    ? (data as Dataset).eventInstances
-    : [];
+  // doseOverrides / eventTypes / eventInstances / regimenChanges are newer than
+  // older exports; default each to none for back-compat.
+  const optional = <K extends keyof Dataset>(key: K): Dataset[K] | [] => {
+    const value = (data as Partial<Dataset>)[key];
+    return Array.isArray(value) ? (value as Dataset[K]) : [];
+  };
+  const doseOverrides = optional('doseOverrides');
+  const eventTypes = optional('eventTypes');
+  const eventInstances = optional('eventInstances');
+  const regimenChanges = optional('regimenChanges');
 
   const error =
     validateEntities('medications', medications) ??
@@ -98,6 +98,7 @@ export function parseImport(text: string): ImportResult {
     validateEntities('doseOverrides', doseOverrides) ??
     validateEntities('eventTypes', eventTypes) ??
     validateEntities('eventInstances', eventInstances) ??
+    validateEntities('regimenChanges', regimenChanges) ??
     validateEntities('settings', [{ ...(settings as Settings), id: 'settings' }]);
   if (error) return { ok: false, reason: error };
 
@@ -110,6 +111,7 @@ export function parseImport(text: string): ImportResult {
       doseOverrides,
       eventTypes,
       eventInstances,
+      regimenChanges,
       settings: settings as Settings,
     },
   };
@@ -150,6 +152,7 @@ export function mergeDatasets(base: Dataset, incoming: Dataset, mode: ImportMode
     doseOverrides: mergeById<DoseOverride>(base.doseOverrides, incoming.doseOverrides),
     eventTypes: mergeById<EventType>(base.eventTypes, incoming.eventTypes),
     eventInstances: mergeById<EventInstance>(base.eventInstances, incoming.eventInstances),
+    regimenChanges: mergeById<RegimenChange>(base.regimenChanges, incoming.regimenChanges),
     settings,
   };
 }

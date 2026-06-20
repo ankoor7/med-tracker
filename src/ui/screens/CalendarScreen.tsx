@@ -13,6 +13,7 @@ import {
   clampInstant,
   dayEndInstant,
   dayStartInstant,
+  groupChangesByDay,
   instantToDayY,
   isoDateInZone,
   plannedSlotsForDate,
@@ -25,6 +26,7 @@ import {
 } from '../../core';
 import { useStore } from '../../store/store';
 import { Button, Card, ColorDot } from '../components/ui';
+import { ChangeDetail } from '../components/ChangeMarkers';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { GroupLogger, type GroupLoggerTarget } from '../components/GroupLogger';
 import { useNow } from '../lib/useNow';
@@ -68,9 +70,11 @@ export function CalendarScreen() {
   const now = useNow();
   const { zone, assumeTakenOnTime, medications, slots, doseLog, doseOverrides } = useScheduleData();
   const adjustDoseTime = useStore((s) => s.adjustDoseTime);
+  const regimenChanges = useStore((s) => s.regimenChanges);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
   const [groupTarget, setGroupTarget] = useState<GroupLoggerTarget | null>(null);
+  const [showChanges, setShowChanges] = useState(false);
 
   // The day being viewed/adjusted. Defaults to today but can be moved back or
   // forward (prev/next buttons or a horizontal swipe) so a dose missed late in a
@@ -82,6 +86,13 @@ export function CalendarScreen() {
 
   const dayStart = useMemo(() => dayStartInstant(selectedDate, zone), [selectedDate, zone]);
   const dayEnd = useMemo(() => dayEndInstant(selectedDate, zone), [selectedDate, zone]);
+
+  // Regimen changes recorded on the viewed day (Stage 16) — surfaced as a header
+  // chip that opens the same detail popover as the chart markers.
+  const changeGroup = useMemo(
+    () => groupChangesByDay(regimenChanges, zone).find((g) => g.date === selectedDate) ?? null,
+    [regimenChanges, zone, selectedDate],
+  );
 
   const dayLabel = useMemo(() => {
     if (isToday) return 'Today';
@@ -223,6 +234,25 @@ export function CalendarScreen() {
         <div className="flex flex-col items-center">
           <h2 className="text-lg font-semibold tracking-tight">{dayLabel}</h2>
           <span className="text-xs tabular-nums text-slate-400">{selectedDate}</span>
+          {changeGroup && (
+            <div className="relative mt-1">
+              <button
+                type="button"
+                className="rounded-full border border-amber-700 bg-amber-950/40 px-2 py-0.5 text-[11px] text-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+                aria-label={`${changeGroup.changes.length} regimen change${
+                  changeGroup.changes.length > 1 ? 's' : ''
+                } on this day`}
+                aria-expanded={showChanges}
+                onClick={() => setShowChanges((v) => !v)}
+              >
+                ⚙ {changeGroup.changes.length} regimen change
+                {changeGroup.changes.length > 1 ? 's' : ''}
+              </button>
+              {showChanges && (
+                <ChangeDetail group={changeGroup} onClose={() => setShowChanges(false)} />
+              )}
+            </div>
+          )}
         </div>
         <button
           type="button"

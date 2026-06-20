@@ -11,6 +11,7 @@ function dataset(): Dataset {
     doseOverrides: [],
     eventTypes: [],
     eventInstances: [],
+    regimenChanges: [],
     settings: settings(),
   };
 }

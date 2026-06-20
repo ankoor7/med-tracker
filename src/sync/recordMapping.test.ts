@@ -12,6 +12,7 @@ import {
   eventInstance,
   eventType,
   med,
+  regimenChange,
   settings,
   slot,
   logEntry,
@@ -45,9 +46,19 @@ describe('record mapping', () => {
       ['doseOverrides', override({ id: 'o', medId: 'm', slotId: 's' })],
       ['eventTypes', eventType({ id: 'et' })],
       ['eventInstances', eventInstance({ id: 'ei', typeId: 'et' })],
+      ['regimenChanges', regimenChange({ id: 'rc', slotId: 's' })],
     ] as const) {
       expect(validateSyncRecord(wrap(table, entity)).ok).toBe(true);
     }
+  });
+
+  it('round-trips a regimen change through the wire envelope', () => {
+    const c = regimenChange({ id: 'rc1', slotId: 's1', updatedAt: 7, version: 2 });
+    const rec = wrap('regimenChanges', c);
+    expect(rec).toMatchObject({ id: 'rc1', type: 'regimenChange', updatedAt: 7, version: 2 });
+    const { table, entity } = fromSyncRecord(rec);
+    expect(table).toBe('regimenChanges');
+    expect(entity).toMatchObject({ id: 'rc1', slotId: 's1', kind: 'slot-updated' });
   });
 
   it('round-trips an event type and instance through the wire envelope', () => {
@@ -107,6 +118,7 @@ describe('record mapping', () => {
     expect(tableForType('doseLog')).toBe('doseLog');
     expect(tableForType('eventType')).toBe('eventTypes');
     expect(tableForType('eventInstance')).toBe('eventInstances');
+    expect(tableForType('regimenChange')).toBe('regimenChanges');
     expect(tableForType('settings')).toBe('settings');
   });
 });

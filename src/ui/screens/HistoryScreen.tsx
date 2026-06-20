@@ -6,17 +6,21 @@ import {
   filterLog,
   formatDateTimeWithZone,
   formatTimeWithZone,
+  groupChangesByDay,
   levelSeriesFor,
   type DoseLogEntry,
   type HistoryFilter,
+  type IanaZone,
   type Medication,
+  type RegimenChange,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Card, ColorDot, Field, inputClass } from '../components/ui';
+import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
 import { BloodLevelChart } from '../components/BloodLevelChart';
+import { FieldDiffList } from '../components/ChangeMarkers';
 import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
 import { useNow } from '../lib/useNow';
@@ -36,6 +40,7 @@ export function HistoryScreen() {
   const slots = useStore((s) => s.slots);
   const medications = useStore((s) => s.medications);
   const doseLog = useStore((s) => s.doseLog);
+  const regimenChanges = useStore((s) => s.regimenChanges);
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
 
@@ -135,7 +140,7 @@ export function HistoryScreen() {
           </span>
         </div>
         <div className="mt-3">
-          <AdherenceChart days={timeline} />
+          <AdherenceChart days={timeline} changes={regimenChanges} zone={settings.zone} />
         </div>
       </Card>
 
@@ -147,6 +152,8 @@ export function HistoryScreen() {
           <BloodLevelChart
             series={levelSeries}
             doseMarkers={levelDoses.map((d) => d.actualInstant)}
+            changes={regimenChanges}
+            zone={settings.zone}
           />
         ) : (
           <p className="text-sm text-slate-400">
@@ -155,6 +162,8 @@ export function HistoryScreen() {
           </p>
         )}
       </Card>
+
+      <RegimenChangesCard changes={regimenChanges} zone={settings.zone} />
 
       <OuraPanel />
 
@@ -309,4 +318,100 @@ function LogRow({ entry, med: m }: { entry: DoseLogEntry; med: Medication | unde
 
 function Tag({ children, className = '' }: { children: ReactNode; className?: string }) {
   return <span className={`rounded-full border px-2 py-0.5 text-xs ${className}`}>{children}</span>;
+}
+
+// Reverse-chronological list of derived regimen changes (Stage 16), grouped by
+// day, with each change's field diffs. A change can be annotated with a note or
+// soft-deleted (its marker then disappears from the charts).
+function RegimenChangesCard({ changes, zone }: { changes: RegimenChange[]; zone: IanaZone }) {
+  const groups = useMemo(
+    // groupChangesByDay sorts ascending; reverse for newest-first display.
+    () => groupChangesByDay(changes, zone).slice().reverse(),
+    [changes, zone],
+  );
+
+  return (
+    <Card>
+      <h3 className="mb-2 text-sm font-medium">Regimen changes</h3>
+      {groups.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          No regimen changes yet. Editing a medication or schedule records a dated change here and a
+          marker on the charts above.
+        </p>
+      ) : (
+        <ul className="flex flex-col gap-3">
+          {groups.map((group) => (
+            <li key={group.date}>
+              <p className="mb-1 text-xs font-medium text-slate-400">{group.date}</p>
+              <ul className="flex flex-col gap-2">
+                {group.changes.map((c) => (
+                  <ChangeRow key={c.id} change={c} />
+                ))}
+              </ul>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
+function ChangeRow({ change }: { change: RegimenChange }) {
+  const addChangeNote = useStore((s) => s.addChangeNote);
+  const deleteChange = useStore((s) => s.deleteChange);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(change.note ?? '');
+
+  return (
+    <li className="rounded-md border border-slate-800 p-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-100">{change.summary}</p>
+          <FieldDiffList changes={change.changes} />
+          {change.note && !editing && (
+            <p className="mt-1 text-xs italic text-slate-400">“{change.note}”</p>
+          )}
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <button
+            type="button"
+            className="text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:text-slate-200"
+            onClick={() => setEditing((v) => !v)}
+            aria-label={change.note ? 'Edit note' : 'Add note'}
+          >
+            {change.note ? 'Edit note' : 'Add note'}
+          </button>
+          <button
+            type="button"
+            className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus:text-red-200"
+            onClick={() => deleteChange(change.id)}
+            aria-label="Delete change"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+      {editing && (
+        <div className="mt-2 flex items-end gap-2">
+          <Field label="Note">
+            <input
+              className={inputClass}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              aria-label="Change note"
+            />
+          </Field>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              addChangeNote(change.id, draft.trim());
+              setEditing(false);
+            }}
+          >
+            Save
+          </Button>
+        </div>
+      )}
+    </li>
+  );
 }

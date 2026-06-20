@@ -29,6 +29,7 @@ export function DataTransferPanel() {
     doseOverrides: store.doseOverrides,
     eventTypes: store.eventTypes,
     eventInstances: store.eventInstances,
+    regimenChanges: store.regimenChanges,
     settings: store.settings,
   });
 

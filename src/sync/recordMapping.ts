@@ -22,6 +22,7 @@ const TYPE_FOR_TABLE: Record<TableName, RecordType> = {
   doseOverrides: 'doseOverride',
   eventTypes: 'eventType',
   eventInstances: 'eventInstance',
+  regimenChanges: 'regimenChange',
   settings: 'settings',
 };
 
@@ -32,6 +33,7 @@ const TABLE_FOR_TYPE: Record<RecordType, TableName> = {
   doseOverride: 'doseOverrides',
   eventType: 'eventTypes',
   eventInstance: 'eventInstances',
+  regimenChange: 'regimenChanges',
   settings: 'settings',
 };
 

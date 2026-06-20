@@ -6,6 +6,7 @@ import type {
   EventType,
   Guardrails,
   Medication,
+  RegimenChange,
   Settings,
   Slot,
 } from '../core/types';
@@ -105,6 +106,23 @@ export function eventInstance(over: Partial<EventInstance> = {}): EventInstance 
     occurredAt: over.occurredAt ?? 0,
     zone: over.zone ?? 'Europe/London',
     values: over.values ?? { severity: 3, duration: 90 },
+    note: over.note,
+    updatedAt: over.updatedAt ?? 0,
+    version: over.version,
+    deleted: over.deleted,
+  };
+}
+
+export function regimenChange(over: Partial<RegimenChange> = {}): RegimenChange {
+  return {
+    id: over.id ?? id('change'),
+    changedAt: over.changedAt ?? 0,
+    zone: over.zone ?? 'Europe/London',
+    kind: over.kind ?? 'slot-updated',
+    medId: over.medId,
+    slotId: over.slotId,
+    summary: over.summary ?? 'Morning: Lamotrigine dose 100mg → 150mg',
+    changes: over.changes ?? [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
     note: over.note,
     updatedAt: over.updatedAt ?? 0,
     version: over.version,
