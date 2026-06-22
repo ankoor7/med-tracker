@@ -21,7 +21,9 @@ setup/teardown docs; LICENSE + contributing/security policy; secrets guidance
 (anon vs service-role key); documented pharmacology extension guide + example;
 first-run onboarding (create account + sign in; optional MFA + on-device lock);
 minimal release hardening (CSP, dependency audit).
-**Out:** hosted multi-tenant offering; app-store distribution (PWA install only).
+**Out:** hosted multi-tenant offering. (App-store distribution was originally out of
+scope here — PWA install only — but is now its own stage: **Stage 18** packages a
+local-first edition via Capacitor. This stage remains web/PWA + BYO-Supabase.)
 
 ## 3. Prerequisites
 The Supabase backend and simplified client from **Stage 8** (auth, `records` table
@@ -75,7 +77,12 @@ sync (Stage 5), and the feature stages (6–7).
 - **Extension example:** a sample strategy file (clearly a template, not medical
   advice) showing where equations go and that outputs are cap-validated.
 - **Release hardening:** strict CSP for the PWA (allow only the project's Supabase
-  origin); dependency audit in CI; production build checks; secret scan.
+  origin); dependency audit in CI; production build checks; secret scan. The CSP must
+  be **build-flavour-aware**: apply it to the **web/PWA build only** and do **not** bake
+  a Supabase-origin policy into a shared `index.html` that the Stage 18 native build
+  would inherit — that build has no Supabase origin to allow and serves from a
+  `capacitor://` scheme, so it needs its own minimal policy or none (see
+  `stage-18-app-store-packaging.md` §5).
 
 ## 6. Tasks
 1. Build the one-command setup wrapper (`supabase link`/`db push` + build + static

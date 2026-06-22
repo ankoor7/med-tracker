@@ -38,6 +38,9 @@ Do not start a stage before its prerequisites are met. The domain core (Stage 1)
 | 15 | Health-Condition Event Tracking | 1, 2, 4, 5, 8 | User-defined event types + synced flare-up logging |
 | 16 | Regimen Change Markers | 1, 2, 4, 5, 7, 8 | Synced prescription/schedule change records as dated, grouped, tappable markers on charts |
 | 17 | GP Adherence Summary | 1, 2, 7, 15, (16) | On-device clinician report of adherence + flare-ups; print/PDF/share, optional opt-in email |
+| 18 | Capacitor App Store Packaging | 1, 2, 6 | Local-first iOS app on the App Store via Capacitor; native local notifications fire while the app is closed (no backend/account) |
+| 19 | iCloud Sync (App Store edition) | 2, 18 | Cross-device sync over the user's own iCloud, no developer backend; whole-dataset blob (reuses `transfer.ts` merge) or record-level CloudKit via the `SyncBackend` port |
+| 20 | Doctor's Appointments & Tests | 1, 2, 4, 5, 8 | Mark upcoming/past appointments & tests with outcome notes; new synced `Appointment` entity, surfaced as a section in History (no reminders) |
 
 ```mermaid
 flowchart LR
@@ -60,6 +63,7 @@ flowchart LR
 - **Milestone C — Daily-driver polish (Stages 6–7).** Reminders and history/visualisation.
 - **Milestone D — Re-platform (Stage 8).** Drop AWS; move the cloud onto Supabase (GoTrue + Postgres + RLS), collapsing the custom API tier.
 - **Milestone E — Release (Stages 9–10).** Open source with bring-your-own-Supabase, plus a browser-driven E2E suite that proves UI actions reach the Supabase `records` table.
+- **Milestone F — App Store (Stages 18–19).** Ship the app to the Apple App Store via Capacitor. Stage 18 ships the **local-first** edition first (native local notifications fix the closed-app reminder weakness; no backend, no account, no Supabase in this build) to de-risk submission; Stage 19 adds **iCloud sync** as a point release, keeping data in the user's own iCloud (still no developer backend). This is single-tenant — PRD non-goal **N3** (no multi-tenant) stays in force. See `specs/stage-18-app-store-packaging.md` (+ its execution plan) and `spikes/2026-06-20-capacitor-app-store-mechanics.md`.
 
 Stages 6 and 7 can proceed in parallel with the cloud track once Stage 2 lands, if capacity allows; otherwise follow the table order. Stage 4 now depends on the Stage 3 backend. The Supabase re-platform (Stage 8) lands after the feature track and **before** open-source packaging (Stage 9), so the released project ships on Supabase, not AWS.
 
