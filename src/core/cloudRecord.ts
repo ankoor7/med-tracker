@@ -15,6 +15,7 @@ export type RecordType =
   | 'eventType'
   | 'eventInstance'
   | 'regimenChange'
+  | 'appointment'
   | 'settings';
 
 export const RECORD_TYPES: readonly RecordType[] = [
@@ -25,6 +26,7 @@ export const RECORD_TYPES: readonly RecordType[] = [
   'eventType',
   'eventInstance',
   'regimenChange',
+  'appointment',
   'settings',
 ];
 
@@ -46,6 +48,14 @@ const REGIMEN_CHANGE_KIND_NAMES: readonly string[] = [
  * validation. Kept in lock-step with EVENT_PROPERTY_TYPES (and validate_record).
  */
 const EVENT_PROPERTY_TYPE_NAMES: readonly string[] = ['number', 'text', 'scale', 'duration'];
+
+/**
+ * Appointment kind/status vocabularies, mirrored from core/appointments.ts for
+ * envelope validation. Kept in lock-step with APPOINTMENT_KINDS / APPOINTMENT_STATUSES
+ * (and validate_record).
+ */
+const APPOINTMENT_KIND_NAMES: readonly string[] = ['appointment', 'test', 'other'];
+const APPOINTMENT_STATUS_NAMES: readonly string[] = ['scheduled', 'completed', 'cancelled'];
 
 /**
  * A readable, typed record as stored in the cloud and moved by the sync engine
@@ -118,25 +128,23 @@ export function validateSyncRecord(rec: unknown): ValidationResult {
   return validatePayload(rec.type as RecordType, rec.payload);
 }
 
+// Dispatch table: one validator per record type. A map (vs a switch) keeps this
+// O(1) and flat — adding a type is one entry, and TS enforces exhaustiveness via
+// the Record<RecordType, …> key. Functions are hoisted, so forward refs are fine.
+const PAYLOAD_VALIDATORS: Record<RecordType, (p: Record<string, unknown>) => ValidationResult> = {
+  medication: validateMedication,
+  slot: validateSlot,
+  doseLog: validateDoseLog,
+  doseOverride: validateDoseOverride,
+  eventType: validateEventType,
+  eventInstance: validateEventInstance,
+  regimenChange: validateRegimenChange,
+  appointment: validateAppointment,
+  settings: validateSettings,
+};
+
 function validatePayload(type: RecordType, payload: Record<string, unknown>): ValidationResult {
-  switch (type) {
-    case 'medication':
-      return validateMedication(payload);
-    case 'slot':
-      return validateSlot(payload);
-    case 'doseLog':
-      return validateDoseLog(payload);
-    case 'doseOverride':
-      return validateDoseOverride(payload);
-    case 'eventType':
-      return validateEventType(payload);
-    case 'eventInstance':
-      return validateEventInstance(payload);
-    case 'regimenChange':
-      return validateRegimenChange(payload);
-    case 'settings':
-      return validateSettings(payload);
-  }
+  return PAYLOAD_VALIDATORS[type](payload);
 }
 
 function validateGuardrails(v: unknown): boolean {
@@ -231,6 +239,19 @@ function validateRegimenChange(p: Record<string, unknown>): ValidationResult {
   if ('note' in p && p.note !== undefined && typeof p.note !== 'string') {
     return fail('regimenChange.note must be a string');
   }
+  return ok;
+}
+
+function validateAppointment(p: Record<string, unknown>): ValidationResult {
+  if (!isNonEmptyString(p.title)) return fail('appointment.title required');
+  if (typeof p.kind !== 'string' || !APPOINTMENT_KIND_NAMES.includes(p.kind)) {
+    return fail('appointment.kind invalid');
+  }
+  if (!isFiniteNumber(p.scheduledAt)) return fail('appointment.scheduledAt required');
+  if (typeof p.status !== 'string' || !APPOINTMENT_STATUS_NAMES.includes(p.status)) {
+    return fail('appointment.status invalid');
+  }
+  if (!isNonEmptyString(p.zone)) return fail('appointment.zone required');
   return ok;
 }
 

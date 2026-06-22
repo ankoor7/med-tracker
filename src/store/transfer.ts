@@ -10,6 +10,7 @@
 import { isNewerRecord, validateSyncRecord } from '../core/cloudRecord';
 import { formatDateTimeWithZone, formatTimeWithZone } from '../core/time';
 import type {
+  Appointment,
   Dataset,
   DoseLogEntry,
   DoseOverride,
@@ -80,8 +81,8 @@ export function parseImport(text: string): ImportResult {
     return { ok: false, reason: 'Missing medications, slots, or dose log.' };
   }
   if (!settings || typeof settings !== 'object') return { ok: false, reason: 'Missing settings.' };
-  // doseOverrides / eventTypes / eventInstances / regimenChanges are newer than
-  // older exports; default each to none for back-compat.
+  // doseOverrides / eventTypes / eventInstances / regimenChanges / appointments are
+  // newer than older exports; default each to none for back-compat.
   const optional = <K extends keyof Dataset>(key: K): Dataset[K] | [] => {
     const value = (data as Partial<Dataset>)[key];
     return Array.isArray(value) ? (value as Dataset[K]) : [];
@@ -90,17 +91,23 @@ export function parseImport(text: string): ImportResult {
   const eventTypes = optional('eventTypes');
   const eventInstances = optional('eventInstances');
   const regimenChanges = optional('regimenChanges');
+  const appointments = optional('appointments');
 
-  const error =
-    validateEntities('medications', medications) ??
-    validateEntities('slots', slots) ??
-    validateEntities('doseLog', doseLog) ??
-    validateEntities('doseOverrides', doseOverrides) ??
-    validateEntities('eventTypes', eventTypes) ??
-    validateEntities('eventInstances', eventInstances) ??
-    validateEntities('regimenChanges', regimenChanges) ??
-    validateEntities('settings', [{ ...(settings as Settings), id: 'settings' }]);
-  if (error) return { ok: false, reason: error };
+  const groups: [TableName, { id: string }[]][] = [
+    ['medications', medications],
+    ['slots', slots],
+    ['doseLog', doseLog],
+    ['doseOverrides', doseOverrides],
+    ['eventTypes', eventTypes],
+    ['eventInstances', eventInstances],
+    ['regimenChanges', regimenChanges],
+    ['appointments', appointments],
+    ['settings', [{ ...(settings as Settings), id: 'settings' }]],
+  ];
+  for (const [table, entities] of groups) {
+    const error = validateEntities(table, entities);
+    if (error) return { ok: false, reason: error };
+  }
 
   return {
     ok: true,
@@ -112,6 +119,7 @@ export function parseImport(text: string): ImportResult {
       eventTypes,
       eventInstances,
       regimenChanges,
+      appointments,
       settings: settings as Settings,
     },
   };
@@ -153,6 +161,7 @@ export function mergeDatasets(base: Dataset, incoming: Dataset, mode: ImportMode
     eventTypes: mergeById<EventType>(base.eventTypes, incoming.eventTypes),
     eventInstances: mergeById<EventInstance>(base.eventInstances, incoming.eventInstances),
     regimenChanges: mergeById<RegimenChange>(base.regimenChanges, incoming.regimenChanges),
+    appointments: mergeById<Appointment>(base.appointments, incoming.appointments),
     settings,
   };
 }

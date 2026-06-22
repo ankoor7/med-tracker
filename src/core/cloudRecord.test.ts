@@ -328,4 +328,64 @@ describe('validateSyncRecord — typed payloads', () => {
     );
     expect(res).toMatchObject({ ok: false, reason: /changes entry/ });
   });
+
+  const appointmentRecord = (payload: object): unknown => ({
+    id: 'ap1',
+    type: 'appointment',
+    updatedAt: 1,
+    version: 1,
+    payload,
+  });
+
+  it('accepts a valid appointment', () => {
+    const res = validateSyncRecord(
+      appointmentRecord({
+        kind: 'appointment',
+        title: 'Neurology review',
+        scheduledAt: 1_700_000_000_000,
+        zone: 'Europe/London',
+        status: 'scheduled',
+        provider: 'Dr Patel',
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects an appointment missing the title', () => {
+    const res = validateSyncRecord(
+      appointmentRecord({
+        kind: 'test',
+        scheduledAt: 1_700_000_000_000,
+        zone: 'Europe/London',
+        status: 'scheduled',
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /title/ });
+  });
+
+  it('rejects an appointment with an unknown kind', () => {
+    const res = validateSyncRecord(
+      appointmentRecord({
+        kind: 'surgery',
+        title: 'X',
+        scheduledAt: 1,
+        zone: 'Europe/London',
+        status: 'scheduled',
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /kind/ });
+  });
+
+  it('rejects an appointment with an unknown status', () => {
+    const res = validateSyncRecord(
+      appointmentRecord({
+        kind: 'appointment',
+        title: 'X',
+        scheduledAt: 1,
+        zone: 'Europe/London',
+        status: 'pending',
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /status/ });
+  });
 });

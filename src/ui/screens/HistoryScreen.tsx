@@ -1,21 +1,40 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
+  APPOINTMENT_KINDS,
+  APPOINTMENT_STATUSES,
   activeStrategy,
   adherenceTimeline,
+  appointmentKindLabel,
+  appointmentStatusLabel,
+  appointmentTiming,
   computeAdherence,
+  datetimeLocalToInstant,
   filterLog,
   formatDateTimeWithZone,
   formatTimeWithZone,
   groupChangesByDay,
+  instantToDatetimeLocal,
   levelSeriesFor,
+  validateAppointment,
+  type Appointment,
+  type AppointmentKind,
+  type AppointmentStatus,
   type DoseLogEntry,
   type HistoryFilter,
   type IanaZone,
   type Medication,
   type RegimenChange,
 } from '../../core';
-import { useStore } from '../../store/store';
-import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
+import { useStore, type AppointmentInput } from '../../store/store';
+import {
+  Button,
+  Card,
+  ColorDot,
+  Field,
+  FormErrors,
+  inputClass,
+  ModalActions,
+} from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
@@ -23,6 +42,7 @@ import { BloodLevelChart } from '../components/BloodLevelChart';
 import { FieldDiffList } from '../components/ChangeMarkers';
 import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
+import { Modal } from '../components/Modal';
 import { useNow } from '../lib/useNow';
 
 const COMMON_ZONES = [
@@ -162,6 +182,8 @@ export function HistoryScreen() {
           </p>
         )}
       </Card>
+
+      <AppointmentsCard />
 
       <RegimenChangesCard changes={regimenChanges} zone={settings.zone} />
 
@@ -413,5 +435,283 @@ function ChangeRow({ change }: { change: RegimenChange }) {
         </div>
       )}
     </li>
+  );
+}
+
+// ---- Appointments & tests (Stage 20) -----------------------------------------
+// Upcoming and past medical appointments/tests, split by derived timing, with a
+// free-text notes field for what happened. Records only — no dose value, no
+// scheduling/adherence impact (PRD NFR-Safety).
+function AppointmentsCard() {
+  const now = useNow();
+  const appointments = useStore((s) => s.appointments);
+  const settings = useStore((s) => s.settings);
+  const deleteAppointment = useStore((s) => s.deleteAppointment);
+  const [editing, setEditing] = useState<Appointment | 'new' | null>(null);
+
+  const { upcoming, past } = useMemo(() => {
+    const live = appointments.filter((a) => !a.deleted);
+    return {
+      upcoming: live
+        .filter((a) => appointmentTiming(a.scheduledAt, now) === 'upcoming')
+        .sort((a, b) => a.scheduledAt - b.scheduledAt),
+      past: live
+        .filter((a) => appointmentTiming(a.scheduledAt, now) === 'past')
+        .sort((a, b) => b.scheduledAt - a.scheduledAt),
+    };
+  }, [appointments, now]);
+
+  return (
+    <Card>
+      <div className="mb-2 flex items-center justify-between">
+        <h3 className="text-sm font-medium">Appointments &amp; tests</h3>
+        <Button variant="secondary" onClick={() => setEditing('new')}>
+          New
+        </Button>
+      </div>
+
+      {upcoming.length === 0 && past.length === 0 ? (
+        <p className="text-sm text-slate-400">
+          No appointments yet. Add a doctor's appointment or test, then record what happened.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <AppointmentList
+            title="Upcoming"
+            appts={upcoming}
+            empty="Nothing upcoming."
+            onEdit={setEditing}
+            onDelete={deleteAppointment}
+          />
+          <AppointmentList
+            title="Past"
+            appts={past}
+            empty="No past appointments."
+            onEdit={setEditing}
+            onDelete={deleteAppointment}
+          />
+        </div>
+      )}
+
+      {editing && (
+        <AppointmentEditor
+          zone={settings.zone}
+          initial={editing === 'new' ? null : editing}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </Card>
+  );
+}
+
+function AppointmentList({
+  title,
+  appts,
+  empty,
+  onEdit,
+  onDelete,
+}: {
+  title: string;
+  appts: Appointment[];
+  empty: string;
+  onEdit: (a: Appointment) => void;
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <div>
+      <p className="mb-1 text-xs font-medium text-slate-400">{title}</p>
+      {appts.length === 0 ? (
+        <p className="text-xs text-slate-500">{empty}</p>
+      ) : (
+        <ul className="flex flex-col divide-y divide-slate-800">
+          {appts.map((a) => (
+            <AppointmentRow key={a.id} appt={a} onEdit={onEdit} onDelete={onDelete} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function AppointmentRow({
+  appt,
+  onEdit,
+  onDelete,
+}: {
+  appt: Appointment;
+  onEdit: (a: Appointment) => void;
+  onDelete: (id: string) => void;
+}) {
+  const cancelled = appt.status === 'cancelled';
+  return (
+    <li className="flex items-start justify-between gap-2 py-2">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag className="border-slate-600 text-slate-300">{appointmentKindLabel(appt.kind)}</Tag>
+          <span className={`text-sm font-medium ${cancelled ? 'text-slate-500 line-through' : ''}`}>
+            {appt.title}
+          </span>
+          {appt.status !== 'scheduled' && (
+            <Tag
+              className={
+                appt.status === 'completed'
+                  ? 'border-emerald-700 text-emerald-300'
+                  : 'border-slate-600 text-slate-400'
+              }
+            >
+              {appointmentStatusLabel(appt.status)}
+            </Tag>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs text-slate-400">
+          {formatDateTimeWithZone(appt.scheduledAt, appt.zone)}
+          {appt.provider ? ` · ${appt.provider}` : ''}
+          {appt.location ? ` · ${appt.location}` : ''}
+        </p>
+        {appt.notes && <p className="mt-0.5 text-xs text-slate-300">{appt.notes}</p>}
+      </div>
+      <div className="flex shrink-0 flex-col gap-1">
+        <Button variant="secondary" onClick={() => onEdit(appt)}>
+          Edit
+        </Button>
+        <Button variant="ghost" onClick={() => onDelete(appt.id)}>
+          Delete
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+// Stage 20 form modal; revisit (extract fields / add a unit test) when next touched.
+// fallow-ignore-next-line complexity
+function AppointmentEditor({
+  zone,
+  initial,
+  onClose,
+}: {
+  zone: string;
+  initial: Appointment | null;
+  onClose: () => void;
+}) {
+  const addAppointment = useStore((s) => s.addAppointment);
+  const updateAppointment = useStore((s) => s.updateAppointment);
+
+  const [kind, setKind] = useState<AppointmentKind>(initial?.kind ?? 'appointment');
+  const [title, setTitle] = useState(initial?.title ?? '');
+  const [when, setWhen] = useState(
+    instantToDatetimeLocal(initial?.scheduledAt ?? Date.now(), zone),
+  );
+  const [status, setStatus] = useState<AppointmentStatus>(initial?.status ?? 'scheduled');
+  const [provider, setProvider] = useState(initial?.provider ?? '');
+  const [location, setLocation] = useState(initial?.location ?? '');
+  const [notes, setNotes] = useState(initial?.notes ?? '');
+
+  const scheduledAt = datetimeLocalToInstant(when, zone);
+  const errors = validateAppointment({ kind, title, scheduledAt, status });
+  const canSave = errors.length === 0;
+
+  const save = () => {
+    if (!canSave) return;
+    const input: AppointmentInput = {
+      kind,
+      title: title.trim(),
+      scheduledAt,
+      status,
+      provider: provider.trim() || undefined,
+      location: location.trim() || undefined,
+      notes: notes.trim() || undefined,
+    };
+    if (initial) updateAppointment(initial.id, input);
+    else addAppointment(input);
+    onClose();
+  };
+
+  return (
+    <Modal title={initial ? 'Edit appointment' : 'New appointment'} onClose={onClose}>
+      <div className="flex flex-col gap-3">
+        <Field label="Kind">
+          <select
+            className={inputClass}
+            value={kind}
+            onChange={(e) => setKind(e.target.value as AppointmentKind)}
+            aria-label="Kind"
+          >
+            {APPOINTMENT_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {appointmentKindLabel(k)}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Title">
+          <input
+            className={inputClass}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            aria-label="Title"
+            placeholder="e.g. Neurology review"
+          />
+        </Field>
+
+        <Field label="Date & time">
+          <input
+            type="datetime-local"
+            className={inputClass}
+            value={when}
+            onChange={(e) => setWhen(e.target.value)}
+            aria-label="Date and time"
+          />
+        </Field>
+
+        <Field label="Status">
+          <select
+            className={inputClass}
+            value={status}
+            onChange={(e) => setStatus(e.target.value as AppointmentStatus)}
+            aria-label="Status"
+          >
+            {APPOINTMENT_STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {appointmentStatusLabel(s)}
+              </option>
+            ))}
+          </select>
+        </Field>
+
+        <Field label="Provider">
+          <input
+            className={inputClass}
+            value={provider}
+            onChange={(e) => setProvider(e.target.value)}
+            aria-label="Provider"
+            placeholder="Clinician / clinic"
+          />
+        </Field>
+
+        <Field label="Location">
+          <input
+            className={inputClass}
+            value={location}
+            onChange={(e) => setLocation(e.target.value)}
+            aria-label="Location"
+          />
+        </Field>
+
+        <Field label="Notes — what happened">
+          <textarea
+            className={inputClass}
+            rows={3}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            aria-label="Notes"
+          />
+        </Field>
+
+        <FormErrors errors={errors} />
+
+        <ModalActions onCancel={onClose} onSave={save} canSave={canSave} />
+      </div>
+    </Modal>
   );
 }

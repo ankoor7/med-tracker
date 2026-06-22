@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EXPORT_APP_TAG, exportCSV, exportJSON, mergeDatasets, parseImport } from './transfer';
 import type { Dataset } from '../core/types';
 import {
+  appointment,
   eventInstance,
   eventType,
   logEntry,
@@ -12,9 +13,11 @@ import {
 } from '../test/fixtures';
 
 function dataset(over: Partial<Dataset> = {}): Dataset {
+  // Full defaults, then let `over` replace whole fields (keeps this flat — no
+  // per-field branching).
   return {
-    medications: over.medications ?? [med({ id: 'm1', name: 'Levo', updatedAt: 1000, version: 1 })],
-    slots: over.slots ?? [
+    medications: [med({ id: 'm1', name: 'Levo', updatedAt: 1000, version: 1 })],
+    slots: [
       slot({
         id: 's1',
         time: '08:00',
@@ -23,18 +26,18 @@ function dataset(over: Partial<Dataset> = {}): Dataset {
         version: 1,
       }),
     ],
-    doseLog: over.doseLog ?? [
-      logEntry({ id: 'l1', medId: 'm1', slotId: 's1', updatedAt: 1000, version: 1 }),
-    ],
-    doseOverrides: over.doseOverrides ?? [],
-    eventTypes: over.eventTypes ?? [eventType({ id: 'et1', updatedAt: 1000, version: 1 })],
-    eventInstances: over.eventInstances ?? [
+    doseLog: [logEntry({ id: 'l1', medId: 'm1', slotId: 's1', updatedAt: 1000, version: 1 })],
+    doseOverrides: [],
+    eventTypes: [eventType({ id: 'et1', updatedAt: 1000, version: 1 })],
+    eventInstances: [
       eventInstance({ id: 'ei1', typeId: 'et1', occurredAt: 1000, updatedAt: 1000, version: 1 }),
     ],
-    regimenChanges: over.regimenChanges ?? [
+    regimenChanges: [
       regimenChange({ id: 'rc1', slotId: 's1', changedAt: 1000, updatedAt: 1000, version: 1 }),
     ],
-    settings: over.settings ?? settings({ zone: 'Europe/London', updatedAt: 1000, version: 1 }),
+    appointments: [appointment({ id: 'ap1', scheduledAt: 1000, updatedAt: 1000, version: 1 })],
+    settings: settings({ zone: 'Europe/London', updatedAt: 1000, version: 1 }),
+    ...over,
   };
 }
 
@@ -54,6 +57,7 @@ describe('JSON export/import round-trip (AC5)', () => {
       eventTypes: [],
       eventInstances: [],
       regimenChanges: [],
+      appointments: [],
       settings: original.settings,
     };
     expect(mergeDatasets(empty, result.data, 'replace')).toEqual(original);

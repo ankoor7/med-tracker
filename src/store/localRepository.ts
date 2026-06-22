@@ -6,6 +6,7 @@ import Dexie, { type Table } from 'dexie';
 import { isNewerRecord, type SyncRecord } from '../core/cloudRecord';
 import type { OuraDaySummary } from '../core/oura';
 import type {
+  Appointment,
   Dataset,
   DoseLogEntry,
   DoseOverride,
@@ -38,6 +39,7 @@ export class SteadyDoseDB extends Dexie {
   eventTypes!: Table<EventType, string>;
   eventInstances!: Table<EventInstance, string>;
   regimenChanges!: Table<RegimenChange, string>;
+  appointments!: Table<Appointment, string>;
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<SyncRecord, string>;
@@ -77,6 +79,11 @@ export class SteadyDoseDB extends Dexie {
     this.version(6).stores({
       regimenChanges: 'id, updatedAt, deleted, changedAt',
     });
+    // v7 (Stage 20): doctor's appointments & tests; indexed by scheduledAt for
+    // upcoming/past splitting and by status.
+    this.version(7).stores({
+      appointments: 'id, updatedAt, deleted, scheduledAt, status',
+    });
   }
 }
 
@@ -88,6 +95,7 @@ const TABLES: TableName[] = [
   'eventTypes',
   'eventInstances',
   'regimenChanges',
+  'appointments',
 ];
 
 export class LocalRepository implements Repository {
@@ -102,6 +110,7 @@ export class LocalRepository implements Repository {
       eventTypes,
       eventInstances,
       regimenChanges,
+      appointments,
       settingsRow,
       versionStr,
     ] = await Promise.all([
@@ -112,6 +121,7 @@ export class LocalRepository implements Repository {
       this.db.eventTypes.toArray(),
       this.db.eventInstances.toArray(),
       this.db.regimenChanges.toArray(),
+      this.db.appointments.toArray(),
       this.db.settings.get(SETTINGS_ID),
       this.getMeta(META_SCHEMA_VERSION),
     ]);
@@ -124,7 +134,8 @@ export class LocalRepository implements Repository {
       doseLog.length === 0 &&
       eventTypes.length === 0 &&
       eventInstances.length === 0 &&
-      regimenChanges.length === 0
+      regimenChanges.length === 0 &&
+      appointments.length === 0
     ) {
       return null;
     }
@@ -138,6 +149,7 @@ export class LocalRepository implements Repository {
       eventTypes,
       eventInstances,
       regimenChanges,
+      appointments,
       settings,
     };
 
@@ -265,6 +277,7 @@ export class LocalRepository implements Repository {
         this.db.eventTypes,
         this.db.eventInstances,
         this.db.regimenChanges,
+        this.db.appointments,
         this.db.settings,
         this.db.outbox,
       ],
@@ -276,6 +289,7 @@ export class LocalRepository implements Repository {
         await this.db.eventTypes.bulkPut(data.eventTypes);
         await this.db.eventInstances.bulkPut(data.eventInstances);
         await this.db.regimenChanges.bulkPut(data.regimenChanges);
+        await this.db.appointments.bulkPut(data.appointments);
         await this.putSettings(data.settings);
       },
     );

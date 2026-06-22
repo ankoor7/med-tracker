@@ -180,6 +180,31 @@ export interface EventInstance {
   deleted?: boolean;
 }
 
+// --- Doctor's appointments & tests (Stage 20) --------------------------------
+// A scheduled (or past) medical appointment or test, with free-text notes for
+// what happened. Unlike an EventInstance (a point-in-time occurrence that already
+// happened), an appointment is scheduled future→past and carries a status
+// lifecycle and outcome notes. "Upcoming vs past" is derived from `scheduledAt`,
+// never stored. The app never originates an appointment — it records the user's.
+
+export type AppointmentKind = 'appointment' | 'test' | 'other';
+export type AppointmentStatus = 'scheduled' | 'completed' | 'cancelled';
+
+export interface Appointment {
+  id: string;
+  kind: AppointmentKind;
+  title: string; // e.g. "Neurology review", "Blood test (LFTs)"
+  scheduledAt: Instant; // when it is / was (UTC ms) — drives upcoming vs past
+  zone: IanaZone; // zone in effect when set (stable display)
+  status: AppointmentStatus;
+  provider?: string; // clinician / clinic / department
+  location?: string;
+  notes?: string; // free text: what happened / things to remember
+  updatedAt: Instant;
+  version?: number;
+  deleted?: boolean;
+}
+
 // Aggregate of all syncable records — used by the store and (Stage 2) repository.
 export interface Dataset {
   medications: Medication[];
@@ -189,6 +214,7 @@ export interface Dataset {
   eventTypes: EventType[];
   eventInstances: EventInstance[];
   regimenChanges: RegimenChange[];
+  appointments: Appointment[];
   settings: Settings;
 }
 

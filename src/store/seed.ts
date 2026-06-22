@@ -6,6 +6,8 @@ import type { Dataset } from '../core/types';
 export function seedDataset(now: number): Dataset {
   const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
   const fiveDaysAgo = now - 5 * 24 * 60 * 60 * 1000;
+  const twoWeeksAgo = now - 14 * 24 * 60 * 60 * 1000;
+  const inTenDays = now + 10 * 24 * 60 * 60 * 1000;
 
   const lamotrigine = {
     id: 'seed-med-lamotrigine',
@@ -108,6 +110,35 @@ export function seedDataset(now: number): Dataset {
         summary: 'Morning: Lamotrigine dose 100mg → 150mg',
         changes: [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
         updatedAt: fiveDaysAgo,
+        version: 1,
+      },
+    ],
+    // Example appointments (Stage 20): one upcoming review, one past test with
+    // outcome notes so the "what happened" field is discoverable on first run.
+    appointments: [
+      {
+        id: 'seed-appt-neurology',
+        kind: 'appointment' as const,
+        title: 'Neurology review',
+        scheduledAt: inTenDays,
+        zone: hostZone,
+        status: 'scheduled' as const,
+        provider: 'Dr Patel',
+        location: 'City Hospital, Neurology',
+        notes: 'Ask about the morning Lamotrigine increase.',
+        updatedAt: now,
+        version: 1,
+      },
+      {
+        id: 'seed-appt-bloods',
+        kind: 'test' as const,
+        title: 'Blood test (Lamotrigine level)',
+        scheduledAt: twoWeeksAgo,
+        zone: hostZone,
+        status: 'completed' as const,
+        provider: 'GP surgery',
+        notes: 'Level within range; continue current dose.',
+        updatedAt: twoWeeksAgo,
         version: 1,
       },
     ],

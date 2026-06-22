@@ -1,5 +1,6 @@
 // Test fixtures — minimal factory helpers for domain entities.
 import type {
+  Appointment,
   DoseLogEntry,
   DoseOverride,
   EventInstance,
@@ -124,6 +125,23 @@ export function regimenChange(over: Partial<RegimenChange> = {}): RegimenChange 
     summary: over.summary ?? 'Morning: Lamotrigine dose 100mg → 150mg',
     changes: over.changes ?? [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
     note: over.note,
+    updatedAt: over.updatedAt ?? 0,
+    version: over.version,
+    deleted: over.deleted,
+  };
+}
+
+export function appointment(over: Partial<Appointment> = {}): Appointment {
+  return {
+    id: over.id ?? id('appt'),
+    kind: over.kind ?? 'appointment',
+    title: over.title ?? 'Neurology review',
+    scheduledAt: over.scheduledAt ?? 0,
+    zone: over.zone ?? 'Europe/London',
+    status: over.status ?? 'scheduled',
+    provider: over.provider,
+    location: over.location,
+    notes: over.notes,
     updatedAt: over.updatedAt ?? 0,
     version: over.version,
     deleted: over.deleted,

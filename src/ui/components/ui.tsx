@@ -119,6 +119,42 @@ export function Ring({
   );
 }
 
+/** A list of human-readable validation messages; renders nothing when empty. */
+export function FormErrors({ errors }: { errors: string[] }) {
+  if (errors.length === 0) return null;
+  return (
+    <ul className="text-xs text-red-300">
+      {errors.map((msg) => (
+        <li key={msg}>⚠ {msg}</li>
+      ))}
+    </ul>
+  );
+}
+
+/** Right-aligned Cancel / Save footer shared by modal forms. */
+export function ModalActions({
+  onCancel,
+  onSave,
+  canSave = true,
+  saveLabel = 'Save',
+}: {
+  onCancel: () => void;
+  onSave: () => void;
+  canSave?: boolean;
+  saveLabel?: string;
+}) {
+  return (
+    <div className="mt-1 flex justify-end gap-2">
+      <Button variant="ghost" onClick={onCancel}>
+        Cancel
+      </Button>
+      <Button onClick={onSave} disabled={!canSave}>
+        {saveLabel}
+      </Button>
+    </div>
+  );
+}
+
 /** Big calm numeric readout with a small label underneath (Oura stat style). */
 export function Stat({
   value,

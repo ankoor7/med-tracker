@@ -14,6 +14,9 @@ import {
   normalizeOuraData,
   overrideMatchesOccurrence,
   slotSubject,
+  type Appointment,
+  type AppointmentKind,
+  type AppointmentStatus,
   type DoseLogEntry,
   type DoseOverride,
   type EventInstance,
@@ -88,6 +91,16 @@ export interface EventInstanceInput {
   note?: string;
 }
 
+export interface AppointmentInput {
+  kind: AppointmentKind;
+  title: string;
+  scheduledAt: Instant;
+  status: AppointmentStatus;
+  provider?: string;
+  location?: string;
+  notes?: string;
+}
+
 interface StoreState {
   hydrated: boolean;
   medications: Medication[];
@@ -97,6 +110,7 @@ interface StoreState {
   eventTypes: EventType[];
   eventInstances: EventInstance[];
   regimenChanges: RegimenChange[];
+  appointments: Appointment[];
   settings: Settings;
 
   // ---- Oura health data (Stage 13) -----------------------------------------
@@ -153,6 +167,11 @@ interface StoreState {
   /** Soft-delete (tombstone) a regimen change so its marker disappears. */
   deleteChange: (id: string) => void;
 
+  // ---- Doctor's appointments & tests (Stage 20) -----------------------------
+  addAppointment: (input: AppointmentInput) => Appointment;
+  updateAppointment: (id: string, patch: Partial<AppointmentInput>) => void;
+  deleteAppointment: (id: string) => void;
+
   /** Apply an imported dataset (Stage 7), replacing or LWW-merging the current. */
   importData: (incoming: Dataset, mode: ImportMode) => void;
 }
@@ -200,6 +219,7 @@ export const useStore = create<StoreState>((set, get) => {
     eventTypes: [],
     eventInstances: [],
     regimenChanges: [],
+    appointments: [],
     settings: {
       zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
       adherenceWindowDays: 7,
@@ -236,6 +256,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (const s of data.slots) persistUpsert('slots', s);
       for (const t of data.eventTypes) persistUpsert('eventTypes', t);
       for (const c of data.regimenChanges) persistUpsert('regimenChanges', c);
+      for (const a of data.appointments) persistUpsert('appointments', a);
       persistSettings(data.settings);
     },
 
@@ -750,6 +771,59 @@ export const useStore = create<StoreState>((set, get) => {
       if (tombstoned) persistUpsert('regimenChanges', tombstoned);
     },
 
+    // ---- Doctor's appointments & tests (Stage 20) -----------------------------
+
+    addAppointment: (input) => {
+      const now = Date.now();
+      const { settings } = get();
+      // Capture the active zone (like logEvent) so the time displays stably even
+      // if the zone later changes. The app never originates an appointment.
+      const appt: Appointment = stamp(
+        {
+          id: newId(),
+          kind: input.kind,
+          title: input.title,
+          scheduledAt: input.scheduledAt,
+          zone: settings.zone,
+          status: input.status,
+          provider: input.provider,
+          location: input.location,
+          notes: input.notes,
+          updatedAt: now,
+        },
+        now,
+      );
+      set((s) => ({ appointments: [...s.appointments, appt] }));
+      persistUpsert('appointments', appt);
+      return appt;
+    },
+
+    updateAppointment: (id, patch) => {
+      const now = Date.now();
+      let updated: Appointment | undefined;
+      set((s) => ({
+        appointments: s.appointments.map((a) => {
+          if (a.id !== id) return a;
+          updated = stamp({ ...a, ...patch }, now);
+          return updated;
+        }),
+      }));
+      if (updated) persistUpsert('appointments', updated);
+    },
+
+    deleteAppointment: (id) => {
+      const now = Date.now();
+      let tombstoned: Appointment | undefined;
+      set((s) => ({
+        appointments: s.appointments.map((a) => {
+          if (a.id !== id) return a;
+          tombstoned = stamp({ ...a, deleted: true }, now);
+          return tombstoned;
+        }),
+      }));
+      if (tombstoned) persistUpsert('appointments', tombstoned);
+    },
+
     importData: (incoming, mode) => {
       const {
         medications,
@@ -759,6 +833,7 @@ export const useStore = create<StoreState>((set, get) => {
         eventTypes,
         eventInstances,
         regimenChanges,
+        appointments,
         settings,
       } = get();
       const merged = mergeDatasets(
@@ -770,6 +845,7 @@ export const useStore = create<StoreState>((set, get) => {
           eventTypes,
           eventInstances,
           regimenChanges,
+          appointments,
           settings,
         },
         incoming,
@@ -784,6 +860,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (const t of merged.eventTypes) persistUpsert('eventTypes', t);
       for (const e of merged.eventInstances) persistUpsert('eventInstances', e);
       for (const c of merged.regimenChanges) persistUpsert('regimenChanges', c);
+      for (const a of merged.appointments) persistUpsert('appointments', a);
       persistSettings(merged.settings);
     },
   };
