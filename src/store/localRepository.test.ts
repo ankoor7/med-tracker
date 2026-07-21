@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { LocalRepository, SteadyDoseDB } from './localRepository';
+import { CURRENT_SCHEMA_VERSION } from './migrations';
 import { med, settings, slot, logEntry } from '../test/fixtures';
 
 let dbName: string;
@@ -66,7 +67,25 @@ describe('LocalRepository', () => {
   it('stamps the schema version in meta after load', async () => {
     await repo.upsert('medications', med({ id: 'a' }));
     await repo.loadAll();
-    expect(await repo.getMeta('schemaVersion')).toBe('1');
+    expect(await repo.getMeta('schemaVersion')).toBe(String(CURRENT_SCHEMA_VERSION));
+  });
+
+  // Stage 18 FR-18.1 validation: a dataset with real rows but no recorded
+  // `schemaVersion` (e.g. a fresh device pulling pre-Stage-18 synced data, whose
+  // local `meta` table is empty) must still run every pending migration. Treating
+  // the absent version as `CURRENT_SCHEMA_VERSION` — the pre-existing behaviour —
+  // silently skipped the v2 baseline-snapshot migration, the exact class of bug
+  // this stage exists to close.
+  it('runs pending migrations for data with no recorded schema version', async () => {
+    await repo.upsert('medications', med({ id: 'a' }));
+    await repo.upsert('slots', slot({ id: 's1', items: [{ medId: 'a', dose: 100 }] }));
+    expect(await repo.getMeta('schemaVersion')).toBeNull();
+
+    const loaded = await repo.loadAll();
+
+    expect(loaded!.scheduleSnapshots).toHaveLength(1);
+    expect(loaded!.scheduleSnapshots[0]!.medications).toHaveLength(1);
+    expect(await repo.getMeta('schemaVersion')).toBe(String(CURRENT_SCHEMA_VERSION));
   });
 
   it('persists data across a fresh repository on the same DB (reload, AC1)', async () => {

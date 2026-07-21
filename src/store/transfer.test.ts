@@ -11,10 +11,11 @@ import {
   slot,
 } from '../test/fixtures';
 
-function dataset(over: Partial<Dataset> = {}): Dataset {
+/** Baseline dataset shared by every test below; `over` replaces whole fields. */
+function datasetDefaults(): Dataset {
   return {
-    medications: over.medications ?? [med({ id: 'm1', name: 'Levo', updatedAt: 1000, version: 1 })],
-    slots: over.slots ?? [
+    medications: [med({ id: 'm1', name: 'Levo', updatedAt: 1000, version: 1 })],
+    slots: [
       slot({
         id: 's1',
         time: '08:00',
@@ -23,19 +24,22 @@ function dataset(over: Partial<Dataset> = {}): Dataset {
         version: 1,
       }),
     ],
-    doseLog: over.doseLog ?? [
-      logEntry({ id: 'l1', medId: 'm1', slotId: 's1', updatedAt: 1000, version: 1 }),
-    ],
-    doseOverrides: over.doseOverrides ?? [],
-    eventTypes: over.eventTypes ?? [eventType({ id: 'et1', updatedAt: 1000, version: 1 })],
-    eventInstances: over.eventInstances ?? [
+    doseLog: [logEntry({ id: 'l1', medId: 'm1', slotId: 's1', updatedAt: 1000, version: 1 })],
+    doseOverrides: [],
+    eventTypes: [eventType({ id: 'et1', updatedAt: 1000, version: 1 })],
+    eventInstances: [
       eventInstance({ id: 'ei1', typeId: 'et1', occurredAt: 1000, updatedAt: 1000, version: 1 }),
     ],
-    regimenChanges: over.regimenChanges ?? [
+    regimenChanges: [
       regimenChange({ id: 'rc1', slotId: 's1', changedAt: 1000, updatedAt: 1000, version: 1 }),
     ],
-    settings: over.settings ?? settings({ zone: 'Europe/London', updatedAt: 1000, version: 1 }),
+    scheduleSnapshots: [],
+    settings: settings({ zone: 'Europe/London', updatedAt: 1000, version: 1 }),
   };
+}
+
+function dataset(over: Partial<Dataset> = {}): Dataset {
+  return { ...datasetDefaults(), ...over };
 }
 
 describe('JSON export/import round-trip (AC5)', () => {
@@ -54,6 +58,7 @@ describe('JSON export/import round-trip (AC5)', () => {
       eventTypes: [],
       eventInstances: [],
       regimenChanges: [],
+      scheduleSnapshots: [],
       settings: original.settings,
     };
     expect(mergeDatasets(empty, result.data, 'replace')).toEqual(original);

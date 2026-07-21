@@ -17,6 +17,7 @@ import type {
   EventType,
   Medication,
   RegimenChange,
+  ScheduleSnapshot,
   Settings,
   Slot,
 } from '../core/types';
@@ -56,32 +57,52 @@ function validateEntities(table: TableName, entities: { id: string }[]): string 
   return null;
 }
 
-/**
- * Parse and validate an exported JSON file. Every record is checked against the
- * shared schema before anything is accepted, so a malformed file is rejected
- * with a reason rather than partially applied.
- */
-export function parseImport(text: string): ImportResult {
+/** Validate a batch of tables in order, stopping at the first failure. */
+function validateAllEntities(tables: Array<[TableName, { id: string }[]]>): string | null {
+  for (const [table, entities] of tables) {
+    const error = validateEntities(table, entities);
+    if (error) return error;
+  }
+  return null;
+}
+
+/** Parse the outer export envelope: valid JSON, an object, tagged as ours. */
+function parseExportEnvelope(
+  text: string,
+): { ok: true; file: Partial<ExportFile> } | { ok: false; reason: string } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
     return { ok: false, reason: 'Not valid JSON.' };
   }
-  if (!parsed || typeof parsed !== 'object')
+  if (!parsed || typeof parsed !== 'object') {
     return { ok: false, reason: 'Empty or malformed file.' };
-
+  }
   const file = parsed as Partial<ExportFile>;
   if (file.app !== EXPORT_APP_TAG) return { ok: false, reason: 'Not a SteadyDose export.' };
-  const data = file.data;
+  return { ok: true, file };
+}
+
+/**
+ * Parse and validate an exported JSON file. Every record is checked against the
+ * shared schema before anything is accepted, so a malformed file is rejected
+ * with a reason rather than partially applied.
+ */
+export function parseImport(text: string): ImportResult {
+  const envelope = parseExportEnvelope(text);
+  if (!envelope.ok) return envelope;
+
+  const data = envelope.file.data;
   if (!data || typeof data !== 'object') return { ok: false, reason: 'Missing data section.' };
   const { medications, slots, doseLog, settings } = data as Partial<Dataset>;
   if (!Array.isArray(medications) || !Array.isArray(slots) || !Array.isArray(doseLog)) {
     return { ok: false, reason: 'Missing medications, slots, or dose log.' };
   }
   if (!settings || typeof settings !== 'object') return { ok: false, reason: 'Missing settings.' };
-  // doseOverrides / eventTypes / eventInstances / regimenChanges are newer than
-  // older exports; default each to none for back-compat.
+  // doseOverrides / eventTypes / eventInstances / regimenChanges /
+  // scheduleSnapshots are newer than older exports; default each to none for
+  // back-compat.
   const optional = <K extends keyof Dataset>(key: K): Dataset[K] | [] => {
     const value = (data as Partial<Dataset>)[key];
     return Array.isArray(value) ? (value as Dataset[K]) : [];
@@ -90,16 +111,19 @@ export function parseImport(text: string): ImportResult {
   const eventTypes = optional('eventTypes');
   const eventInstances = optional('eventInstances');
   const regimenChanges = optional('regimenChanges');
+  const scheduleSnapshots = optional('scheduleSnapshots');
 
-  const error =
-    validateEntities('medications', medications) ??
-    validateEntities('slots', slots) ??
-    validateEntities('doseLog', doseLog) ??
-    validateEntities('doseOverrides', doseOverrides) ??
-    validateEntities('eventTypes', eventTypes) ??
-    validateEntities('eventInstances', eventInstances) ??
-    validateEntities('regimenChanges', regimenChanges) ??
-    validateEntities('settings', [{ ...(settings as Settings), id: 'settings' }]);
+  const error = validateAllEntities([
+    ['medications', medications],
+    ['slots', slots],
+    ['doseLog', doseLog],
+    ['doseOverrides', doseOverrides],
+    ['eventTypes', eventTypes],
+    ['eventInstances', eventInstances],
+    ['regimenChanges', regimenChanges],
+    ['scheduleSnapshots', scheduleSnapshots],
+    ['settings', [{ ...(settings as Settings), id: 'settings' }]],
+  ]);
   if (error) return { ok: false, reason: error };
 
   return {
@@ -112,6 +136,7 @@ export function parseImport(text: string): ImportResult {
       eventTypes,
       eventInstances,
       regimenChanges,
+      scheduleSnapshots,
       settings: settings as Settings,
     },
   };
@@ -153,6 +178,10 @@ export function mergeDatasets(base: Dataset, incoming: Dataset, mode: ImportMode
     eventTypes: mergeById<EventType>(base.eventTypes, incoming.eventTypes),
     eventInstances: mergeById<EventInstance>(base.eventInstances, incoming.eventInstances),
     regimenChanges: mergeById<RegimenChange>(base.regimenChanges, incoming.regimenChanges),
+    scheduleSnapshots: mergeById<ScheduleSnapshot>(
+      base.scheduleSnapshots,
+      incoming.scheduleSnapshots,
+    ),
     settings,
   };
 }

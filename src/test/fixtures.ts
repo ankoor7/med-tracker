@@ -7,6 +7,7 @@ import type {
   Guardrails,
   Medication,
   RegimenChange,
+  ScheduleSnapshot,
   Settings,
   Slot,
 } from '../core/types';
@@ -31,6 +32,7 @@ export function med(over: Partial<Medication> = {}): Medication {
     active: over.active ?? true,
     notes: over.notes,
     guardrails,
+    startedAt: over.startedAt,
     updatedAt: over.updatedAt ?? 0,
     version: over.version,
     deleted: over.deleted,
@@ -125,6 +127,20 @@ export function regimenChange(over: Partial<RegimenChange> = {}): RegimenChange 
     changes: over.changes ?? [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
     note: over.note,
     updatedAt: over.updatedAt ?? 0,
+    version: over.version,
+    deleted: over.deleted,
+  };
+}
+
+export function scheduleSnapshot(over: Partial<ScheduleSnapshot> = {}): ScheduleSnapshot {
+  const effectiveFrom = over.effectiveFrom ?? 0;
+  return {
+    id: over.id ?? id('snap'),
+    effectiveFrom,
+    zone: over.zone ?? 'Europe/London',
+    medications: over.medications ?? [],
+    slots: over.slots ?? [],
+    updatedAt: over.updatedAt ?? effectiveFrom,
     version: over.version,
     deleted: over.deleted,
   };

@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   formatTimeWithZone,
   isoDateInZone,
-  plannedSlotsForDate,
+  plannedSlotsAsOf,
   type Medication,
   type PlannedOccurrence,
 } from '../../core';
@@ -15,7 +15,8 @@ import { useScheduleData } from '../lib/useScheduleData';
 
 export function TodayScreen() {
   const now = useNow();
-  const { zone, assumeTakenOnTime, medications, slots, doseLog, doseOverrides } = useScheduleData();
+  const { zone, assumeTakenOnTime, medications, doseLog, doseOverrides, regimen } =
+    useScheduleData();
   const takeGroup = useStore((s) => s.takeGroup);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
@@ -23,17 +24,11 @@ export function TodayScreen() {
   const today = isoDateInZone(now, zone);
   const planned = useMemo(
     () =>
-      plannedSlotsForDate(
-        today,
-        slots,
-        medications,
-        doseLog,
-        zone,
-        now,
-        doseOverrides,
-        assumeTakenOnTime,
-      ),
-    [today, slots, medications, doseLog, zone, now, doseOverrides, assumeTakenOnTime],
+      // Resolved rather than raw: Today always renders the current day, but
+      // routing it through the same path keeps every screen on one rule and
+      // makes it correct by construction if it ever renders another date.
+      plannedSlotsAsOf(regimen, today, doseLog, zone, now, doseOverrides, assumeTakenOnTime),
+    [today, regimen, doseLog, zone, now, doseOverrides, assumeTakenOnTime],
   );
   const medById = new Map(medications.map((m) => [m.id, m]));
 

@@ -4,9 +4,17 @@
 // canonical log/schedule in the active zone; the UI only renders. No
 // pharmacology is computed (the level chart is fed solely by the extension).
 
-import { plannedSlotsForDate } from './schedule';
+import { timingSensitivePlannedForDate } from './scheduleHistory';
 import { addDaysToIsoDate, isoDateInZone } from './time';
-import type { DoseLogEntry, IanaZone, ISODate, Instant, Medication, Slot } from './types';
+import type {
+  DoseLogEntry,
+  IanaZone,
+  ISODate,
+  Instant,
+  Medication,
+  ScheduleSnapshot,
+  Slot,
+} from './types';
 
 export interface HistoryFilter {
   medId?: string; // undefined = all medications
@@ -74,8 +82,9 @@ export function adherenceTimeline(
   windowDays: number,
   now: Instant,
   assumeTakenOnTime = false,
+  scheduleSnapshots: ScheduleSnapshot[] = [],
 ): AdherenceDay[] {
-  const timingSensitive = medications.filter((m) => m.adjustWhenLate && m.active && !m.deleted);
+  const source = { medications, slots, scheduleSnapshots };
   const today = isoDateInZone(now, zone);
   const days = Math.max(1, windowDays);
   const from = addDaysToIsoDate(today, -(days - 1));
@@ -83,16 +92,9 @@ export function adherenceTimeline(
   const timeline: AdherenceDay[] = [];
   for (let i = 0; i < days; i++) {
     const date = addDaysToIsoDate(from, i);
-    const planned = plannedSlotsForDate(
-      date,
-      slots,
-      timingSensitive,
-      log,
-      zone,
-      now,
-      [],
-      assumeTakenOnTime,
-    );
+    // Same effective-dated resolution as `computeAdherence`, so the chart and
+    // the summary figure can never disagree (FR-18.1).
+    const planned = timingSensitivePlannedForDate(source, date, log, zone, now, assumeTakenOnTime);
     let taken = 0;
     let missed = 0;
     for (const slot of planned) {

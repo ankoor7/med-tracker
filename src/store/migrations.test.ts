@@ -12,6 +12,7 @@ function dataset(): Dataset {
     eventTypes: [],
     eventInstances: [],
     regimenChanges: [],
+    scheduleSnapshots: [],
     settings: settings(),
   };
 }

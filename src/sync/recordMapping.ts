@@ -23,6 +23,7 @@ const TYPE_FOR_TABLE: Record<TableName, RecordType> = {
   eventTypes: 'eventType',
   eventInstances: 'eventInstance',
   regimenChanges: 'regimenChange',
+  scheduleSnapshots: 'scheduleSnapshot',
   settings: 'settings',
 };
 
@@ -34,6 +35,7 @@ const TABLE_FOR_TYPE: Record<RecordType, TableName> = {
   eventType: 'eventTypes',
   eventInstance: 'eventInstances',
   regimenChange: 'regimenChanges',
+  scheduleSnapshot: 'scheduleSnapshots',
   settings: 'settings',
 };
 

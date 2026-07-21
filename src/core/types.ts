@@ -22,6 +22,14 @@ export interface Medication {
   active: boolean;
   notes?: string;
   guardrails: Guardrails;
+  // When this medication was first prescribed (Stage 18 FR-18.1). Optional:
+  // a medication with no `startedAt` is treated as having always existed, which
+  // preserves pre-Stage-18 behaviour. Once set, calendar days entirely before it
+  // are excluded from the medication's expected-dose count, so widening the
+  // adherence window can no longer fabricate history predating the regimen.
+  // It is a statement about the past, so it applies retroactively: the current
+  // value governs every historical resolution, including inside snapshots.
+  startedAt?: Instant;
   updatedAt: Instant;
   version?: number; // sync metadata (Stage 2+)
   deleted?: boolean;
@@ -116,6 +124,29 @@ export interface RegimenChange {
   deleted?: boolean;
 }
 
+// --- Effective-dated schedule snapshots (Stage 18 FR-18.1) --------------------
+//
+// The historical source of truth for "what was my regimen on day D". The store
+// writes one snapshot of the whole regimen (medications + slots) after every
+// mutating action, stamped with the instant it took effect. Read paths resolve a
+// past day against these rather than reapplying today's configuration — see
+// `core/scheduleHistory.ts`.
+//
+// This is deliberately independent of `RegimenChange`: a change record is a
+// derived, display-oriented diff for the marker layer, whereas a snapshot is the
+// complete state. Historical rendering must not depend on a diff being complete
+// or reversible.
+export interface ScheduleSnapshot {
+  id: string;
+  effectiveFrom: Instant; // when this regimen took effect (UTC ms)
+  zone: IanaZone; // zone in effect when captured (provenance; resolution uses the query zone)
+  medications: Medication[]; // full copies, so the snapshot stands alone
+  slots: Slot[];
+  updatedAt: Instant; // sync metadata (equal to effectiveFrom at creation)
+  version?: number;
+  deleted?: boolean;
+}
+
 export interface Settings {
   zone: IanaZone;
   adherenceWindowDays: number;
@@ -189,6 +220,7 @@ export interface Dataset {
   eventTypes: EventType[];
   eventInstances: EventInstance[];
   regimenChanges: RegimenChange[];
+  scheduleSnapshots: ScheduleSnapshot[];
   settings: Settings;
 }
 

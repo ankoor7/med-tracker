@@ -14,6 +14,7 @@ import {
   normalizeOuraData,
   overrideMatchesOccurrence,
   slotSubject,
+  buildScheduleSnapshot,
   type DoseLogEntry,
   type DoseOverride,
   type EventInstance,
@@ -26,6 +27,7 @@ import {
   type OuraDaySummary,
   type RegimenChange,
   type ScheduleItem,
+  type ScheduleSnapshot,
   type Settings,
   type Slot,
 } from '../core';
@@ -33,6 +35,7 @@ import { getRepository, type TableName } from './repository';
 import { getOuraClient } from '../oura/registry';
 import { seedDataset } from './seed';
 import { mergeDatasets, type ImportMode } from './transfer';
+import { BASELINE_SNAPSHOT_AT } from './migrations';
 import type { Dataset } from '../core/types';
 
 /** Days of Oura history to fetch/overlay; at least two weeks for a useful chart. */
@@ -97,6 +100,7 @@ interface StoreState {
   eventTypes: EventType[];
   eventInstances: EventInstance[];
   regimenChanges: RegimenChange[];
+  scheduleSnapshots: ScheduleSnapshot[];
   settings: Settings;
 
   // ---- Oura health data (Stage 13) -----------------------------------------
@@ -191,6 +195,32 @@ export const useStore = create<StoreState>((set, get) => {
     persistUpsert('regimenChanges', change);
   };
 
+  const addSnapshot = (snapshot: ScheduleSnapshot): void => {
+    set((s) => ({ scheduleSnapshots: [...s.scheduleSnapshots, snapshot] }));
+    persistUpsert('scheduleSnapshots', snapshot);
+  };
+
+  // Stage 18 FR-18.1. These two bracket every regimen-mutating action so past
+  // days can be rendered from the regimen that was actually in effect on them.
+  //
+  // `beginRegimenEdit` guards the case where the snapshot log is still empty
+  // (a dataset that never ran the v2 migration): without a baseline capturing
+  // the *pre-edit* regimen, this edit's snapshot would become the earliest one
+  // and resolution would project the post-edit state back over all history.
+  const beginRegimenEdit = (): void => {
+    const { scheduleSnapshots, medications, slots, settings } = get();
+    if (scheduleSnapshots.length > 0) return;
+    addSnapshot(
+      buildScheduleSnapshot(newId(), medications, slots, BASELINE_SNAPSHOT_AT, settings.zone),
+    );
+  };
+
+  /** Capture the post-edit regimen as taking effect at `now`. */
+  const endRegimenEdit = (now: Instant): void => {
+    const { medications, slots, settings } = get();
+    addSnapshot(buildScheduleSnapshot(newId(), medications, slots, now, settings.zone));
+  };
+
   return {
     hydrated: false,
     medications: [],
@@ -200,6 +230,7 @@ export const useStore = create<StoreState>((set, get) => {
     eventTypes: [],
     eventInstances: [],
     regimenChanges: [],
+    scheduleSnapshots: [],
     settings: {
       zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
       adherenceWindowDays: 7,
@@ -236,6 +267,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (const s of data.slots) persistUpsert('slots', s);
       for (const t of data.eventTypes) persistUpsert('eventTypes', t);
       for (const c of data.regimenChanges) persistUpsert('regimenChanges', c);
+      for (const s of data.scheduleSnapshots) persistUpsert('scheduleSnapshots', s);
       persistSettings(data.settings);
     },
 
@@ -277,6 +309,7 @@ export const useStore = create<StoreState>((set, get) => {
     addMedication: (input) => {
       const now = Date.now();
       const zone = get().settings.zone;
+      beginRegimenEdit();
       const med: Medication = stamp({ id: newId(), updatedAt: now, ...input }, now);
       set((s) => ({ medications: [...s.medications, med] }));
       persistUpsert('medications', med);
@@ -290,12 +323,14 @@ export const useStore = create<StoreState>((set, get) => {
           zone,
         }),
       );
+      endRegimenEdit(now);
       return med;
     },
 
     updateMedication: (id, patch) => {
       const now = Date.now();
       const zone = get().settings.zone;
+      beginRegimenEdit();
       let prev: Medication | undefined;
       let updated: Medication | undefined;
       set((s) => ({
@@ -348,11 +383,13 @@ export const useStore = create<StoreState>((set, get) => {
           );
         }
       }
+      endRegimenEdit(now);
     },
 
     deleteMedication: (id) => {
       const now = Date.now();
       const zone = get().settings.zone;
+      beginRegimenEdit();
       let tombstoned: Medication | undefined;
       const affectedSlots: Slot[] = [];
       set((s) => {
@@ -389,11 +426,13 @@ export const useStore = create<StoreState>((set, get) => {
           }),
         );
       }
+      endRegimenEdit(now);
     },
 
     addSlot: (input) => {
       const now = Date.now();
       const { settings, medications } = get();
+      beginRegimenEdit();
       const slot: Slot = stamp({ id: newId(), updatedAt: now, ...input }, now);
       set((s) => ({ slots: [...s.slots, slot] }));
       persistUpsert('slots', slot);
@@ -408,12 +447,14 @@ export const useStore = create<StoreState>((set, get) => {
           zone: settings.zone,
         }),
       );
+      endRegimenEdit(now);
       return slot;
     },
 
     updateSlot: (id, patch) => {
       const now = Date.now();
       const { settings, medications } = get();
+      beginRegimenEdit();
       let prev: Slot | undefined;
       let updated: Slot | undefined;
       set((s) => ({
@@ -440,11 +481,13 @@ export const useStore = create<StoreState>((set, get) => {
           }),
         );
       }
+      endRegimenEdit(now);
     },
 
     deleteSlot: (id) => {
       const now = Date.now();
       const { settings, medications } = get();
+      beginRegimenEdit();
       let tombstoned: Slot | undefined;
       set((s) => ({
         slots: s.slots.map((slot) => {
@@ -466,6 +509,7 @@ export const useStore = create<StoreState>((set, get) => {
           zone: settings.zone,
         }),
       );
+      endRegimenEdit(now);
     },
 
     logDose: (input) => {
@@ -759,6 +803,7 @@ export const useStore = create<StoreState>((set, get) => {
         eventTypes,
         eventInstances,
         regimenChanges,
+        scheduleSnapshots,
         settings,
       } = get();
       const merged = mergeDatasets(
@@ -770,6 +815,7 @@ export const useStore = create<StoreState>((set, get) => {
           eventTypes,
           eventInstances,
           regimenChanges,
+          scheduleSnapshots,
           settings,
         },
         incoming,
@@ -784,6 +830,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (const t of merged.eventTypes) persistUpsert('eventTypes', t);
       for (const e of merged.eventInstances) persistUpsert('eventInstances', e);
       for (const c of merged.regimenChanges) persistUpsert('regimenChanges', c);
+      for (const s of merged.scheduleSnapshots) persistUpsert('scheduleSnapshots', s);
       persistSettings(merged.settings);
     },
   };

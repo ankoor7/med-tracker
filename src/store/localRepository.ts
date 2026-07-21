@@ -13,6 +13,7 @@ import type {
   EventType,
   Medication,
   RegimenChange,
+  ScheduleSnapshot,
   Settings,
   Slot,
 } from '../core/types';
@@ -38,6 +39,7 @@ export class SteadyDoseDB extends Dexie {
   eventTypes!: Table<EventType, string>;
   eventInstances!: Table<EventInstance, string>;
   regimenChanges!: Table<RegimenChange, string>;
+  scheduleSnapshots!: Table<ScheduleSnapshot, string>;
   settings!: Table<StoredSettings, string>;
   meta!: Table<MetaRow, string>;
   outbox!: Table<SyncRecord, string>;
@@ -77,6 +79,11 @@ export class SteadyDoseDB extends Dexie {
     this.version(6).stores({
       regimenChanges: 'id, updatedAt, deleted, changedAt',
     });
+    // v7 (Stage 18): effective-dated regimen snapshots — the historical source
+    // of truth for past-day rendering. Indexed by effectiveFrom for resolution.
+    this.version(7).stores({
+      scheduleSnapshots: 'id, updatedAt, deleted, effectiveFrom',
+    });
   }
 }
 
@@ -88,6 +95,7 @@ const TABLES: TableName[] = [
   'eventTypes',
   'eventInstances',
   'regimenChanges',
+  'scheduleSnapshots',
 ];
 
 export class LocalRepository implements Repository {
@@ -102,6 +110,7 @@ export class LocalRepository implements Repository {
       eventTypes,
       eventInstances,
       regimenChanges,
+      scheduleSnapshots,
       settingsRow,
       versionStr,
     ] = await Promise.all([
@@ -112,6 +121,7 @@ export class LocalRepository implements Repository {
       this.db.eventTypes.toArray(),
       this.db.eventInstances.toArray(),
       this.db.regimenChanges.toArray(),
+      this.db.scheduleSnapshots.toArray(),
       this.db.settings.get(SETTINGS_ID),
       this.getMeta(META_SCHEMA_VERSION),
     ]);
@@ -138,11 +148,17 @@ export class LocalRepository implements Repository {
       eventTypes,
       eventInstances,
       regimenChanges,
+      scheduleSnapshots,
       settings,
     };
 
-    // Run forward data migrations if the stored version is behind.
-    const fromVersion = versionStr ? Number(versionStr) : CURRENT_SCHEMA_VERSION;
+    // Run forward data migrations if the stored version is behind. A dataset
+    // with rows but no recorded `schemaVersion` (Stage 18 validation: a fresh
+    // device pulling pre-Stage-18 synced data has real rows but no local meta)
+    // must be treated as the OLDEST version, not the current one — defaulting to
+    // `CURRENT_SCHEMA_VERSION` here would silently skip every pending migration,
+    // exactly the historical-fidelity bug this stage fixes for schedule snapshots.
+    const fromVersion = versionStr ? Number(versionStr) : 0;
     const { data, version } = runMigrations(loaded, fromVersion);
     if (version !== fromVersion) {
       await this.persistDataset(data);
@@ -265,6 +281,7 @@ export class LocalRepository implements Repository {
         this.db.eventTypes,
         this.db.eventInstances,
         this.db.regimenChanges,
+        this.db.scheduleSnapshots,
         this.db.settings,
         this.db.outbox,
       ],
@@ -276,6 +293,7 @@ export class LocalRepository implements Repository {
         await this.db.eventTypes.bulkPut(data.eventTypes);
         await this.db.eventInstances.bulkPut(data.eventInstances);
         await this.db.regimenChanges.bulkPut(data.regimenChanges);
+        await this.db.scheduleSnapshots.bulkPut(data.scheduleSnapshots);
         await this.putSettings(data.settings);
       },
     );

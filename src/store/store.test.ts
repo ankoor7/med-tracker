@@ -18,6 +18,7 @@ function resetStore() {
     eventTypes: [],
     eventInstances: [],
     regimenChanges: [],
+    scheduleSnapshots: [],
     settings: {
       zone: 'Europe/London',
       adherenceWindowDays: 7,
@@ -36,6 +37,13 @@ const MED_INPUT = {
   active: true,
   guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
 } as const;
+
+/** Snapshots in the store, oldest first, for the Stage 18 assertions. */
+function snapshots() {
+  return [...useStore.getState().scheduleSnapshots].sort(
+    (a, b) => a.effectiveFrom - b.effectiveFrom,
+  );
+}
 
 /** Non-deleted changes in the store, for the Stage 16 emission assertions. */
 function liveChanges() {
@@ -334,5 +342,84 @@ describe('store + LocalRepository', () => {
     await useStore.getState().hydrate();
     expect(useStore.getState().medications.length).toBe(firstCount);
     db2.close();
+  });
+});
+
+// ---- Stage 18 FR-18.1: effective-dated snapshot capture -----------------------
+//
+// The resolver in core is only as good as what the store feeds it, so these
+// assert that every regimen-mutating action leaves behind a snapshot — and that
+// the *first* one is a baseline capturing the pre-edit state.
+
+describe('schedule snapshots (Stage 18 FR-18.1)', () => {
+  it('captures a baseline of the pre-edit regimen plus the post-edit state', () => {
+    const store = useStore.getState();
+    const medA = store.addMedication({ ...MED_INPUT, name: 'A' });
+    useStore.getState().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+
+    // The baseline is stamped at the epoch: it claims every day before the first
+    // recorded edit, which is the only honest answer for unrecorded history.
+    expect(snapshots()[0]!.effectiveFrom).toBe(0);
+    expect(snapshots()[0]!.medications).toEqual([]);
+    expect(snapshots()[0]!.slots).toEqual([]);
+
+    // One snapshot per mutation thereafter, each holding the post-edit regimen.
+    const latest = snapshots()[snapshots().length - 1]!;
+    expect(latest.medications.map((m) => m.name)).toEqual(['A']);
+    expect(latest.slots[0]!.items[0]!.dose).toBe(100);
+  });
+
+  it('records a snapshot for every regimen-mutating action', () => {
+    const s = () => useStore.getState();
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+    const before = snapshots().length;
+
+    const slotA = s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+    s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 200 }] });
+    s().updateMedication(medA.id, { name: 'A2' });
+    s().deleteSlot(slotA.id);
+    s().deleteMedication(medA.id);
+
+    expect(snapshots().length).toBe(before + 5);
+  });
+
+  it('preserves the earlier dose in the earlier snapshot after a dose change (AC1)', () => {
+    const s = () => useStore.getState();
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+    const slotA = s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+    const beforeEdit = snapshots()[snapshots().length - 1]!;
+
+    s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 250 }] });
+
+    // The pre-edit snapshot must be untouched by the edit — this is what makes
+    // yesterday keep showing 100.
+    expect(beforeEdit.slots[0]!.items[0]!.dose).toBe(100);
+    expect(snapshots()[snapshots().length - 1]!.slots[0]!.items[0]!.dose).toBe(250);
+    // ...and it must still read 100 from the store, not just from the local ref.
+    const stored = snapshots().find((x) => x.id === beforeEdit.id)!;
+    expect(stored.slots[0]!.items[0]!.dose).toBe(100);
+  });
+
+  it('keeps a retired medication active in the snapshot covering its active days (AC2)', () => {
+    const s = () => useStore.getState();
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+    s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+    const whileActive = snapshots()[snapshots().length - 1]!;
+
+    s().deleteMedication(medA.id);
+
+    expect(whileActive.medications[0]!.active).toBe(true);
+    expect(whileActive.medications[0]!.deleted).toBeFalsy();
+    expect(whileActive.slots[0]!.items).toHaveLength(1);
+    // The current state has both the tombstone and the slot cascade applied.
+    const latest = snapshots()[snapshots().length - 1]!;
+    expect(latest.medications[0]!.deleted).toBe(true);
+  });
+
+  it('does not add a second baseline once snapshots exist', () => {
+    const s = () => useStore.getState();
+    s().addMedication({ ...MED_INPUT, name: 'A' });
+    s().addMedication({ ...MED_INPUT, name: 'B' });
+    expect(snapshots().filter((x) => x.effectiveFrom === 0)).toHaveLength(1);
   });
 });

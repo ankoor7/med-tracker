@@ -328,4 +328,146 @@ describe('validateSyncRecord — typed payloads', () => {
     );
     expect(res).toMatchObject({ ok: false, reason: /changes entry/ });
   });
+
+  const validSnapshotMed = {
+    id: 'lam',
+    name: 'Lamotrigine',
+    unit: 'mg',
+    halfLifeHours: 30,
+    active: true,
+    guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
+  };
+  const validSnapshotSlot = {
+    id: 'morning',
+    time: '08:00',
+    items: [{ medId: 'lam', dose: 150 }],
+  };
+  const scheduleSnapshotRecord = (payload: object): unknown => ({
+    id: 'snap1',
+    type: 'scheduleSnapshot',
+    updatedAt: 1,
+    version: 1,
+    payload,
+  });
+
+  it('accepts a valid scheduleSnapshot', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [validSnapshotMed],
+        slots: [validSnapshotSlot],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts a scheduleSnapshot with empty medications and slots', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: [],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects a scheduleSnapshot missing effectiveFrom', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        zone: 'Europe/London',
+        medications: [],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /effectiveFrom/ });
+  });
+
+  it('rejects a scheduleSnapshot missing zone', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        medications: [],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /zone/ });
+  });
+
+  it('rejects a scheduleSnapshot whose medications is not an array', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: 'nope',
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /medications required/ });
+  });
+
+  it('rejects a scheduleSnapshot whose slots is not an array', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: 'nope',
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /slots required/ });
+  });
+
+  it('rejects a scheduleSnapshot medication entry missing an id', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [{ ...validSnapshotMed, id: undefined }],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /medications entry invalid/ });
+  });
+
+  it('rejects a scheduleSnapshot medication entry that fails medication validation', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [{ ...validSnapshotMed, halfLifeHours: 'lots' }],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({
+      ok: false,
+      reason: /medications entry invalid: medication\.halfLifeHours/,
+    });
+  });
+
+  it('rejects a scheduleSnapshot slot entry missing an id', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: [{ ...validSnapshotSlot, id: undefined }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /slots entry invalid/ });
+  });
+
+  it('rejects a scheduleSnapshot slot entry that fails slot validation', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: [{ ...validSnapshotSlot, time: '8am' }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /slots entry invalid: slot\.time/ });
+  });
 });

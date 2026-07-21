@@ -1,11 +1,12 @@
 // First-run seed data — a small, realistic AED-style regimen so the app is
 // usable immediately. Stage 2 seeds this into IndexedDB on first run.
 
-import type { Dataset } from '../core/types';
+import type { Dataset, Slot } from '../core/types';
 
 export function seedDataset(now: number): Dataset {
   const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
   const fiveDaysAgo = now - 5 * 24 * 60 * 60 * 1000;
+  const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
 
   const lamotrigine = {
     id: 'seed-med-lamotrigine',
@@ -64,33 +65,45 @@ export function seedDataset(now: number): Dataset {
     version: 1,
   };
 
+  const morningSlot: Slot = {
+    id: 'seed-slot-morning',
+    time: '08:00',
+    label: 'Morning',
+    items: [
+      { medId: lamotrigine.id, dose: 150 },
+      { medId: levetiracetam.id, dose: 1000 },
+      { medId: vitaminD.id, dose: 1000 },
+    ],
+    updatedAt: now,
+    version: 1,
+  };
+
+  const eveningSlot: Slot = {
+    id: 'seed-slot-evening',
+    time: '20:00',
+    label: 'Evening',
+    items: [
+      { medId: lamotrigine.id, dose: 150 },
+      { medId: levetiracetam.id, dose: 1000 },
+    ],
+    updatedAt: now,
+    version: 1,
+  };
+
+  // The morning Lamotrigine dose was raised 100mg → 150mg five days ago. The
+  // slot above holds the *current* (150mg) regimen; this is what it looked like
+  // before that change, and it is what days six-or-more days back must render.
+  const morningSlotBefore: Slot = {
+    ...morningSlot,
+    items: morningSlot.items.map((i) =>
+      i.medId === lamotrigine.id ? { ...i, dose: 100 } : { ...i },
+    ),
+    updatedAt: thirtyDaysAgo,
+  };
+
   return {
     medications: [lamotrigine, levetiracetam, vitaminD],
-    slots: [
-      {
-        id: 'seed-slot-morning',
-        time: '08:00',
-        label: 'Morning',
-        items: [
-          { medId: lamotrigine.id, dose: 150 },
-          { medId: levetiracetam.id, dose: 1000 },
-          { medId: vitaminD.id, dose: 1000 },
-        ],
-        updatedAt: now,
-        version: 1,
-      },
-      {
-        id: 'seed-slot-evening',
-        time: '20:00',
-        label: 'Evening',
-        items: [
-          { medId: lamotrigine.id, dose: 150 },
-          { medId: levetiracetam.id, dose: 1000 },
-        ],
-        updatedAt: now,
-        version: 1,
-      },
-    ],
+    slots: [morningSlot, eveningSlot],
     doseLog: [],
     doseOverrides: [],
     eventTypes: [seizureType],
@@ -107,6 +120,31 @@ export function seedDataset(now: number): Dataset {
         slotId: 'seed-slot-morning',
         summary: 'Morning: Lamotrigine dose 100mg → 150mg',
         changes: [{ field: 'Lamotrigine dose', from: '100mg', to: '150mg' }],
+        updatedAt: fiveDaysAgo,
+        version: 1,
+      },
+    ],
+    // The effective-dated history behind that change (Stage 18 FR-18.1), so a
+    // fresh install demonstrates correct historical rendering: days on or after
+    // the change show 150mg, earlier days still show the 100mg they were taken
+    // at. The two snapshots are the regimen before and after the same edit the
+    // marker above describes.
+    scheduleSnapshots: [
+      {
+        id: 'seed-snapshot-initial',
+        effectiveFrom: thirtyDaysAgo,
+        zone: hostZone,
+        medications: [lamotrigine, levetiracetam, vitaminD],
+        slots: [morningSlotBefore, eveningSlot],
+        updatedAt: thirtyDaysAgo,
+        version: 1,
+      },
+      {
+        id: 'seed-snapshot-lamotrigine-150',
+        effectiveFrom: fiveDaysAgo,
+        zone: hostZone,
+        medications: [lamotrigine, levetiracetam, vitaminD],
+        slots: [morningSlot, eveningSlot],
         updatedAt: fiveDaysAgo,
         version: 1,
       },

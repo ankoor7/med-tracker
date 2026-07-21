@@ -5,9 +5,17 @@
 // `adherenceWindowDays` calendar days (in the active zone) up to and including
 // today. Only occurrences that are already past-due are scored.
 
-import { plannedSlotsForDate } from './schedule';
+import { timingSensitivePlannedForDate } from './scheduleHistory';
 import { addDaysToIsoDate, isoDateInZone } from './time';
-import type { DoseLogEntry, IanaZone, ISODate, Instant, Medication, Slot } from './types';
+import type {
+  DoseLogEntry,
+  IanaZone,
+  ISODate,
+  Instant,
+  Medication,
+  ScheduleSnapshot,
+  Slot,
+} from './types';
 
 export interface AdherenceResult {
   windowDays: number;
@@ -30,8 +38,9 @@ export function computeAdherence(
   missedThreshold: number,
   now: Instant,
   assumeTakenOnTime = false,
+  scheduleSnapshots: ScheduleSnapshot[] = [],
 ): AdherenceResult {
-  const timingSensitive = medications.filter((m) => m.adjustWhenLate && m.active && !m.deleted);
+  const source = { medications, slots, scheduleSnapshots };
   const today = isoDateInZone(now, zone);
   const from = addDaysToIsoDate(today, -(Math.max(1, windowDays) - 1));
 
@@ -41,16 +50,12 @@ export function computeAdherence(
 
   for (let i = 0; i < windowDays; i++) {
     const date = addDaysToIsoDate(from, i);
-    const planned = plannedSlotsForDate(
-      date,
-      slots,
-      timingSensitive,
-      log,
-      zone,
-      now,
-      [],
-      assumeTakenOnTime,
-    );
+    // Resolve the regimen as it stood on this day, then score only the
+    // medications that were timing-sensitive *then* (FR-18.1 AC1/AC2). Scoring
+    // against today's medication list is what made retiring a medication
+    // retroactively erase its expected doses; the filter must therefore be
+    // applied to the resolved list, not the current one.
+    const planned = timingSensitivePlannedForDate(source, date, log, zone, now, assumeTakenOnTime);
     for (const slot of planned) {
       for (const occ of slot.occurrences) {
         if (occ.status === 'taken') {

@@ -15,6 +15,7 @@ export type RecordType =
   | 'eventType'
   | 'eventInstance'
   | 'regimenChange'
+  | 'scheduleSnapshot'
   | 'settings';
 
 export const RECORD_TYPES: readonly RecordType[] = [
@@ -25,6 +26,7 @@ export const RECORD_TYPES: readonly RecordType[] = [
   'eventType',
   'eventInstance',
   'regimenChange',
+  'scheduleSnapshot',
   'settings',
 ];
 
@@ -118,25 +120,28 @@ export function validateSyncRecord(rec: unknown): ValidationResult {
   return validatePayload(rec.type as RecordType, rec.payload);
 }
 
+/**
+ * Dispatch table, one entry per `RecordType`. A `Record<RecordType, ...>` (rather
+ * than a switch) makes an unhandled type a compile error instead of a runtime
+ * branch, and keeps `validatePayload` itself a single lookup.
+ */
+const PAYLOAD_VALIDATORS: Record<
+  RecordType,
+  (payload: Record<string, unknown>) => ValidationResult
+> = {
+  medication: validateMedication,
+  slot: validateSlot,
+  doseLog: validateDoseLog,
+  doseOverride: validateDoseOverride,
+  eventType: validateEventType,
+  eventInstance: validateEventInstance,
+  regimenChange: validateRegimenChange,
+  scheduleSnapshot: validateScheduleSnapshot,
+  settings: validateSettings,
+};
+
 function validatePayload(type: RecordType, payload: Record<string, unknown>): ValidationResult {
-  switch (type) {
-    case 'medication':
-      return validateMedication(payload);
-    case 'slot':
-      return validateSlot(payload);
-    case 'doseLog':
-      return validateDoseLog(payload);
-    case 'doseOverride':
-      return validateDoseOverride(payload);
-    case 'eventType':
-      return validateEventType(payload);
-    case 'eventInstance':
-      return validateEventInstance(payload);
-    case 'regimenChange':
-      return validateRegimenChange(payload);
-    case 'settings':
-      return validateSettings(payload);
-  }
+  return PAYLOAD_VALIDATORS[type](payload);
 }
 
 function validateGuardrails(v: unknown): boolean {
@@ -232,6 +237,46 @@ function validateRegimenChange(p: Record<string, unknown>): ValidationResult {
     return fail('regimenChange.note must be a string');
   }
   return ok;
+}
+
+/**
+ * Validate every entry of `arr` against `validate` after confirming each carries
+ * a non-empty `id` — the shape a snapshot's nested medications/slots share with
+ * their standalone records. Shared by `validateScheduleSnapshot`'s two array
+ * fields so the id/shape check isn't duplicated per field.
+ */
+function validateIdentifiedEntries(
+  arr: unknown,
+  label: string,
+  validate: (v: Record<string, unknown>) => ValidationResult,
+): ValidationResult {
+  if (!Array.isArray(arr)) return fail(`${label} required`);
+  for (const entry of arr) {
+    if (!isPlainObject(entry) || !isNonEmptyString(entry.id)) {
+      return fail(`${label} entry invalid`);
+    }
+    const result = validate(entry);
+    if (!result.ok) return fail(`${label} entry invalid: ${result.reason}`);
+  }
+  return ok;
+}
+
+/**
+ * An effective-dated regimen snapshot (Stage 18 FR-18.1): when it took effect,
+ * the zone it was captured in, and full copies of the medications and slots. The
+ * nested entities are validated with the same rules as their standalone records,
+ * so a snapshot can never carry a shape the top-level types would reject.
+ */
+function validateScheduleSnapshot(p: Record<string, unknown>): ValidationResult {
+  if (!isFiniteNumber(p.effectiveFrom)) return fail('scheduleSnapshot.effectiveFrom required');
+  if (!isNonEmptyString(p.zone)) return fail('scheduleSnapshot.zone required');
+  const meds = validateIdentifiedEntries(
+    p.medications,
+    'scheduleSnapshot.medications',
+    validateMedication,
+  );
+  if (!meds.ok) return meds;
+  return validateIdentifiedEntries(p.slots, 'scheduleSnapshot.slots', validateSlot);
 }
 
 function validateSettings(p: Record<string, unknown>): ValidationResult {

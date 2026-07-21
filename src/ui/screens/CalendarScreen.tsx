@@ -16,7 +16,7 @@ import {
   groupChangesByDay,
   instantToDayY,
   isoDateInZone,
-  plannedSlotsForDate,
+  plannedSlotsAsOf,
   resolveDraggedInstant,
   roundInstantToStep,
   wallTimeInZone,
@@ -68,7 +68,8 @@ interface CalendarGroup {
 
 export function CalendarScreen() {
   const now = useNow();
-  const { zone, assumeTakenOnTime, medications, slots, doseLog, doseOverrides } = useScheduleData();
+  const { zone, assumeTakenOnTime, medications, doseLog, doseOverrides, regimen } =
+    useScheduleData();
   const adjustDoseTime = useStore((s) => s.adjustDoseTime);
   const regimenChanges = useStore((s) => s.regimenChanges);
 
@@ -130,10 +131,11 @@ export function CalendarScreen() {
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
 
   const groups = useMemo<CalendarGroup[]>(() => {
-    const planned = plannedSlotsForDate(
+    // Resolve against the regimen in effect on the *selected* day: the calendar
+    // is the main surface where a past day is rendered (Stage 18 FR-18.1).
+    const planned = plannedSlotsAsOf(
+      regimen,
       selectedDate,
-      slots,
-      medications,
       doseLog,
       zone,
       now,
@@ -171,17 +173,7 @@ export function CalendarScreen() {
       });
     }
     return assignLanes(raw);
-  }, [
-    selectedDate,
-    slots,
-    medications,
-    doseLog,
-    zone,
-    now,
-    doseOverrides,
-    assumeTakenOnTime,
-    medById,
-  ]);
+  }, [selectedDate, regimen, doseLog, zone, now, doseOverrides, assumeTakenOnTime, medById]);
 
   // Re-time every logged member of a group by the same delta (drag / arrow keys).
   const onRetimeGroup = (group: CalendarGroup, delta: number) => {

@@ -30,6 +30,7 @@ export function DataTransferPanel() {
     eventTypes: store.eventTypes,
     eventInstances: store.eventInstances,
     regimenChanges: store.regimenChanges,
+    scheduleSnapshots: store.scheduleSnapshots,
     settings: store.settings,
   });
 

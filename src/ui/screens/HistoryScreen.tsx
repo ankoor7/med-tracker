@@ -38,6 +38,7 @@ export function HistoryScreen() {
   const medications = useStore((s) => s.medications);
   const doseLog = useStore((s) => s.doseLog);
   const regimenChanges = useStore((s) => s.regimenChanges);
+  const scheduleSnapshots = useStore((s) => s.scheduleSnapshots);
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
 
@@ -58,8 +59,9 @@ export function HistoryScreen() {
         settings.missedDayThreshold,
         now,
         assumeTakenOnTime,
+        scheduleSnapshots,
       ),
-    [slots, medications, doseLog, settings, now, assumeTakenOnTime],
+    [slots, medications, doseLog, settings, now, assumeTakenOnTime, scheduleSnapshots],
   );
 
   const timeline = useMemo(
@@ -72,6 +74,7 @@ export function HistoryScreen() {
         settings.adherenceWindowDays,
         now,
         assumeTakenOnTime,
+        scheduleSnapshots,
       ),
     [
       slots,
@@ -81,6 +84,7 @@ export function HistoryScreen() {
       settings.adherenceWindowDays,
       now,
       assumeTakenOnTime,
+      scheduleSnapshots,
     ],
   );
 

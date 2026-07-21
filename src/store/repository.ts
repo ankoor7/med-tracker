@@ -18,6 +18,7 @@ export type TableName =
   | 'eventTypes'
   | 'eventInstances'
   | 'regimenChanges'
+  | 'scheduleSnapshots'
   | 'settings';
 
 /** Identifies a specific version of a record in the outbox. */
