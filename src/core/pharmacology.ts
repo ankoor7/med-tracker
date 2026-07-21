@@ -44,9 +44,10 @@ export interface LevelSeries {
 export interface DoseAdjustmentStrategy {
   computeAdjustment(ctx: AdjustmentContext): AdjustmentResult | null;
   /**
-   * Optional (Stage 7): predicted blood-level series for the level chart. The
-   * app renders exactly what this returns and NEVER synthesises a curve itself;
-   * a missing method or `null` yields an explanatory empty state (FR-7.3/AC4).
+   * Optional: a predicted blood-level series. This is a developer-facing
+   * extension seam only (Stage 18 FR-18.11) — the app never renders a curve or
+   * advertises this capability in the UI; a missing method or `null` is simply
+   * "no series available" to any code that calls `levelSeriesFor`.
    */
   levelSeries?(ctx: LevelSeriesContext): LevelSeries | null;
 }

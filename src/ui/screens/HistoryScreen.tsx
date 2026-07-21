@@ -1,13 +1,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  activeStrategy,
   adherenceTimeline,
   computeAdherence,
   filterLog,
   formatDateTimeWithZone,
   formatTimeWithZone,
   groupChangesByDay,
-  levelSeriesFor,
   type DoseLogEntry,
   type HistoryFilter,
   type IanaZone,
@@ -19,7 +17,6 @@ import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
-import { BloodLevelChart } from '../components/BloodLevelChart';
 import { FieldDiffList } from '../components/ChangeMarkers';
 import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
@@ -92,28 +89,6 @@ export function HistoryScreen() {
     [doseLog, filter, settings.zone],
   );
 
-  // Blood-level chart: the app renders only what the extension provides. Pick the
-  // filtered med (or the first one) and ask the extension for a series.
-  const levelMed = filter.medId ? medById.get(filter.medId) : medications.find((m) => !m.deleted);
-  const levelDoses = useMemo(
-    () =>
-      levelMed
-        ? doseLog
-            .filter((e) => !e.deleted && e.status === 'taken' && e.medId === levelMed.id)
-            .sort((a, b) => a.actualInstant - b.actualInstant)
-        : [],
-    [doseLog, levelMed],
-  );
-  const levelSeries =
-    levelMed && levelDoses.length > 0
-      ? levelSeriesFor(activeStrategy, {
-          med: levelMed,
-          doses: levelDoses,
-          from: levelDoses[0]!.actualInstant,
-          to: now,
-        })
-      : null;
-
   return (
     <div className="flex flex-col gap-4">
       <h2 className="text-2xl font-semibold tracking-tight">History</h2>
@@ -142,25 +117,6 @@ export function HistoryScreen() {
         <div className="mt-3">
           <AdherenceChart days={timeline} changes={regimenChanges} zone={settings.zone} />
         </div>
-      </Card>
-
-      <Card>
-        <h3 className="mb-2 text-sm font-medium">
-          Predicted blood level{levelMed ? ` — ${levelMed.name}` : ''}
-        </h3>
-        {levelSeries ? (
-          <BloodLevelChart
-            series={levelSeries}
-            doseMarkers={levelDoses.map((d) => d.actualInstant)}
-            changes={regimenChanges}
-            zone={settings.zone}
-          />
-        ) : (
-          <p className="text-sm text-slate-400">
-            No predicted curve. SteadyDose computes no pharmacology itself — provide a pharmacology
-            extension with a <code>levelSeries</code> function to chart predicted levels here.
-          </p>
-        )}
       </Card>
 
       <RegimenChangesCard changes={regimenChanges} zone={settings.zone} />

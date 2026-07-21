@@ -1,7 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { AdherenceChart } from './AdherenceChart';
-import { BloodLevelChart } from './BloodLevelChart';
 import {
   levelSeriesFor,
   noopStrategy,
@@ -25,23 +24,7 @@ describe('AdherenceChart', () => {
   });
 });
 
-describe('BloodLevelChart', () => {
-  it('renders the extension-provided series with a target band (AC3)', () => {
-    const series: LevelSeries = {
-      points: [
-        { t: 0, level: 1 },
-        { t: 1000, level: 2 },
-      ],
-      unit: 'ng/mL',
-      targetBand: { low: 0.5, high: 2.5 },
-    };
-    render(<BloodLevelChart series={series} doseMarkers={[0]} />);
-    expect(screen.getByRole('img', { name: /predicted blood level/i })).toBeInTheDocument();
-    expect(screen.getByText('ng/mL')).toBeInTheDocument();
-  });
-});
-
-describe('levelSeriesFor (AC4 — no invented curve)', () => {
+describe('levelSeriesFor (developer-facing extension seam only, AC12 — no UI surface)', () => {
   it('returns null for the default no-op strategy', () => {
     expect(
       levelSeriesFor(noopStrategy, { med: med({ id: 'm1' }), doses: [], from: 0, to: 1 }),

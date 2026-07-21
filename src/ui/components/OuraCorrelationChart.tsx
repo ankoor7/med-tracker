@@ -1,7 +1,7 @@
 import type { OuraMetric, OuraOverlayPoint } from '../../core';
 
-// Hand-rolled SVG overlay (no chart dependency — matches AdherenceChart /
-// BloodLevelChart and keeps the bundle small). Faint bars = daily medication
+// Hand-rolled SVG overlay (no chart dependency — matches AdherenceChart and
+// keeps the bundle small). Faint bars = daily medication
 // adherence (taken/expected); the line = the selected Oura metric, so the user
 // can eyeball whether health tracks adherence. Mobile-first via a viewBox.
 
