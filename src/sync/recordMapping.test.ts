@@ -61,6 +61,41 @@ describe('record mapping', () => {
     expect(entity).toMatchObject({ id: 'rc1', slotId: 's1', kind: 'slot-updated' });
   });
 
+  // Stage 18 FR-18.1 — the structured machine layer must survive the wire
+  // unaltered (typed values must not be stringified) and must validate.
+  it('round-trips a structured regimen-change diff without flattening its values', () => {
+    const c = regimenChange({
+      id: 'rc2',
+      slotId: 's1',
+      kind: 'medication-retired',
+      changes: [
+        {
+          field: 'Status',
+          from: 'Active',
+          to: 'Retired',
+          key: 'med.active',
+          medId: 'm1',
+          fromValue: true,
+          toValue: false,
+        },
+        {
+          field: '08:00 Morning: Lamotrigine dose',
+          from: '150mg',
+          to: null,
+          key: 'slot.dose',
+          medId: 'm1',
+          slotId: 's1',
+          fromValue: 150,
+          toValue: null,
+        },
+      ],
+    });
+    const rec = wrap('regimenChanges', c);
+    expect(validateSyncRecord(rec).ok).toBe(true);
+    const { entity } = fromSyncRecord(rec);
+    expect(entity.changes).toEqual(c.changes);
+  });
+
   it('round-trips an event type and instance through the wire envelope', () => {
     const t = eventType({ id: 'et1', name: 'Seizure', updatedAt: 5, version: 2 });
     const tRec = wrap('eventTypes', t);

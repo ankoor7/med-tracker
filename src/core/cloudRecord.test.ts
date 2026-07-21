@@ -263,7 +263,9 @@ describe('validateSyncRecord — typed payloads', () => {
     payload,
   });
 
-  it('accepts a valid regimenChange', () => {
+  // Back-compat: a pre-Stage-18 record carries display strings only and no
+  // machine layer. It must keep validating exactly as it did when it was written.
+  it('accepts a valid regimenChange (legacy, display-only diff)', () => {
     const res = validateSyncRecord(
       regimenChangeRecord({
         changedAt: 1000,
@@ -324,6 +326,128 @@ describe('validateSyncRecord — typed payloads', () => {
         kind: 'slot-updated',
         summary: 'x',
         changes: [{ field: 42, from: null, to: '20:00' }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /changes entry/ });
+  });
+
+  // Stage 18 FR-18.1 — the structured machine layer on each diff entry.
+  it('accepts a regimenChange whose diff carries key/medId/slotId + typed values', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        slotId: 's1',
+        summary: 'Morning: Lamotrigine dose 100mg → 150mg',
+        changes: [
+          {
+            field: 'Lamotrigine dose',
+            from: '100mg',
+            to: '150mg',
+            key: 'slot.dose',
+            medId: 'm1',
+            slotId: 's1',
+            fromValue: 100,
+            toValue: 150,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts boolean and null typed values', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'medication-retired',
+        summary: 'Retired Lamotrigine',
+        changes: [
+          {
+            field: 'Status',
+            from: 'Active',
+            to: 'Retired',
+            key: 'med.active',
+            medId: 'm1',
+            fromValue: true,
+            toValue: false,
+          },
+          {
+            field: 'Max single dose',
+            from: '200',
+            to: null,
+            key: 'med.guardrails.maxSingleDose',
+            medId: 'm1',
+            fromValue: 200,
+            toValue: null,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts the medication-reactivated kind', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'medication-reactivated',
+        summary: 'Resumed Lamotrigine',
+        changes: [
+          {
+            field: 'Status',
+            from: 'Retired',
+            to: 'Active',
+            key: 'med.active',
+            medId: 'm1',
+            fromValue: false,
+            toValue: true,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts a diff key it does not recognise (forward compatibility)', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'medication-updated',
+        summary: 'x',
+        changes: [
+          {
+            field: 'Future',
+            from: null,
+            to: '1',
+            key: 'med.newerThing',
+            fromValue: null,
+            toValue: 1,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['a non-string key', { key: 42 }],
+    ['a non-string medId', { key: 'slot.dose', medId: 7 }],
+    ['a non-string slotId', { key: 'slot.dose', slotId: [] }],
+    ['an object typed value', { key: 'slot.dose', fromValue: { a: 1 }, toValue: 2 }],
+    ['a NaN typed value', { key: 'slot.dose', fromValue: Number.NaN, toValue: 2 }],
+  ])('rejects a diff entry with %s', (_label, extra) => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        summary: 'x',
+        changes: [{ field: 'Dose', from: '1', to: '2', ...extra }],
       }),
     );
     expect(res).toMatchObject({ ok: false, reason: /changes entry/ });

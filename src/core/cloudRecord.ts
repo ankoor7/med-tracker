@@ -36,6 +36,7 @@ export const RECORD_TYPES: readonly RecordType[] = [
  */
 const REGIMEN_CHANGE_KIND_NAMES: readonly string[] = [
   'medication-added',
+  'medication-reactivated',
   'medication-updated',
   'medication-retired',
   'slot-added',
@@ -216,10 +217,43 @@ function validateEventInstance(p: Record<string, unknown>): ValidationResult {
   return ok;
 }
 
-/** A diff entry is `{ field: string, from: string|null, to: string|null }`. */
+/** A typed diff value: `string | number | boolean | null` (Stage 18). */
+function isFieldValue(v: unknown): boolean {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return true;
+  return isFiniteNumber(v);
+}
+
+/**
+ * A diff entry. The display layer — `{ field, from, to }` with string-or-null
+ * `from`/`to` — is required. The Stage 18 machine layer (`key`, `medId`,
+ * `slotId`, `fromValue`, `toValue`) is optional, because records written before
+ * it existed omit it; when present each part must be well-formed.
+ *
+ * `key` is deliberately validated as any non-empty string rather than against a
+ * fixed vocabulary: a newer client must be able to sync a key this build does
+ * not yet know about without the server rejecting the write.
+ */
+/** An absent field is fine; a present one must satisfy `check`. */
+function isOptionally(v: unknown, check: (v: unknown) => boolean): boolean {
+  return v === undefined || check(v);
+}
+
+/** The optional Stage 18 machine layer: identity strings + typed values. */
+function hasValidMachineLayer(c: Record<string, unknown>): boolean {
+  return (
+    isOptionally(c.key, isNonEmptyString) &&
+    isOptionally(c.medId, isNonEmptyString) &&
+    isOptionally(c.slotId, isNonEmptyString) &&
+    isOptionally(c.fromValue, isFieldValue) &&
+    isOptionally(c.toValue, isFieldValue)
+  );
+}
+
 function isValidFieldChange(c: unknown): boolean {
   const isStrOrNull = (v: unknown) => v === null || typeof v === 'string';
-  return isPlainObject(c) && isNonEmptyString(c.field) && isStrOrNull(c.from) && isStrOrNull(c.to);
+  if (!isPlainObject(c)) return false;
+  if (!isNonEmptyString(c.field) || !isStrOrNull(c.from) || !isStrOrNull(c.to)) return false;
+  return hasValidMachineLayer(c);
 }
 
 function validateRegimenChange(p: Record<string, unknown>): ValidationResult {

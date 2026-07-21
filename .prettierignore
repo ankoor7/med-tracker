@@ -1,5 +1,6 @@
 dist/
 dev-dist/
+.claude/
 coverage/
 node_modules/
 pnpm-lock.yaml

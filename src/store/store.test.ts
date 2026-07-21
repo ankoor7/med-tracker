@@ -50,6 +50,16 @@ function liveChanges() {
   return useStore.getState().regimenChanges.filter((c) => !c.deleted);
 }
 
+/**
+ * Hydrate, then clear medications/slots/changes so the seeded demo dataset does
+ * not skew emission counts. Returns a freshly added medication to edit.
+ */
+async function freshRegimen() {
+  await useStore.getState().hydrate();
+  useStore.setState({ medications: [], slots: [], regimenChanges: [] });
+  return useStore.getState().addMedication(MED_INPUT);
+}
+
 beforeEach(() => {
   dbName = `steadydose-store-${++counter}-${Date.now()}`;
   db = new SteadyDoseDB(dbName);
@@ -270,11 +280,7 @@ describe('store + LocalRepository', () => {
   });
 
   it('emits one regimen change per meaningful edit and none for a no-op (Stage 16 AC1)', async () => {
-    await useStore.getState().hydrate();
-    // Start from a clean slate so the seed change does not skew counts.
-    useStore.setState({ medications: [], slots: [], regimenChanges: [] });
-
-    const med = useStore.getState().addMedication(MED_INPUT);
+    const med = await freshRegimen();
     expect(liveChanges().map((c) => c.kind)).toEqual(['medication-added']);
 
     // A real prescription edit records a medication-updated change.
@@ -282,7 +288,9 @@ describe('store + LocalRepository', () => {
     expect(liveChanges().map((c) => c.kind)).toEqual(['medication-added', 'medication-updated']);
     const updated = liveChanges().at(-1)!;
     expect(updated.summary).toContain('Renamed');
-    expect(updated.changes).toContainEqual({ field: 'Name', from: 'Test', to: 'Renamed' });
+    expect(updated.changes).toContainEqual(
+      expect.objectContaining({ field: 'Name', from: 'Test', to: 'Renamed', key: 'med.name' }),
+    );
 
     // A no-op save (same name) records nothing further.
     useStore.getState().updateMedication(med.id, { name: 'Renamed' });
@@ -308,10 +316,121 @@ describe('store + LocalRepository', () => {
     useStore.getState().updateSlot(slot.id, { items: [{ medId: med.id, dose: 150 }] });
     const updated = liveChanges().at(-1)!;
     expect(updated.kind).toBe('slot-updated');
-    expect(updated.changes).toContainEqual({ field: 'Test dose', from: '100mg', to: '150mg' });
+    expect(updated.changes).toContainEqual(
+      expect.objectContaining({
+        field: 'Test dose',
+        from: '100mg',
+        to: '150mg',
+        key: 'slot.dose',
+        medId: med.id,
+        slotId: slot.id,
+        fromValue: 100,
+        toValue: 150,
+      }),
+    );
 
     useStore.getState().deleteSlot(slot.id);
     expect(liveChanges().at(-1)!.kind).toBe('slot-removed');
+  });
+
+  // G2 — a hard delete strips the medication from every slot and tombstones any
+  // slot left empty. Those cascade edits used to be recorded nowhere: the whole
+  // diff was "Status Active → Retired".
+  it('records the slot cascade of a hard medication delete (FR-18.1 G2)', async () => {
+    const med = await freshRegimen();
+    const other = useStore.getState().addMedication({ ...MED_INPUT, name: 'Other' });
+    // Morning holds both meds (survives the delete); Evening holds only the
+    // deleted med (is tombstoned by the cascade).
+    const morning = useStore.getState().addSlot({
+      time: '08:00',
+      label: 'Morning',
+      items: [
+        { medId: med.id, dose: 150 },
+        { medId: other.id, dose: 500 },
+      ],
+    });
+    const evening = useStore
+      .getState()
+      .addSlot({ time: '20:00', items: [{ medId: med.id, dose: 200 }] });
+    useStore.setState({ regimenChanges: [] });
+
+    useStore.getState().deleteMedication(med.id);
+
+    // Still one marker for the whole delete...
+    expect(liveChanges()).toHaveLength(1);
+    const change = liveChanges()[0]!;
+    expect(change.kind).toBe('medication-retired');
+
+    // ...but the cascade is inside its diff, keyed by slot and medication.
+    const cascade = change.changes.filter((c) => c.key === 'slot.dose');
+    expect(cascade).toHaveLength(2);
+    expect(cascade).toContainEqual(
+      expect.objectContaining({
+        key: 'slot.dose',
+        medId: med.id,
+        slotId: morning.id,
+        fromValue: 150,
+        toValue: null,
+        from: '150mg',
+      }),
+    );
+    expect(cascade).toContainEqual(
+      expect.objectContaining({
+        key: 'slot.dose',
+        medId: med.id,
+        slotId: evening.id,
+        fromValue: 200,
+        toValue: null,
+      }),
+    );
+
+    // The emptied slot's own removal is recorded; the surviving one's is not.
+    const removed = change.changes.filter((c) => c.key === 'slot.removed');
+    expect(removed).toHaveLength(1);
+    expect(removed[0]!.slotId).toBe(evening.id);
+
+    // And the state matches what the diff claims.
+    const slots = useStore.getState().slots;
+    expect(slots.find((s) => s.id === evening.id)?.deleted).toBe(true);
+    expect(slots.find((s) => s.id === morning.id)?.deleted).toBeFalsy();
+    expect(slots.find((s) => s.id === morning.id)?.items.map((i) => i.medId)).toEqual([other.id]);
+  });
+
+  it('records no cascade when the deleted medication was in no slot (FR-18.1 G2)', async () => {
+    const med = await freshRegimen();
+    useStore.setState({ regimenChanges: [] });
+
+    useStore.getState().deleteMedication(med.id);
+    const change = liveChanges()[0]!;
+    expect(change.changes.map((c) => c.key)).toEqual(['med.active']);
+  });
+
+  // G3 — creating and resuming a medication were both `medication-added`.
+  it('distinguishes a reactivation from a first prescription (FR-18.1 G3)', async () => {
+    const med = await freshRegimen();
+    expect(liveChanges().at(-1)!.kind).toBe('medication-added');
+
+    // Soft-retire, then resume. The soft path leaves slot items intact.
+    useStore.getState().updateMedication(med.id, { active: false });
+    expect(liveChanges().at(-1)!.kind).toBe('medication-retired');
+
+    useStore.getState().updateMedication(med.id, { active: true });
+    const resumed = liveChanges().at(-1)!;
+    expect(resumed.kind).toBe('medication-reactivated');
+    expect(resumed.summary).toBe('Resumed Test');
+    expect(resumed.changes).toEqual([
+      expect.objectContaining({
+        key: 'med.active',
+        medId: med.id,
+        fromValue: false,
+        toValue: true,
+      }),
+    ]);
+    expect(liveChanges().map((c) => c.kind)).toEqual([
+      'medication-added',
+      'medication-retired',
+      'medication-reactivated',
+    ]);
   });
 
   it('annotates and soft-deletes a regimen change (Stage 16 AC6)', async () => {

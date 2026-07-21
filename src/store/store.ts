@@ -4,7 +4,9 @@ import {
   buildRegimenChange,
   checkGuardrails,
   describeMedicationAdded,
+  describeMedicationReactivated,
   describeMedicationRetired,
+  describeMedicationSlotCascade,
   describeSlot,
   diffMedication,
   diffSlot,
@@ -30,6 +32,7 @@ import {
   type ScheduleSnapshot,
   type Settings,
   type Slot,
+  type SlotCascadeRemoval,
 } from '../core';
 import { getRepository, type TableName } from './repository';
 import { getOuraClient } from '../oura/registry';
@@ -352,18 +355,21 @@ export const useStore = create<StoreState>((set, get) => {
             kind: 'medication-retired',
             subject: updated.name,
             medId: id,
-            changes: describeMedicationRetired(),
+            changes: describeMedicationRetired(updated),
             now,
             zone,
           }),
         );
       } else if (!prev.active && updated.active) {
+        // Resuming an existing prescription is not the same event as first
+        // prescribing one; recording both as `medication-added` made the two
+        // indistinguishable to anyone reading the history back.
         recordChange(
           buildRegimenChange({
-            kind: 'medication-added',
+            kind: 'medication-reactivated',
             subject: updated.name,
             medId: id,
-            changes: describeMedicationAdded(updated),
+            changes: describeMedicationReactivated(updated),
             now,
             zone,
           }),
@@ -392,6 +398,7 @@ export const useStore = create<StoreState>((set, get) => {
       beginRegimenEdit();
       let tombstoned: Medication | undefined;
       const affectedSlots: Slot[] = [];
+      const removals: SlotCascadeRemoval[] = [];
       set((s) => {
         const medications = s.medications.map((m) => {
           if (m.id !== id) return m;
@@ -400,12 +407,17 @@ export const useStore = create<StoreState>((set, get) => {
         });
         // FR-MED-4: remove the med from every slot; tombstone now-empty slots.
         const slots = s.slots.map((slot) => {
-          if (slot.deleted || !slot.items.some((i) => i.medId === id)) return slot;
+          const removed = slot.deleted ? undefined : slot.items.find((i) => i.medId === id);
+          if (!removed) return slot;
           const items = slot.items.filter((i) => i.medId !== id);
+          const slotRemoved = items.length === 0;
           const next = stamp(
-            items.length === 0 ? { ...slot, items, deleted: true } : { ...slot, items },
+            slotRemoved ? { ...slot, items, deleted: true } : { ...slot, items },
             now,
           );
+          // Capture the *pre-edit* slot: it still names the affected occurrence
+          // and carries the dose that is about to disappear.
+          removals.push({ slot, dose: removed.dose, slotRemoved });
           affectedSlots.push(next);
           return next;
         });
@@ -413,14 +425,19 @@ export const useStore = create<StoreState>((set, get) => {
       });
       if (tombstoned) persistUpsert('medications', tombstoned);
       for (const slot of affectedSlots) persistUpsert('slots', slot);
-      // Retiring the medication subsumes the cascade slot edits: one marker.
+      // Retiring the medication subsumes the cascade slot edits into one marker
+      // — but the cascade is now recorded in that marker's diff rather than lost.
       if (tombstoned) {
+        const med = tombstoned;
         recordChange(
           buildRegimenChange({
             kind: 'medication-retired',
-            subject: tombstoned.name,
+            subject: med.name,
             medId: id,
-            changes: describeMedicationRetired(),
+            changes: [
+              ...describeMedicationRetired(med),
+              ...describeMedicationSlotCascade(med, removals),
+            ],
             now,
             zone,
           }),

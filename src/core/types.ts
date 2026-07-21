@@ -93,20 +93,63 @@ export interface DoseOverride {
 // as same-day-grouped, tappable markers on the timeline charts.
 
 export type RegimenChangeKind =
-  | 'medication-added'
+  | 'medication-added' // first prescribed
+  | 'medication-reactivated' // resumed after retirement (Stage 18: was also 'medication-added')
   | 'medication-updated' // name, unit, half-life, timing-sensitivity, guardrails, notes
   | 'medication-retired' // active → false (or deleted)
   | 'slot-added'
   | 'slot-updated' // time, label, or a per-med amount in the slot
   | 'slot-removed';
 
-// One concrete field that changed, in display-ready form. `from`/`to` are
-// pre-formatted strings (e.g. "100mg", "08:00") so rendering needs no schema;
-// null means the value was newly set (`from`) or cleared/removed (`to`).
+/**
+ * Stable machine identity for a changed field (Stage 18 FR-18.1). Unlike the
+ * human `field` label, these are part of the stored schema: renaming a label is
+ * a copy edit, renaming a key is a data migration.
+ */
+export type RegimenFieldKey =
+  | 'med.name'
+  | 'med.unit'
+  | 'med.halfLifeHours'
+  | 'med.adjustWhenLate'
+  | 'med.notes'
+  | 'med.active'
+  | 'med.guardrails.maxSingleDose'
+  | 'med.guardrails.maxDailyDose'
+  | 'med.guardrails.minIntervalHours'
+  | 'slot.time'
+  | 'slot.label'
+  | 'slot.dose'
+  | 'slot.removed';
+
+/** The typed value of a changed field; null means unset/absent, never "unknown". */
+export type RegimenFieldValue = string | number | boolean | null;
+
+/**
+ * One concrete field that changed.
+ *
+ * `field`/`from`/`to` are the display layer: pre-formatted strings (e.g. "100mg",
+ * "08:00") so rendering needs no schema; null means the value was newly set
+ * (`from`) or cleared/removed (`to`).
+ *
+ * `key`/`medId`/`slotId`/`fromValue`/`toValue` are the machine layer added in
+ * Stage 18 (FR-18.1). They carry *identity* (which medication, which slot) and
+ * *typed* values, so a change no longer depends on a display name that can be
+ * duplicated, renamed after the fact, or lost when the entity is deleted.
+ *
+ * They are **optional** because records written before Stage 18 do not have
+ * them. Absence means "this record predates structured diffs" — it is never
+ * inferred from the display strings. Use `isStructuredFieldChange` (in
+ * `core/regimenChanges.ts`) to narrow; treat anything else as display-only.
+ */
 export interface RegimenFieldChange {
   field: string; // e.g. "Morning dose", "Name", "Max single dose", "Time"
   from: string | null;
   to: string | null;
+  key?: RegimenFieldKey;
+  medId?: string; // the medication this field belongs to, when applicable
+  slotId?: string; // the slot this field belongs to, when applicable
+  fromValue?: RegimenFieldValue;
+  toValue?: RegimenFieldValue;
 }
 
 export interface RegimenChange {
