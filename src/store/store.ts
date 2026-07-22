@@ -3,6 +3,7 @@ import {
   addDaysToIsoDate,
   buildRegimenChange,
   checkGuardrails,
+  DEFAULT_ON_TIME_WINDOW_MINUTES,
   describeMedicationAdded,
   describeMedicationReactivated,
   describeMedicationRetired,
@@ -26,6 +27,7 @@ import {
   type EventPropertyValue,
   type EventType,
   type Guardrails,
+  type IanaZone,
   type Instant,
   type Medication,
   type OuraDaySummary,
@@ -75,6 +77,16 @@ export interface LogDoseInput {
   scheduledInstant: Instant;
   dose: number;
   actualInstant: Instant;
+}
+
+interface SkipDoseInput {
+  slotId: string;
+  medId: string;
+  scheduledInstant: Instant;
+  /** When the skip was recorded (usually "now"). */
+  actualInstant: Instant;
+  /** Optional free-text reason (Stage 18 FR-18.3) — never required. */
+  reason?: string;
 }
 
 export interface DoseOverrideInput {
@@ -133,6 +145,13 @@ interface StoreState {
   deleteSlot: (id: string) => void;
 
   logDose: (input: LogDoseInput) => DoseLogEntry;
+  /**
+   * Record a deliberately withheld dose (Stage 18 FR-18.3) — distinct from
+   * simply forgetting. No amount is taken (`dose: 0`), so it can never corrupt
+   * a guardrail check or a daily total: `checkGuardrails` only sums entries with
+   * `status === 'taken'`, and this entry's status is `'skipped'`.
+   */
+  skipDose: (input: SkipDoseInput) => DoseLogEntry;
   takeGroup: (slotId: string, scheduledInstant: Instant) => DoseLogEntry[];
   deleteLogEntry: (id: string) => void;
 
@@ -240,6 +259,46 @@ export const useStore = create<StoreState>((set, get) => {
     addSnapshot(buildScheduleSnapshot(newId(), medications, slots, now, settings.zone));
   };
 
+  // A dose being resolved — taken (`logDose`) or deliberately withheld
+  // (`skipDose`, Stage 18 FR-18.3) — fulfils any pending one-time override for
+  // that occurrence (Stage 12 FR-12.4), so it must not linger or re-apply.
+  // Shared by both so the two correction paths can't drift.
+  const clearOverrideForOccurrence = (
+    slotId: string,
+    medId: string,
+    scheduledInstant: Instant,
+    zone: IanaZone,
+  ): void => {
+    const date = isoDateInZone(scheduledInstant, zone);
+    for (const o of get().doseOverrides) {
+      if (o.deleted) continue;
+      if (overrideMatchesOccurrence(o, slotId, medId, scheduledInstant, date)) {
+        get().clearDoseOverride(o.id);
+      }
+    }
+  };
+
+  // Shared by `logDose`/`skipDose`: the unit to stamp on a new dose-log entry
+  // is always the medication's current unit, defaulting to '' if the
+  // medication has since been removed (soft-tombstoned meds keep their unit,
+  // but a hard-deleted id should not blow up logging).
+  const unitForMed = (medId: string): string => {
+    const med = get().medications.find((m) => m.id === medId);
+    return med?.unit ?? '';
+  };
+
+  // Shared tail of `logDose`/`skipDose`: store the entry, persist it, and
+  // resolve any pending one-time override for the occurrence it fulfils.
+  const finalizeDoseLogEntry = (entry: DoseLogEntry): DoseLogEntry => {
+    set((s) => ({ doseLog: [...s.doseLog, entry] }));
+    persistUpsert('doseLog', entry);
+    // `entry.zone` is the zone in effect when it was recorded (same value
+    // `settings.zone` held a moment ago in the caller) — reuse it rather than
+    // re-reading settings, so this helper only depends on the entry itself.
+    clearOverrideForOccurrence(entry.slotId, entry.medId, entry.scheduledInstant, entry.zone);
+    return entry;
+  };
+
   return {
     hydrated: false,
     medications: [],
@@ -255,6 +314,7 @@ export const useStore = create<StoreState>((set, get) => {
       adherenceWindowDays: 7,
       missedDayThreshold: 3,
       assumeTakenOnTime: true,
+      onTimeWindowMinutes: DEFAULT_ON_TIME_WINDOW_MINUTES,
       updatedAt: 0,
     },
 
@@ -575,19 +635,34 @@ export const useStore = create<StoreState>((set, get) => {
         },
         now,
       );
-      set((s) => ({ doseLog: [...s.doseLog, entry] }));
-      persistUpsert('doseLog', entry);
+      return finalizeDoseLogEntry(entry);
+    },
 
-      // Consume any one-time override for this occurrence — it's been fulfilled
-      // (Stage 12 FR-12.4), so it must not linger or re-apply.
-      const date = isoDateInZone(input.scheduledInstant, settings.zone);
-      for (const o of get().doseOverrides) {
-        if (o.deleted) continue;
-        if (overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date)) {
-          get().clearDoseOverride(o.id);
-        }
-      }
-      return entry;
+    skipDose: (input) => {
+      const { settings } = get();
+      const now = Date.now();
+      const unit = unitForMed(input.medId);
+      const reason = input.reason?.trim();
+
+      const entry: DoseLogEntry = stamp(
+        {
+          id: newId(),
+          slotId: input.slotId,
+          medId: input.medId,
+          scheduledInstant: input.scheduledInstant,
+          actualInstant: input.actualInstant,
+          dose: 0, // no amount was taken — never originates a dose value
+          unit,
+          zone: settings.zone,
+          status: 'skipped' as const,
+          adjusted: false,
+          warnings: [],
+          ...(reason ? { skipReason: reason } : {}),
+          updatedAt: now,
+        },
+        now,
+      );
+      return finalizeDoseLogEntry(entry);
     },
 
     takeGroup: (slotId, scheduledInstant) => {
@@ -598,13 +673,12 @@ export const useStore = create<StoreState>((set, get) => {
       const date = isoDateInZone(scheduledInstant, settings.zone);
       const created: DoseLogEntry[] = [];
       for (const item of slot.items) {
-        // Skip items already taken for this occurrence (matched on the occurrence
-        // key, so a prior log still counts across a zone change — FR-5.6).
+        // Skip items already resolved for this occurrence — taken or
+        // deliberately skipped (Stage 18 FR-18.3) — matched on the occurrence
+        // key, so a prior entry still counts across a zone change (FR-5.6).
         const exists = get().doseLog.some(
           (e) =>
-            !e.deleted &&
-            e.status === 'taken' &&
-            entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
+            !e.deleted && entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
         );
         if (exists) continue;
         // Honour a one-time override for this occurrence (Stage 12); logDose then

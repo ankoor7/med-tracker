@@ -4,6 +4,7 @@
 // canonical log/schedule in the active zone; the UI only renders. No
 // pharmacology is computed (the level chart is fed solely by the extension).
 
+import { classifyOccurrences, DEFAULT_ON_TIME_WINDOW_MINUTES } from './adherence';
 import { timingSensitivePlannedForDate } from './scheduleHistory';
 import { addDaysToIsoDate, isoDateInZone } from './time';
 import type {
@@ -35,7 +36,10 @@ const LATE_MS = 60_000;
 export function entryMarkers(entry: DoseLogEntry): EntryMarkers {
   return {
     adjusted: entry.adjusted,
-    late: entry.actualInstant > entry.scheduledInstant + LATE_MS,
+    // A skipped dose was never taken, so "late" (a lateness-of-taking concept)
+    // does not apply to it (Stage 18 FR-18.3) — only score it for real 'taken'
+    // entries.
+    late: entry.status === 'taken' && entry.actualInstant > entry.scheduledInstant + LATE_MS,
     overCap: entry.warnings.length > 0,
   };
 }
@@ -64,15 +68,19 @@ export function filterLog(
 
 export interface AdherenceDay {
   date: ISODate;
-  taken: number;
+  onTime: number; // taken within the on-time window (Stage 18 FR-18.4)
+  late: number; // taken, but outside the on-time window — still "taken"
   missed: number;
-  expected: number; // past-due timing-sensitive occurrences (taken + missed)
+  skipped: number; // deliberately withheld — excluded from `expected` (FR-18.3)
+  taken: number; // onTime + late
+  expected: number; // past-due timing-sensitive occurrences: onTime + late + missed
 }
 
 /**
- * Per-day taken/missed counts for timing-sensitive meds over the last
- * `windowDays` days (in `zone`, ending today). Feeds the adherence chart;
- * mirrors `computeAdherence`'s scoring but keeps the daily breakdown.
+ * Per-day on-time/late/missed/skipped counts for timing-sensitive meds over the
+ * last `windowDays` days (in `zone`, ending today). Feeds the adherence chart;
+ * mirrors `computeAdherence`'s scoring (via the shared `classifyOccurrences`)
+ * but keeps the daily breakdown.
  */
 export function adherenceTimeline(
   slots: Slot[],
@@ -83,6 +91,7 @@ export function adherenceTimeline(
   now: Instant,
   assumeTakenOnTime = false,
   scheduleSnapshots: ScheduleSnapshot[] = [],
+  onTimeWindowMinutes: number = DEFAULT_ON_TIME_WINDOW_MINUTES,
 ): AdherenceDay[] {
   const source = { medications, slots, scheduleSnapshots };
   const today = isoDateInZone(now, zone);
@@ -95,15 +104,20 @@ export function adherenceTimeline(
     // Same effective-dated resolution as `computeAdherence`, so the chart and
     // the summary figure can never disagree (FR-18.1).
     const planned = timingSensitivePlannedForDate(source, date, log, zone, now, assumeTakenOnTime);
-    let taken = 0;
-    let missed = 0;
-    for (const slot of planned) {
-      for (const occ of slot.occurrences) {
-        if (occ.status === 'taken') taken++;
-        else if (occ.status === 'missed') missed++;
-      }
-    }
-    timeline.push({ date, taken, missed, expected: taken + missed });
+    const { onTime, late, missed, skipped } = classifyOccurrences(
+      planned,
+      log,
+      onTimeWindowMinutes,
+    );
+    timeline.push({
+      date,
+      onTime,
+      late,
+      missed,
+      skipped,
+      taken: onTime + late,
+      expected: onTime + late + missed,
+    });
   }
   return timeline;
 }

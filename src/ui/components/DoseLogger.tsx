@@ -33,6 +33,12 @@ export interface LoggerTarget {
    * entry so an edit never counts against itself.
    */
   entryId?: string;
+  /**
+   * Open directly in "mark as skipped" mode (Stage 18 FR-18.3) — the Today
+   * screen's quick "Skip" action. Only meaningful for a fresh log (no
+   * `entryId`); ignored otherwise.
+   */
+  startInSkipMode?: boolean;
 }
 
 export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose: () => void }) {
@@ -40,6 +46,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   const logDose = useStore((s) => s.logDose);
   const editLogEntry = useStore((s) => s.editLogEntry);
   const setDoseOverride = useStore((s) => s.setDoseOverride);
+  const skipDose = useStore((s) => s.skipDose);
 
   const med = medications.find((m) => m.id === target.medId);
   const editingEntry = target.entryId
@@ -47,6 +54,17 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
     : undefined;
   // "Now", rounded to the 5-minute step so the common path needs no adjustment.
   const now = useMemo(() => roundInstantToStep(Date.now()), []);
+
+  // A dose can be marked skipped instead of taken (Stage 18 FR-18.3) — but only
+  // when creating a fresh entry. An existing logged entry (taken or skipped) is
+  // corrected through `editLogEntry`/delete, not converted between the two: a
+  // skip has no meaningful dose amount, so letting the dose editor above also
+  // rewrite `status` would let an edit silently turn a skip into a partial,
+  // dose-bearing "taken" record (or vice versa) without the guardrail/adherence
+  // paths ever re-deriving from a clean state.
+  const canSkip = !target.entryId;
+  const [skipMode, setSkipMode] = useState(canSkip && (target.startInSkipMode ?? false));
+  const [skipReason, setSkipReason] = useState('');
 
   const [doseStr, setDoseStr] = useState(
     String(editingEntry ? editingEntry.dose : target.normalDose),
@@ -154,6 +172,47 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
     }
     onClose();
   };
+
+  const submitSkip = () => {
+    skipDose({
+      slotId: target.slotId,
+      medId: target.medId,
+      scheduledInstant: target.scheduledInstant,
+      actualInstant: Date.now(),
+      reason: skipReason.trim() || undefined,
+    });
+    onClose();
+  };
+
+  if (skipMode) {
+    return (
+      <Modal title={`Skip ${med.name}?`} onClose={onClose}>
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-slate-400">
+            Scheduled for {formatTimeWithZone(target.scheduledInstant, zone)}. Recorded distinctly
+            from a missed dose — it won't count against adherence.
+          </p>
+          <Field label="Reason (optional)">
+            <input
+              className={inputClass}
+              value={skipReason}
+              onChange={(e) => setSkipReason(e.target.value)}
+              placeholder="e.g. clinician advised skipping"
+              aria-label="Skip reason"
+            />
+          </Field>
+          <div className="mt-1 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setSkipMode(false)}>
+              Back
+            </Button>
+            <Button variant="secondary" onClick={submitSkip}>
+              Mark skipped
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal title={target.entryId ? `Edit ${med.name} dose` : `Log ${med.name}`} onClose={onClose}>
@@ -306,19 +365,32 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           </div>
         )}
 
-        <div className="mt-1 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant={overCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
-            {target.entryId
-              ? overCap
-                ? 'Save over-cap dose'
-                : 'Save changes'
-              : overCap
-                ? 'Log over-cap dose'
-                : 'Log dose'}
-          </Button>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          {canSkip ? (
+            <button
+              type="button"
+              onClick={() => setSkipMode(true)}
+              className="text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:text-slate-200"
+            >
+              Mark as skipped instead
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant={overCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
+              {target.entryId
+                ? overCap
+                  ? 'Save over-cap dose'
+                  : 'Save changes'
+                : overCap
+                  ? 'Log over-cap dose'
+                  : 'Log dose'}
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>

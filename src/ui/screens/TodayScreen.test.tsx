@@ -268,4 +268,71 @@ describe('TodayScreen', () => {
       expect(within(after).queryByText('Taken')).not.toBeInTheDocument();
     });
   });
+
+  describe('skip dose (Stage 18 FR-18.3)', () => {
+    it('marks a dose skipped from Today, reporting it distinctly from taken and missed', () => {
+      render(<TodayScreen />);
+      const row = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      // The past, unlogged dose starts out "Missed" (assumeTakenOnTime is off
+      // in `seed()`).
+      expect(within(row).getByText('Missed')).toBeInTheDocument();
+
+      fireEvent.click(within(row).getByRole('button', { name: 'Skip' }));
+      const dialog = screen.getByRole('dialog');
+      expect(dialog).toHaveTextContent(/skip lamotrigine/i);
+      fireEvent.click(within(dialog).getByRole('button', { name: /mark skipped/i }));
+
+      const after = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      expect(within(after).getByText('Skipped')).toBeInTheDocument();
+      expect(within(after).queryByText('Missed')).not.toBeInTheDocument();
+      expect(within(after).queryByText('Taken')).not.toBeInTheDocument();
+
+      const log = activeLog();
+      expect(log).toHaveLength(1);
+      expect(log[0]!.status).toBe('skipped');
+      expect(log[0]!.dose).toBe(0);
+    });
+
+    it('records an optional skip reason', () => {
+      render(<TodayScreen />);
+      const row = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      fireEvent.click(within(row).getByRole('button', { name: 'Skip' }));
+
+      const dialog = screen.getByRole('dialog');
+      fireEvent.change(within(dialog).getByLabelText('Skip reason'), {
+        target: { value: 'GP advised skipping this dose' },
+      });
+      fireEvent.click(within(dialog).getByRole('button', { name: /mark skipped/i }));
+
+      expect(activeLog()[0]!.skipReason).toBe('GP advised skipping this dose');
+    });
+
+    it('a skipped dose can be deleted, reverting the occurrence to its prior state', () => {
+      render(<TodayScreen />);
+      const row = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      fireEvent.click(within(row).getByRole('button', { name: 'Skip' }));
+      fireEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: /mark skipped/i }),
+      );
+
+      const skippedRow = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      // A skip has no dose amount to correct, so there is no Edit affordance —
+      // only Delete.
+      expect(within(skippedRow).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
+      confirmDeleteDose(openDeleteConfirm(skippedRow));
+
+      expect(activeLog()).toHaveLength(0);
+      const after = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      expect(within(after).queryByText('Skipped')).not.toBeInTheDocument();
+      expect(within(after).getByText('Missed')).toBeInTheDocument();
+    });
+
+    it('does not offer Skip once a dose is already taken', () => {
+      render(<TodayScreen />);
+      fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+      submitLogDose();
+      const row = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      expect(within(row).queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
+    });
+  });
 });

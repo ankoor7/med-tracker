@@ -47,7 +47,10 @@ export function TodayScreen() {
   const total = occurrences.length;
   const taken = occurrences.filter((o) => o.status === 'taken').length;
   const missed = occurrences.filter((o) => o.status === 'missed').length;
-  const remaining = total - taken;
+  const skipped = occurrences.filter((o) => o.status === 'skipped').length;
+  // Skipped occurrences are resolved (Stage 18 FR-18.3) — not still "remaining"
+  // for the user to act on, and not folded into "taken" either.
+  const remaining = total - taken - skipped;
   const pct = total > 0 ? taken / total : 0;
   const ringColor = total > 0 && taken === total ? '#4ade80' : '#2cb1a6';
 
@@ -77,6 +80,7 @@ export function TodayScreen() {
           <div className="flex items-center gap-8">
             <Stat value={remaining} label="Remaining" />
             {missed > 0 && <Stat value={missed} label="Missed" />}
+            {skipped > 0 && <Stat value={skipped} label="Skipped" />}
           </div>
         </Card>
       )}
@@ -90,7 +94,9 @@ export function TodayScreen() {
       )}
 
       {planned.map((slot) => {
-        const remaining = slot.occurrences.filter((o) => o.status !== 'taken');
+        const remaining = slot.occurrences.filter(
+          (o) => o.status !== 'taken' && o.status !== 'skipped',
+        );
         return (
           <Card key={slot.slotId}>
             <div className="mb-3 flex items-center justify-between">
@@ -125,6 +131,15 @@ export function TodayScreen() {
                       // A genuinely-taken occurrence (not merely assumed) edits its
                       // real log entry rather than creating a new one.
                       entryId: occ.status === 'taken' && !occ.assumed ? occ.logEntryId : undefined,
+                    })
+                  }
+                  onSkip={() =>
+                    setTarget({
+                      slotId: occ.slotId,
+                      medId: occ.medId,
+                      scheduledInstant: occ.scheduledInstant,
+                      normalDose: occ.dose,
+                      startInSkipMode: true,
                     })
                   }
                   onDelete={() =>
@@ -167,11 +182,13 @@ function OccurrenceRow({
   occ,
   med,
   onLog,
+  onSkip,
   onDelete,
 }: {
   occ: PlannedOccurrence;
   med: Medication | undefined;
   onLog: () => void;
+  onSkip: () => void;
   onDelete: () => void;
 }) {
   return (
@@ -192,31 +209,60 @@ function OccurrenceRow({
           </span>
         )}
       </div>
-      <OccurrenceActions occ={occ} onLog={onLog} onDelete={onDelete} />
+      <OccurrenceActions occ={occ} onLog={onLog} onSkip={onSkip} onDelete={onDelete} />
     </li>
   );
 }
 
 // Anything not-yet-taken (or only assumed-taken) offers "Log"/"Edit" to record
-// it. A genuinely-logged dose (a real entry, not the assume-on-time fill-in)
-// is also editable in place and deletable — the correction paths a mistake is
-// actually noticed from (Stage 18 FR-18.2).
+// it, plus "Skip" while it's still unresolved (Stage 18 FR-18.3). A genuinely
+// logged dose (a real entry, not the assume-on-time fill-in) — taken OR skipped
+// — is deletable, the correction path a mistake is actually noticed from
+// (Stage 18 FR-18.2). A skipped entry has no dose amount to edit, so it is not
+// offered an "Edit" affordance; delete it and re-log if the outcome was wrong.
+// Each of Log/Edit/Skip/Delete has its own visibility condition (status ×
+// assumed × genuinely-logged); covered by TodayScreen.test.tsx.
+//
+// `isGenuinelyLogged`/`isUnresolved` are extracted (rather than inlined here)
+// to keep this component's own branching flat — each is a plain status
+// predicate with no rendering concern of its own.
+function isGenuinelyLogged(occ: PlannedOccurrence): boolean {
+  return (
+    (occ.status === 'taken' || occ.status === 'skipped') && !occ.assumed && occ.logEntryId != null
+  );
+}
+
+function isUnresolved(occ: PlannedOccurrence): boolean {
+  return occ.status === 'upcoming' || occ.status === 'due' || occ.status === 'missed';
+}
+
 function OccurrenceActions({
   occ,
   onLog,
+  onSkip,
   onDelete,
 }: {
   occ: PlannedOccurrence;
   onLog: () => void;
+  onSkip: () => void;
   onDelete: () => void;
 }) {
-  const genuinelyLogged = occ.status === 'taken' && !occ.assumed && occ.logEntryId != null;
+  const isSkipped = occ.status === 'skipped';
+  const genuinelyLogged = isGenuinelyLogged(occ);
+  const unresolved = isUnresolved(occ);
   return (
     <div className="flex shrink-0 items-center gap-2">
       <StatusBadge status={occ.status} assumed={occ.assumed} />
-      <Button variant="secondary" onClick={onLog}>
-        {occ.status !== 'taken' ? 'Log' : 'Edit'}
-      </Button>
+      {!isSkipped && (
+        <Button variant="secondary" onClick={onLog}>
+          {occ.status !== 'taken' ? 'Log' : 'Edit'}
+        </Button>
+      )}
+      {unresolved && (
+        <Button variant="ghost" className="text-slate-400 hover:bg-slate-700/40" onClick={onSkip}>
+          Skip
+        </Button>
+      )}
       {genuinelyLogged && (
         <Button
           variant="ghost"

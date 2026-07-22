@@ -144,6 +144,75 @@ describe('validateSyncRecord — typed payloads', () => {
     expect(res).toEqual({ ok: true });
   });
 
+  const validDoseLogPayload = {
+    id: 'd1',
+    slotId: 's1',
+    medId: 'm1',
+    scheduledInstant: 100,
+    actualInstant: 120,
+    dose: 50,
+    status: 'taken' as const,
+  };
+
+  it.each([
+    ['slotId', /slotId/],
+    ['medId', /medId/],
+    ['scheduledInstant', /scheduledInstant/],
+    ['actualInstant', /actualInstant/],
+    ['dose', /dose/],
+  ] as const)('rejects a doseLog missing %s', (field, reason) => {
+    const payload = { ...validDoseLogPayload };
+    delete (payload as Record<string, unknown>)[field];
+    const res = validateSyncRecord({
+      id: 'd1',
+      type: 'doseLog',
+      updatedAt: 1,
+      version: 1,
+      payload,
+    });
+    expect(res).toMatchObject({ ok: false, reason });
+  });
+
+  it('accepts a skipped doseLog with an optional skipReason (FR-18.3)', () => {
+    const res = validateSyncRecord({
+      id: 'd1',
+      type: 'doseLog',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        id: 'd1',
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: 100,
+        actualInstant: 120,
+        dose: 0,
+        status: 'skipped',
+        skipReason: 'clinician advised skipping',
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects a doseLog with a non-string skipReason', () => {
+    const res = validateSyncRecord({
+      id: 'd1',
+      type: 'doseLog',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        id: 'd1',
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: 100,
+        actualInstant: 120,
+        dose: 0,
+        status: 'skipped',
+        skipReason: 123,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /skipReason/ });
+  });
+
   it('rejects a doseLog with an invalid status', () => {
     const res = validateSyncRecord({
       id: 'd1',
@@ -200,6 +269,38 @@ describe('validateSyncRecord — typed payloads', () => {
       payload: { zone: 'Europe/London', adherenceWindowDays: 30, missedDayThreshold: 2 },
     });
     expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts settings with a valid onTimeWindowMinutes (FR-18.4)', () => {
+    const res = validateSyncRecord({
+      id: 'settings',
+      type: 'settings',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        zone: 'Europe/London',
+        adherenceWindowDays: 30,
+        missedDayThreshold: 2,
+        onTimeWindowMinutes: 90,
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects settings with a non-positive onTimeWindowMinutes', () => {
+    const res = validateSyncRecord({
+      id: 'settings',
+      type: 'settings',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        zone: 'Europe/London',
+        adherenceWindowDays: 30,
+        missedDayThreshold: 2,
+        onTimeWindowMinutes: 0,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /onTimeWindowMinutes/ });
   });
 
   it('accepts a valid eventType', () => {

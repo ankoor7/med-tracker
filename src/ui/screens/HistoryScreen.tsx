@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   adherenceTimeline,
   computeAdherence,
+  DEFAULT_ON_TIME_WINDOW_MINUTES,
   filterLog,
   formatDateTimeWithZone,
   formatTimeWithZone,
@@ -54,6 +55,7 @@ export function HistoryScreen() {
   const deleteLogEntry = useStore((s) => s.deleteLogEntry);
 
   const assumeTakenOnTime = settings.assumeTakenOnTime ?? true;
+  const onTimeWindowMinutes = settings.onTimeWindowMinutes ?? DEFAULT_ON_TIME_WINDOW_MINUTES;
 
   const adherence = useMemo(
     () =>
@@ -67,8 +69,18 @@ export function HistoryScreen() {
         now,
         assumeTakenOnTime,
         scheduleSnapshots,
+        onTimeWindowMinutes,
       ),
-    [slots, medications, doseLog, settings, now, assumeTakenOnTime, scheduleSnapshots],
+    [
+      slots,
+      medications,
+      doseLog,
+      settings,
+      now,
+      assumeTakenOnTime,
+      scheduleSnapshots,
+      onTimeWindowMinutes,
+    ],
   );
 
   const timeline = useMemo(
@@ -82,6 +94,7 @@ export function HistoryScreen() {
         now,
         assumeTakenOnTime,
         scheduleSnapshots,
+        onTimeWindowMinutes,
       ),
     [
       slots,
@@ -92,6 +105,7 @@ export function HistoryScreen() {
       now,
       assumeTakenOnTime,
       scheduleSnapshots,
+      onTimeWindowMinutes,
     ],
   );
 
@@ -122,9 +136,16 @@ export function HistoryScreen() {
             {Math.round(adherence.ratio * 100)}%
           </span>
           <span className="text-xs text-slate-400">
-            {adherence.taken} taken · {adherence.missed} missed · {adherence.expected} expected
+            {adherence.onTime} on time · {adherence.late} late · {adherence.missed} missed ·{' '}
+            {adherence.expected} expected
+            {adherence.skipped > 0 && ` · ${adherence.skipped} skipped (not counted)`}
           </span>
         </div>
+        <p className="mt-1 text-xs text-slate-500">
+          "On time" means within {adherence.onTimeWindowMinutes} minutes of the scheduled time — see
+          the on-time window setting below. A skipped dose doesn't count toward this figure either
+          way.
+        </p>
         <div className="mt-3">
           <AdherenceChart days={timeline} changes={regimenChanges} zone={settings.zone} />
         </div>
@@ -175,6 +196,26 @@ export function HistoryScreen() {
               aria-label="Missed threshold"
             />
           </Field>
+        </div>
+        <div className="mt-4">
+          <Field label="On-time window (minutes)">
+            <input
+              type="number"
+              min="1"
+              className={inputClass}
+              value={onTimeWindowMinutes}
+              onChange={(e) =>
+                updateSettings({ onTimeWindowMinutes: Math.max(1, Number(e.target.value)) })
+              }
+              aria-label="On-time window minutes"
+            />
+          </Field>
+          <p className="mt-1 text-xs text-slate-500">
+            How close to the scheduled time a timing-sensitive dose has to be logged to count as "on
+            time" rather than "late" — one setting, applied to every medication. It doesn't change
+            what was logged, only how the same history is summarised: changing it recalculates the
+            figures above from your existing dose log, nothing is added or removed.
+          </p>
         </div>
         <label className="mt-4 flex items-start gap-3">
           <input
@@ -293,6 +334,10 @@ export function HistoryScreen() {
   );
 }
 
+// Branches on taken/skipped/late/adjusted/over-cap to render one dose-log row
+// (Stage 18 FR-18.2/18.3); each branch is exercised by HistoryScreen.test.tsx,
+// splitting further would just move the same conditions into more, smaller,
+// harder-to-follow functions.
 function LogRow({
   entry,
   med: m,
@@ -304,7 +349,10 @@ function LogRow({
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const late = entry.actualInstant > entry.scheduledInstant + 60_000;
+  const skipped = entry.status === 'skipped';
+  // "Late" is a lateness-of-taking concept — doesn't apply to a dose that was
+  // never taken (Stage 18 FR-18.3).
+  const late = !skipped && entry.actualInstant > entry.scheduledInstant + 60_000;
   const overCap = entry.warnings.length > 0;
   return (
     <li className="flex items-start justify-between gap-2 py-2">
@@ -313,8 +361,7 @@ function LogRow({
           <ColorDot color={m?.color ?? '#64748b'} />
           <span className="text-sm font-medium">{m?.name ?? entry.medId}</span>
           <span className="text-xs text-slate-400">
-            {entry.dose}
-            {entry.unit}
+            {skipped ? 'Skipped' : `${entry.dose}${entry.unit}`}
           </span>
         </div>
         <p className="mt-0.5 text-xs text-slate-400">
@@ -322,18 +369,18 @@ function LogRow({
           {' · scheduled '}
           {formatTimeWithZone(entry.scheduledInstant, entry.zone)}
         </p>
-        {overCap && <p className="text-xs text-red-300">⚠ {entry.warnings.join(' ')}</p>}
+        <LogRowNote entry={entry} skipped={skipped} overCap={overCap} />
       </div>
       <div className="flex shrink-0 flex-col items-end gap-1">
-        <div className="flex flex-wrap justify-end gap-1">
-          {entry.adjusted && <Tag className="border-amber-700 text-amber-300">adjusted</Tag>}
-          {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
-          {overCap && <Tag className="border-red-700 text-red-300">over-cap</Tag>}
-        </div>
+        <LogRowTags entry={entry} skipped={skipped} late={late} overCap={overCap} />
         <div className="flex gap-1">
-          <Button variant="secondary" onClick={onEdit}>
-            Edit
-          </Button>
+          {/* A skip has no dose amount to correct — delete and re-log instead
+              of offering a dose editor that doesn't apply to it. */}
+          {!skipped && (
+            <Button variant="secondary" onClick={onEdit}>
+              Edit
+            </Button>
+          )}
           <Button
             variant="ghost"
             className="text-status-missed hover:bg-status-missed/10"
@@ -344,6 +391,52 @@ function LogRow({
         </div>
       </div>
     </li>
+  );
+}
+
+// Extracted from `LogRow` to keep its own branching flat — pure tag rendering,
+// no behaviour.
+// Extracted from `LogRow` to keep its own branching flat — a skip's optional
+// reason and a taken dose's over-cap warning are mutually exclusive, one-line
+// notes, never both.
+function LogRowNote({
+  entry,
+  skipped,
+  overCap,
+}: {
+  entry: DoseLogEntry;
+  skipped: boolean;
+  overCap: boolean;
+}) {
+  if (skipped && entry.skipReason) {
+    return <p className="mt-0.5 text-xs italic text-slate-400">“{entry.skipReason}”</p>;
+  }
+  if (!skipped && overCap) {
+    return <p className="text-xs text-red-300">⚠ {entry.warnings.join(' ')}</p>;
+  }
+  return null;
+}
+
+function LogRowTags({
+  entry,
+  skipped,
+  late,
+  overCap,
+}: {
+  entry: DoseLogEntry;
+  skipped: boolean;
+  late: boolean;
+  overCap: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      {skipped && <Tag className="border-slate-500 text-slate-300">skipped</Tag>}
+      {!skipped && entry.adjusted && (
+        <Tag className="border-amber-700 text-amber-300">adjusted</Tag>
+      )}
+      {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
+      {!skipped && overCap && <Tag className="border-red-700 text-red-300">over-cap</Tag>}
+    </div>
   );
 }
 

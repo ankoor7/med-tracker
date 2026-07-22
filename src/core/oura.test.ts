@@ -13,6 +13,11 @@ import type { AdherenceDay } from './history';
 
 const ZONE = 'Europe/London';
 
+/** An `AdherenceDay` with all-zero counts by default; override what a test cares about. */
+function adherenceDay(date: string, over: Partial<AdherenceDay> = {}): AdherenceDay {
+  return { date, onTime: 0, late: 0, taken: 0, missed: 0, skipped: 0, expected: 0, ...over };
+}
+
 function readiness(over: Partial<OuraDailyReadiness> = {}): OuraDailyReadiness {
   return {
     id: over.id ?? 'r1',
@@ -117,9 +122,9 @@ describe('pearson', () => {
 
 describe('buildOuraOverlay', () => {
   const adherence: AdherenceDay[] = [
-    { date: '2026-06-01', taken: 2, missed: 0, expected: 2 },
-    { date: '2026-06-02', taken: 1, missed: 1, expected: 2 },
-    { date: '2026-06-03', taken: 0, missed: 0, expected: 0 },
+    adherenceDay('2026-06-01', { onTime: 2, taken: 2, expected: 2 }),
+    adherenceDay('2026-06-02', { onTime: 1, taken: 1, missed: 1, expected: 2 }),
+    adherenceDay('2026-06-03'),
   ];
   const summaries: OuraDaySummary[] = [
     {
@@ -147,11 +152,22 @@ describe('buildOuraOverlay', () => {
     expect(points.map((p) => p.date)).toEqual(['2026-06-01', '2026-06-02', '2026-06-03']);
   });
 
-  it('computes adherenceRatio as taken/expected, null when nothing expected', () => {
+  it('computes adherenceRatio as onTime/expected, null when nothing expected', () => {
     const points = buildOuraOverlay(summaries, adherence);
     expect(points[0]!.adherenceRatio).toBe(1);
     expect(points[1]!.adherenceRatio).toBe(0.5);
     expect(points[2]!.adherenceRatio).toBeNull();
+  });
+
+  // Stage 18 FR-18.4 regression: a late dose is still `taken`, but must not
+  // read as fully adherent here either, or this chart would silently disagree
+  // with the History screen's headline figure for the same day.
+  it('does not count a late dose as fully adherent', () => {
+    const withLate: AdherenceDay[] = [
+      adherenceDay('2026-06-01', { onTime: 1, late: 1, taken: 2, expected: 2 }),
+    ];
+    const points = buildOuraOverlay(summaries, withLate);
+    expect(points[0]!.adherenceRatio).toBe(0.5); // onTime/expected, not taken/expected (which would be 1)
   });
 
   it('converts stress seconds to minutes and nulls missing Oura days', () => {
@@ -164,9 +180,9 @@ describe('buildOuraOverlay', () => {
 
 describe('correlateAdherence', () => {
   const adherence: AdherenceDay[] = [
-    { date: '2026-06-01', taken: 2, missed: 0, expected: 2 }, // ratio 1.0
-    { date: '2026-06-02', taken: 1, missed: 1, expected: 2 }, // ratio 0.5
-    { date: '2026-06-03', taken: 0, missed: 2, expected: 2 }, // ratio 0.0
+    adherenceDay('2026-06-01', { onTime: 2, taken: 2, expected: 2 }), // ratio 1.0
+    adherenceDay('2026-06-02', { onTime: 1, taken: 1, missed: 1, expected: 2 }), // ratio 0.5
+    adherenceDay('2026-06-03', { taken: 0, missed: 2, expected: 2 }), // ratio 0.0
   ];
   const summaries: OuraDaySummary[] = [
     s('2026-06-01', 90, 600),

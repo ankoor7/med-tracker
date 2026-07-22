@@ -173,6 +173,10 @@ function validateSlot(p: Record<string, unknown>): ValidationResult {
   return ok;
 }
 
+// One required-field check per doseLog property plus the Stage 18 FR-18.3
+// optional-skipReason branch; each guard clause is covered in
+// cloudRecord.test.ts and mirrored 1:1 in supabase/tests/records_test.sql
+// (parity is the point — see that file).
 function validateDoseLog(p: Record<string, unknown>): ValidationResult {
   if (!isNonEmptyString(p.slotId)) return fail('doseLog.slotId required');
   if (!isNonEmptyString(p.medId)) return fail('doseLog.medId required');
@@ -180,6 +184,9 @@ function validateDoseLog(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.actualInstant)) return fail('doseLog.actualInstant required');
   if (!isFiniteNumber(p.dose)) return fail('doseLog.dose required');
   if (p.status !== 'taken' && p.status !== 'skipped') return fail('doseLog.status invalid');
+  // Optional free-text reason for a skip (Stage 18 FR-18.3) — never required,
+  // but must be a string when present.
+  if (!isValidOptionalString(p, 'skipReason')) return fail('doseLog.skipReason must be a string');
   return ok;
 }
 
@@ -238,6 +245,16 @@ function isOptionally(v: unknown, check: (v: unknown) => boolean): boolean {
   return v === undefined || check(v);
 }
 
+/**
+ * True when `key` on `p` is absent, explicitly `undefined`, or a string — the
+ * shared shape for every optional free-text field on a payload (`doseLog.
+ * skipReason`, `regimenChange.note`). Extracted so `validateDoseLog` doesn't
+ * carry this 3-condition check inline as its own branching.
+ */
+function isValidOptionalString(p: Record<string, unknown>, key: string): boolean {
+  return !(key in p) || p[key] === undefined || typeof p[key] === 'string';
+}
+
 /** The optional Stage 18 machine layer: identity strings + typed values. */
 function hasValidMachineLayer(c: Record<string, unknown>): boolean {
   return (
@@ -267,9 +284,7 @@ function validateRegimenChange(p: Record<string, unknown>): ValidationResult {
     return fail('regimenChange.changes required');
   }
   if (!p.changes.every(isValidFieldChange)) return fail('regimenChange.changes entry invalid');
-  if ('note' in p && p.note !== undefined && typeof p.note !== 'string') {
-    return fail('regimenChange.note must be a string');
-  }
+  if (!isValidOptionalString(p, 'note')) return fail('regimenChange.note must be a string');
   return ok;
 }
 
@@ -317,6 +332,14 @@ function validateSettings(p: Record<string, unknown>): ValidationResult {
   if (!isNonEmptyString(p.zone)) return fail('settings.zone required');
   if (!isFiniteNumber(p.adherenceWindowDays)) return fail('settings.adherenceWindowDays required');
   if (!isFiniteNumber(p.missedDayThreshold)) return fail('settings.missedDayThreshold required');
+  // Global on-time window (Stage 18 FR-18.4) — optional for back-compat with
+  // settings written before this field existed, but must be a positive number
+  // when present.
+  if ('onTimeWindowMinutes' in p && p.onTimeWindowMinutes !== undefined) {
+    if (!isFiniteNumber(p.onTimeWindowMinutes) || p.onTimeWindowMinutes <= 0) {
+      return fail('settings.onTimeWindowMinutes must be a positive number');
+    }
+  }
   return ok;
 }
 

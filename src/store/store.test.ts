@@ -4,6 +4,7 @@ import { useStore } from './store';
 import { LocalRepository, SteadyDoseDB } from './localRepository';
 import { setRepository, nullRepository } from './repository';
 import { resolveWallTimeToInstant } from '../core';
+import type { Guardrails } from '../core/types';
 
 let dbName: string;
 let db: SteadyDoseDB;
@@ -246,26 +247,54 @@ describe('store + LocalRepository', () => {
     });
   }
 
+  /**
+   * Hydrate a regimen with one medication ('m1') in one slot ('s1'), with
+   * `guardrails` overriding the (otherwise unset) defaults — shared by the
+   * editLogEntry/skipDose tests below that need a real med+slot to log or
+   * skip against (unlike `logBareEntry`'s empty regimen).
+   */
+  async function seedMedSlot(guardrails: Partial<Guardrails> = {}) {
+    await useStore.getState().hydrate();
+    useStore.setState({
+      medications: [
+        {
+          id: 'm1',
+          name: 'Med',
+          color: '#fff',
+          unit: 'mg',
+          halfLifeHours: 10,
+          adjustWhenLate: true,
+          active: true,
+          guardrails: {
+            maxSingleDose: null,
+            maxDailyDose: null,
+            minIntervalHours: null,
+            ...guardrails,
+          },
+          updatedAt: 0,
+        },
+      ],
+      slots: [{ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }], updatedAt: 0 }],
+      doseLog: [],
+    });
+  }
+
+  /** Hydrate an empty regimen and skip one bare occurrence at instant 0. */
+  async function skipBareEntry(reason?: string) {
+    await useStore.getState().hydrate();
+    useStore.setState({ medications: [], slots: [], doseLog: [] });
+    return useStore.getState().skipDose({
+      slotId: 's1',
+      medId: 'm1',
+      scheduledInstant: 0,
+      actualInstant: 0,
+      ...(reason ? { reason } : {}),
+    });
+  }
+
   describe('editLogEntry (Stage 18 FR-18.2 — dose correction)', () => {
     it('corrects both dose and time, re-running guardrails excluding itself (AC5)', async () => {
-      await useStore.getState().hydrate();
-      useStore.setState({
-        medications: [
-          {
-            id: 'm1',
-            name: 'Med',
-            color: '#fff',
-            unit: 'mg',
-            halfLifeHours: 10,
-            adjustWhenLate: true,
-            active: true,
-            guardrails: { maxSingleDose: 100, maxDailyDose: null, minIntervalHours: null },
-            updatedAt: 0,
-          },
-        ],
-        slots: [{ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }], updatedAt: 0 }],
-        doseLog: [],
-      });
+      await seedMedSlot({ maxSingleDose: 100 });
       const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0);
       const entry = useStore.getState().logDose({
         slotId: 's1',
@@ -344,6 +373,99 @@ describe('store + LocalRepository', () => {
       await reloadFromFreshRepo();
       const reloaded = useStore.getState().doseLog.find((e) => e.id === entry.id);
       expect(reloaded?.deleted).toBe(true);
+    });
+  });
+
+  describe('skipDose (Stage 18 FR-18.3 — deliberately withheld doses)', () => {
+    it('records a skipped entry distinct from taken — no amount, an optional reason', async () => {
+      await seedMedSlot();
+      const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0);
+      const entry = useStore.getState().skipDose({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant,
+        actualInstant: scheduledInstant + 3_600_000,
+        reason: 'clinician advised skipping',
+      });
+      expect(entry.status).toBe('skipped');
+      expect(entry.dose).toBe(0); // no amount was taken
+      expect(entry.warnings).toHaveLength(0);
+      expect(entry.skipReason).toBe('clinician advised skipping');
+      expect(useStore.getState().doseLog.map((e) => e.id)).toEqual([entry.id]);
+    });
+
+    it('omits skipReason entirely when none is given (never a required field)', async () => {
+      const entry = await skipBareEntry();
+      expect(entry.skipReason).toBeUndefined();
+    });
+
+    it('persists, survives reload, and syncs like any other dose-log entry', async () => {
+      const entry = await skipBareEntry('felt unwell');
+      await reloadFromFreshRepo();
+      const reloaded = useStore.getState().doseLog.find((e) => e.id === entry.id);
+      expect(reloaded?.status).toBe('skipped');
+      expect(reloaded?.skipReason).toBe('felt unwell');
+    });
+
+    it('a skipped dose does not corrupt guardrail checks or daily totals', async () => {
+      // A tight daily cap: if the skip's dose (0) were ever summed in as if it
+      // were a real dose amount, or if a skip could somehow inflate the daily
+      // total, this would misbehave.
+      await seedMedSlot({ maxDailyDose: 100, minIntervalHours: 4 });
+      const morning = Date.UTC(2026, 5, 18, 7, 0);
+      useStore.getState().skipDose({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: morning,
+        actualInstant: morning,
+      });
+      // A full 100mg dose an hour later: the skip contributed nothing to the
+      // daily total (still 0 so far) and nothing to the min-interval history
+      // (no *taken* dose preceded it), so this logs clean.
+      const taken = useStore.getState().logDose({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: morning + 3_600_000,
+        dose: 100,
+        actualInstant: morning + 3_600_000,
+      });
+      expect(taken.warnings).toHaveLength(0);
+    });
+
+    it('clears a pending one-time override for the skipped occurrence (Stage 12)', async () => {
+      await useStore.getState().hydrate();
+      useStore.setState({ medications: [], slots: [], doseLog: [], doseOverrides: [] });
+      const scheduledInstant = 10_000_000;
+      const ovr = useStore.getState().setDoseOverride({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant,
+        dose: 75,
+      });
+      expect(useStore.getState().doseOverrides.find((o) => o.id === ovr.id)?.deleted).toBeFalsy();
+
+      useStore.getState().skipDose({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant,
+        actualInstant: scheduledInstant,
+      });
+      expect(useStore.getState().doseOverrides.filter((o) => !o.deleted)).toHaveLength(0);
+    });
+
+    it('takeGroup does not re-log an item that was already skipped', async () => {
+      await seedMedSlot();
+      const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0);
+      useStore.getState().skipDose({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant,
+        actualInstant: scheduledInstant,
+      });
+      const created = useStore.getState().takeGroup('s1', scheduledInstant);
+      expect(created).toHaveLength(0);
+      expect(useStore.getState().doseLog.filter((e) => !e.deleted)).toHaveLength(1);
+      expect(useStore.getState().doseLog[0]!.status).toBe('skipped');
     });
   });
 

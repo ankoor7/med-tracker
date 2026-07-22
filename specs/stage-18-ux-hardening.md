@@ -208,10 +208,14 @@ Automated where feasible; AC1–AC4 are core-level and MUST be unit tests.
    explanation that this is an artefact of the toggle. Options: default off; keep
    on but render assumed doses distinctly (FR-18.6); or scope the assumption to
    dates before the medication was added.
-2. **On-time window for FR-18.4.** Per-medication, or global with a per-medication
-   override? A window that is too tight will read as punitive to a patient.
-3. **§4 implementation choice** — (a) reconstruct from change records, or (b)
-   effective-dated snapshots.
+2. ~~**On-time window for FR-18.4.**~~ **Settled:** a single **global** window the
+   user sets, applied to all medications. No per-medication override. A window
+   that is too tight will read as punitive to a patient, so the default should be
+   generous and the setting easy to find.
+3. ~~**§4 implementation choice.**~~ **Settled:** effective-dated snapshots (b),
+   plus repaired change-record diffs. Option (a) was audited and found unsound —
+   `deleteMedication` recorded no slot cascade, slot-dose diffs were keyed by
+   medication name, and `from`/`to` were display strings. See pieces 1 and 2.
 4. Should the Meds and Schedule tabs merge? Testers repeatedly could not predict
    which tab owned dose amounts (Schedule) versus guardrails (Meds).
 

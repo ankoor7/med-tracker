@@ -58,12 +58,16 @@ export interface DoseLogEntry {
   medId: string;
   scheduledInstant: Instant;
   actualInstant: Instant;
-  dose: number; // actual amount taken (may be adjusted)
+  dose: number; // actual amount taken (may be adjusted); 0 for a skipped entry
   unit: string;
   zone: IanaZone; // zone in effect when taken
   status: DoseStatus;
   adjusted: boolean; // dose !== scheduled dose
   warnings: string[]; // guardrail messages at log time
+  // Optional free-text reason for a deliberately withheld dose (Stage 18
+  // FR-18.3), e.g. "clinician advised skipping". Only meaningful when
+  // `status === 'skipped'`; never required.
+  skipReason?: string;
   updatedAt: Instant;
   version?: number;
   deleted?: boolean;
@@ -201,6 +205,15 @@ export interface Settings {
   // where a past, untaken dose is "missed"/"due". Optional for back-compat with
   // datasets written before this field existed; read it as `?? true`.
   assumeTakenOnTime?: boolean;
+  // Global on-time window, in minutes, for lateness-aware adherence (Stage 18
+  // FR-18.4): a timing-sensitive dose logged within this many minutes of its
+  // scheduled time counts as "on time"; beyond it, as "late" (still taken —
+  // never folded into "missed"). Single global setting, deliberately with no
+  // per-medication override (settled design decision, spec §7 item 2), so it
+  // applies uniformly. Optional for back-compat with datasets written before
+  // this field existed; read it as `?? DEFAULT_ON_TIME_WINDOW_MINUTES`
+  // (`core/adherence.ts`).
+  onTimeWindowMinutes?: number;
   updatedAt: Instant;
   version?: number;
 }
@@ -270,7 +283,7 @@ export interface Dataset {
 
 // A single occurrence of one scheduled medication on a given day.
 // Produced by schedule enumeration; consumed by the Today screen.
-export type OccurrenceStatus = 'upcoming' | 'taken' | 'due' | 'missed';
+export type OccurrenceStatus = 'upcoming' | 'taken' | 'due' | 'missed' | 'skipped';
 
 export interface PlannedOccurrence {
   slotId: string;

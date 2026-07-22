@@ -1,6 +1,7 @@
 // First-run seed data — a small, realistic AED-style regimen so the app is
 // usable immediately. Stage 2 seeds this into IndexedDB on first run.
 
+import { DEFAULT_ON_TIME_WINDOW_MINUTES } from '../core/adherence';
 import { startOfDayInstant } from '../core/startDate';
 import { isoDateInZone } from '../core/time';
 import type { Dataset, Slot } from '../core/types';
@@ -167,6 +168,7 @@ export function seedDataset(now: number): Dataset {
       adherenceWindowDays: 7,
       missedDayThreshold: 3,
       assumeTakenOnTime: true,
+      onTimeWindowMinutes: DEFAULT_ON_TIME_WINDOW_MINUTES,
       updatedAt: now,
       version: 1,
     },
