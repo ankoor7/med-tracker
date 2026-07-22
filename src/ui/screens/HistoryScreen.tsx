@@ -135,9 +135,13 @@ export function HistoryScreen() {
           <span className="text-3xl font-semibold text-accent-muted">
             {Math.round(adherence.ratio * 100)}%
           </span>
-          <span className="text-xs text-slate-400">
-            {adherence.onTime} on time · {adherence.late} late · {adherence.missed} missed ·{' '}
-            {adherence.expected} expected
+          <span className="text-xs text-slate-400" data-testid="adherence-counts">
+            {adherence.onTime} on time
+            {adherence.assumedOnTime > 0 && (
+              <span className="text-slate-500"> ({adherence.assumedOnTime} assumed)</span>
+            )}
+            {' · '}
+            {adherence.late} late · {adherence.missed} missed · {adherence.expected} expected
             {adherence.skipped > 0 && ` · ${adherence.skipped} skipped (not counted)`}
           </span>
         </div>
@@ -146,6 +150,19 @@ export function HistoryScreen() {
           the on-time window setting below. A skipped dose doesn't count toward this figure either
           way.
         </p>
+        {adherence.assumedOnTime > 0 && (
+          // Stage 18 FR-18.6: this figure is partly the assume-on-time policy's
+          // fill-in, not a full record of what actually happened — disclosed here
+          // next to the number, not only in Settings below. Calm and factual,
+          // matching the on-time-window copy's precedent: state the mechanism,
+          // not an alarm.
+          <p className="mt-1 text-xs text-slate-500" data-testid="assumed-basis-note">
+            <strong className="font-medium text-slate-400">Basis:</strong> {adherence.assumedOnTime}{' '}
+            of the {adherence.onTime} on-time doses above are assumed from your schedule because
+            they were never logged or edited — not confirmed by you. Turn off "Assume doses taken on
+            time" below to see them as missed instead.
+          </p>
+        )}
         <div className="mt-3">
           <AdherenceChart days={timeline} changes={regimenChanges} zone={settings.zone} />
         </div>
@@ -228,8 +245,12 @@ export function HistoryScreen() {
           <span className="text-sm">
             Assume doses taken on time
             <span className="mt-0.5 block text-xs text-slate-500">
-              Past scheduled doses count as taken on time unless you log or edit them. Turn off to
-              mark untaken doses as missed/due and track real gaps.
+              Past scheduled doses count as taken on time unless you log or edit them, so a fresh
+              install or a quiet week doesn't read as a wall of missed doses. Assumed doses are
+              always shown distinctly from ones you actually logged (Today, Calendar and the figures
+              above). Turning this off recalculates the figures above from your existing dose log —
+              nothing is added or removed — but every unlogged past dose will now show as missed
+              instead of assumed; turning it back on restores the same assumption again.
             </span>
           </span>
         </label>

@@ -48,6 +48,12 @@ export function TodayScreen() {
   const taken = occurrences.filter((o) => o.status === 'taken').length;
   const missed = occurrences.filter((o) => o.status === 'missed').length;
   const skipped = occurrences.filter((o) => o.status === 'skipped').length;
+  // Stage 18 FR-18.6: of `taken`, how many are the assume-on-time policy's
+  // fill-in rather than something the user actually logged. The headline ring
+  // and count MUST NOT present these as indistinguishable from a real log — a
+  // fresh install with zero real entries must not read as "5 of 5 doses
+  // taken" with nothing to disclose that every one of them is an assumption.
+  const assumedTaken = occurrences.filter((o) => o.status === 'taken' && o.assumed).length;
   // Skipped occurrences are resolved (Stage 18 FR-18.3) — not still "remaining"
   // for the user to act on, and not folded into "taken" either.
   const remaining = total - taken - skipped;
@@ -69,20 +75,16 @@ export function TodayScreen() {
       </div>
 
       {total > 0 && (
-        <Card className="flex flex-col items-center gap-5 py-7">
-          <Ring value={pct} color={ringColor} aria-label={`${taken} of ${total} doses taken today`}>
-            <span className="text-4xl font-semibold tabular-nums text-slate-50">
-              {taken}
-              <span className="text-2xl text-slate-500">/{total}</span>
-            </span>
-            <span className="mt-1 text-xs uppercase tracking-wide text-slate-400">doses taken</span>
-          </Ring>
-          <div className="flex items-center gap-8">
-            <Stat value={remaining} label="Remaining" />
-            {missed > 0 && <Stat value={missed} label="Missed" />}
-            {skipped > 0 && <Stat value={skipped} label="Skipped" />}
-          </div>
-        </Card>
+        <TodaySummaryCard
+          total={total}
+          taken={taken}
+          missed={missed}
+          skipped={skipped}
+          assumedTaken={assumedTaken}
+          remaining={remaining}
+          pct={pct}
+          ringColor={ringColor}
+        />
       )}
 
       {planned.length === 0 && (
@@ -176,6 +178,66 @@ export function TodayScreen() {
       )}
     </div>
   );
+}
+
+// The ring + composition disclosure + stat row (Stage 18 FR-18.6). Extracted
+// from `TodayScreen` to keep its own branching flat — this is purely
+// presentational, its inputs are the already-computed occurrence counts.
+function TodaySummaryCard({
+  total,
+  taken,
+  missed,
+  skipped,
+  assumedTaken,
+  remaining,
+  pct,
+  ringColor,
+}: {
+  total: number;
+  taken: number;
+  missed: number;
+  skipped: number;
+  assumedTaken: number;
+  remaining: number;
+  pct: number;
+  ringColor: string;
+}) {
+  return (
+    <Card className="flex flex-col items-center gap-5 py-7">
+      <Ring value={pct} color={ringColor} aria-label={ringAriaLabel(taken, total, assumedTaken)}>
+        <span className="text-4xl font-semibold tabular-nums text-slate-50">
+          {taken}
+          <span className="text-2xl text-slate-500">/{total}</span>
+        </span>
+        <span className="mt-1 text-xs uppercase tracking-wide text-slate-400">doses taken</span>
+      </Ring>
+      {/* Stage 18 FR-18.6: disclosed here, next to the headline number, not
+          only in History → Settings. Text label (not colour alone) so the
+          caveat survives a glance and greyscale/colour-blind rendering. A
+          day with zero assumed doses renders no caveat at all. */}
+      {assumedTaken > 0 && (
+        <p className="-mt-3 text-xs text-slate-400" data-testid="assumed-composition-note">
+          <span aria-hidden>◇</span> {assumedTaken} of {taken} assumed taken on time, not logged —{' '}
+          {taken - assumedTaken} confirmed by you.
+        </p>
+      )}
+      <div className="flex items-center gap-8">
+        <Stat value={remaining} label="Remaining" />
+        {missed > 0 && <Stat value={missed} label="Missed" />}
+        {skipped > 0 && <Stat value={skipped} label="Skipped" />}
+        {assumedTaken > 0 && <Stat value={assumedTaken} label="Assumed" />}
+      </div>
+    </Card>
+  );
+}
+
+// Accessible name for the ring: discloses the assumed share inline so a
+// screen-reader user gets the same caveat a sighted user sees in the note
+// below the ring. Extracted purely to keep `TodaySummaryCard` flat.
+function ringAriaLabel(taken: number, total: number, assumedTaken: number): string {
+  return assumedTaken > 0
+    ? `${taken} of ${total} doses taken today, including ${assumedTaken} assumed on time and not logged`
+    : `${taken} of ${total} doses taken today`;
 }
 
 function OccurrenceRow({

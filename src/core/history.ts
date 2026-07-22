@@ -74,6 +74,10 @@ export interface AdherenceDay {
   skipped: number; // deliberately withheld — excluded from `expected` (FR-18.3)
   taken: number; // onTime + late
   expected: number; // past-due timing-sensitive occurrences: onTime + late + missed
+  // Subset of `onTime` that is assumed rather than genuinely logged (Stage 18
+  // FR-18.6) — the chart must not render this day's bar as indistinguishable
+  // from a day backed entirely by real logs.
+  assumedOnTime: number;
 }
 
 /**
@@ -104,7 +108,7 @@ export function adherenceTimeline(
     // Same effective-dated resolution as `computeAdherence`, so the chart and
     // the summary figure can never disagree (FR-18.1).
     const planned = timingSensitivePlannedForDate(source, date, log, zone, now, assumeTakenOnTime);
-    const { onTime, late, missed, skipped } = classifyOccurrences(
+    const { onTime, late, missed, skipped, assumedOnTime } = classifyOccurrences(
       planned,
       log,
       onTimeWindowMinutes,
@@ -117,6 +121,7 @@ export function adherenceTimeline(
       skipped,
       taken: onTime + late,
       expected: onTime + late + missed,
+      assumedOnTime,
     });
   }
   return timeline;

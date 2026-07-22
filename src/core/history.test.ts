@@ -132,4 +132,34 @@ describe('adherenceTimeline', () => {
     expect(days[1]).toMatchObject({ date: '2026-06-15', onTime: 0, late: 1, expected: 1 });
     expect(days[2]).toMatchObject({ date: '2026-06-16', skipped: 1, expected: 0 });
   });
+
+  // Stage 18 FR-18.6 — the calendar/chart consumer needs a per-day breakdown of
+  // how much of `onTime` is merely assumed, so a day made entirely of
+  // assumption never renders identically to a day of real logs.
+  it('reports assumedOnTime per day, distinct from genuinely-logged onTime (FR-18.6)', () => {
+    const m = med({ id: 'm1', adjustWhenLate: true });
+    const slots = [slot({ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }] })];
+    const realDay = at('2026-06-15', '08:00');
+    const real = logEntry({
+      medId: 'm1',
+      slotId: 's1',
+      scheduledInstant: realDay,
+      actualInstant: realDay,
+      status: 'taken',
+    });
+    const now = at('2026-06-16', '23:00');
+    // Day 1 (06-15) has a real log; day 2 (06-16) is unlogged and falls to the
+    // assume-on-time policy.
+    const days = adherenceTimeline(slots, [m], [real], ZONE, 2, now, true);
+    expect(days[0]).toMatchObject({ date: '2026-06-15', onTime: 1, assumedOnTime: 0 });
+    expect(days[1]).toMatchObject({ date: '2026-06-16', onTime: 1, assumedOnTime: 1 });
+  });
+
+  it('assumedOnTime is 0 throughout when assumeTakenOnTime is off', () => {
+    const m = med({ id: 'm1', adjustWhenLate: true });
+    const slots = [slot({ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }] })];
+    const now = at('2026-06-16', '23:00');
+    const days = adherenceTimeline(slots, [m], [], ZONE, 2, now, false);
+    for (const day of days) expect(day.assumedOnTime).toBe(0);
+  });
 });

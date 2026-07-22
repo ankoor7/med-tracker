@@ -58,6 +58,12 @@ export interface AdherenceResult {
   ratio: number; // onTime / expected (1 when nothing was expected)
   threshold: number;
   missedPatternWarning: boolean; // missed > threshold (skipped never counts here)
+  // Stage 18 FR-18.6: of `onTime` (and therefore of `taken` and `ratio`), how many
+  // are the assume-on-time policy's fill-in rather than a genuine log entry. A
+  // caller MUST disclose this whenever it is nonzero — the headline figure is
+  // partly an assumption, not a full record of what actually happened. Zero
+  // means the figure is derived entirely from real logs and carries no caveat.
+  assumedOnTime: number;
 }
 
 /** Per-day/window outcome tally shared by `computeAdherence` and `adherenceTimeline`. */
@@ -66,6 +72,10 @@ export interface OutcomeCounts {
   late: number;
   missed: number;
   skipped: number;
+  // Subset of `onTime` that is assumed rather than genuinely logged (Stage 18
+  // FR-18.6). Assumed occurrences are always classified "onTime" (see
+  // `classifyTakenDelay`), so this can never exceed `onTime`.
+  assumedOnTime: number;
 }
 
 /**
@@ -100,7 +110,7 @@ export function classifyOccurrences(
 ): OutcomeCounts {
   const logById = new Map(log.filter((e) => !e.deleted).map((e) => [e.id, e]));
   const windowMs = onTimeWindowMinutes * 60_000;
-  const counts: OutcomeCounts = { onTime: 0, late: 0, missed: 0, skipped: 0 };
+  const counts: OutcomeCounts = { onTime: 0, late: 0, missed: 0, skipped: 0, assumedOnTime: 0 };
 
   for (const slot of planned) {
     for (const occ of slot.occurrences) {
@@ -110,6 +120,7 @@ export function classifyOccurrences(
         counts.missed++;
       } else if (occ.status === 'taken') {
         counts[classifyTakenDelay(occ, logById, windowMs)]++;
+        if (occ.assumed) counts.assumedOnTime++;
       }
       // 'upcoming' (future) and 'due' (flexible — already filtered out) are not scored.
     }
@@ -137,6 +148,7 @@ export function computeAdherence(
   let late = 0;
   let missed = 0;
   let skipped = 0;
+  let assumedOnTime = 0;
 
   for (let i = 0; i < windowDays; i++) {
     const date = addDaysToIsoDate(from, i);
@@ -151,6 +163,7 @@ export function computeAdherence(
     late += day.late;
     missed += day.missed;
     skipped += day.skipped;
+    assumedOnTime += day.assumedOnTime;
   }
 
   const taken = onTime + late;
@@ -170,5 +183,6 @@ export function computeAdherence(
     ratio,
     threshold: missedThreshold,
     missedPatternWarning: missed > missedThreshold,
+    assumedOnTime,
   };
 }

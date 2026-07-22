@@ -11,8 +11,26 @@ import {
 import { med } from '../../test/fixtures';
 
 const days: AdherenceDay[] = [
-  { date: '2026-06-15', onTime: 2, late: 0, taken: 2, missed: 0, skipped: 0, expected: 2 },
-  { date: '2026-06-16', onTime: 1, late: 0, taken: 1, missed: 1, skipped: 0, expected: 2 },
+  {
+    date: '2026-06-15',
+    onTime: 2,
+    late: 0,
+    taken: 2,
+    missed: 0,
+    skipped: 0,
+    expected: 2,
+    assumedOnTime: 0,
+  },
+  {
+    date: '2026-06-16',
+    onTime: 1,
+    late: 0,
+    taken: 1,
+    missed: 1,
+    skipped: 0,
+    expected: 2,
+    assumedOnTime: 0,
+  },
 ];
 
 describe('AdherenceChart', () => {

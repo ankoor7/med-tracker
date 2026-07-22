@@ -205,9 +205,10 @@ Automated where feasible; AC1–AC4 are core-level and MUST be unit tests.
 1. **`assumeTakenOnTime` default.** Should it remain on? It makes a fresh install
    look complete and a real audit impossible without finding a setting in History →
    Settings; toggling it off swings the whole history to "missed" with no
-   explanation that this is an artefact of the toggle. Options: default off; keep
-   on but render assumed doses distinctly (FR-18.6); or scope the assumption to
-   dates before the medication was added.
+   explanation that this is an artefact of the toggle. **Settled:** keep it **on**
+   by default, and render assumed doses distinctly per FR-18.6. The honesty
+   problem is a display problem, not a default problem — a fresh install should
+   still look complete rather than greeting a new user with a wall of "missed".
 2. ~~**On-time window for FR-18.4.**~~ **Settled:** a single **global** window the
    user sets, applied to all medications. No per-medication override. A window
    that is too tight will read as punitive to a patient, so the default should be
@@ -216,8 +217,45 @@ Automated where feasible; AC1–AC4 are core-level and MUST be unit tests.
    plus repaired change-record diffs. Option (a) was audited and found unsound —
    `deleteMedication` recorded no slot cascade, slot-dose diffs were keyed by
    medication name, and `from`/`to` were display strings. See pieces 1 and 2.
-4. Should the Meds and Schedule tabs merge? Testers repeatedly could not predict
-   which tab owned dose amounts (Schedule) versus guardrails (Meds).
+4. ~~Should the Meds and Schedule tabs merge?~~ **Settled: yes, merge them.**
+   Testers repeatedly could not predict which tab owned dose amounts (Schedule)
+   versus guardrails (Meds). See **FR-18.12** below — this is a larger change than
+   the rest of Stage 18 and needs its own design pass.
+
+## 11. FR-18.12 — Merge the Meds and Schedule tabs
+
+**Why.** "Where do I change my dose?" has no predictable answer today. A
+medication's identity, guardrails and half-life live on **Meds**; its dose
+amounts and times live on **Schedule**, inside a per-slot editor. Nothing signals
+the split, and a medication card never mentions the slots it appears in. Every
+journey that touched a regimen hit this (Journeys 2 and 5 both logged it).
+
+**Requirement.** One tab owns a medication end to end: what it is, what it is
+capped at, when it is taken, and how much at each time. A user changing a dose
+should not have to know which of two screens models it.
+
+**Sequencing.** FR-18.12 lands **before** FR-18.7, FR-18.8 and the
+`ScheduleScreen` half of FR-18.10, because all three add UI to screens this
+merges — building them first means building them twice:
+- FR-18.7's "prompt to schedule after adding a medication" may dissolve entirely
+  once adding a medication and scheduling it are one flow. If so, satisfy the
+  requirement (a medication cannot be silently left unscheduled and invisible)
+  rather than the literal prompt.
+- FR-18.8's validation and FR-18.10's raw-id leak land in whatever the merged
+  editor becomes.
+
+**Constraints.** The merge is presentation-level: `Medication` and `Slot` stay
+separate entities, the store actions keep their shapes, and the sync surface does
+not change. Slot-level dose is deliberately per-time-of-day and must remain so —
+do not flatten a medication to a single dose. Everything in §9's must-not-regress
+list still applies, and the Stage 16 change records emitted by each edit must be
+unchanged in kind and content.
+
+**Acceptance.**
+- **AC13** A user can add a medication, set its guardrails, and put it on a
+  twice-daily schedule without leaving one tab, and it appears on Today.
+- **AC14** Editing a dose amount, a slot time, and a guardrail each still emit the
+  same `RegimenChange` records as before the merge.
 
 ## 8. The blood-level chart — settled: it must never render
 

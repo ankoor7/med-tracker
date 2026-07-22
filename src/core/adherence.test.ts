@@ -267,3 +267,69 @@ describe('computeAdherence — FR-18.3: skipped doses', () => {
     expect(r.missedPatternWarning).toBe(false);
   });
 });
+
+// Stage 18 FR-18.6 — assumed vs logged doses must be distinguishable. The
+// exact defect: a fresh install with an empty dose log and
+// `assumeTakenOnTime` on read as "5 of 5 doses taken" with nothing disclosing
+// that every one of the 5 was an assumption, not a real record. `assumedOnTime`
+// is the field a caller MUST check before presenting `onTime`/`taken`/`ratio`
+// without a caveat.
+describe('computeAdherence — FR-18.6: assumed vs logged must be disclosed', () => {
+  const sensitive = med({ id: 'sens', adjustWhenLate: true });
+  const s = slot({ id: 's1', time: '08:00', items: [{ medId: 'sens', dose: 100 }] });
+
+  it('a fresh install (empty log, assumeTakenOnTime on) discloses every on-time dose as assumed', () => {
+    // The exact "5 of 5 doses taken" scenario, scaled down: a 5-day window with
+    // nothing ever logged must not silently present as 100% adherent with no
+    // record of it being an assumption.
+    const r = computeAdherence([s], [sensitive], [], ZONE, 5, 2, NOW, true);
+    expect(r.onTime).toBe(5);
+    expect(r.taken).toBe(5);
+    expect(r.ratio).toBe(1);
+    // The figure is derived ENTIRELY from assumption — this must be visible.
+    expect(r.assumedOnTime).toBe(5);
+  });
+
+  it('a real, on-time log entry does not count toward assumedOnTime', () => {
+    const scheduled = at('2026-06-15', '08:00');
+    const real = logEntry({
+      medId: 'sens',
+      slotId: 's1',
+      scheduledInstant: scheduled,
+      actualInstant: scheduled,
+    });
+    const r = computeAdherence([s], [sensitive], [real], ZONE, 1, 2, NOW, true);
+    expect(r.onTime).toBe(1);
+    // Derived entirely from a real log — no assumption, no caveat to carry.
+    expect(r.assumedOnTime).toBe(0);
+  });
+
+  it('a mixed window discloses only the assumed share, not the whole figure', () => {
+    // One real on-time entry (06-14), one day left to the assume-on-time policy
+    // (06-15, unlogged).
+    const real = logEntry({
+      medId: 'sens',
+      slotId: 's1',
+      scheduledInstant: at('2026-06-14', '08:00'),
+      actualInstant: at('2026-06-14', '08:00'),
+    });
+    const r = computeAdherence([s], [sensitive], [real], ZONE, 2, 2, NOW, true);
+    expect(r.onTime).toBe(2);
+    expect(r.assumedOnTime).toBe(1); // only the unlogged day is an assumption
+  });
+
+  it('assumedOnTime is always 0 when assumeTakenOnTime is off', () => {
+    const r = computeAdherence([s], [sensitive], [], ZONE, 3, 2, NOW, false);
+    expect(r.missed).toBe(3); // unlogged doses now read as missed, not assumed
+    expect(r.assumedOnTime).toBe(0);
+  });
+
+  it('reversibility: toggling assumeTakenOnTime off then back on returns to the same assumedOnTime figure', () => {
+    const off = computeAdherence([s], [sensitive], [], ZONE, 3, 2, NOW, false);
+    const on = computeAdherence([s], [sensitive], [], ZONE, 3, 2, NOW, true);
+    const onAgain = computeAdherence([s], [sensitive], [], ZONE, 3, 2, NOW, true);
+    expect(off.assumedOnTime).toBe(0);
+    expect(on.assumedOnTime).toBe(3);
+    expect(onAgain).toEqual(on); // same log, same setting → byte-identical figures
+  });
+});

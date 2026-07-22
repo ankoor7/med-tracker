@@ -200,6 +200,50 @@ describe('TodayScreen', () => {
       expect(within(after).getByText('Taken')).toBeInTheDocument();
       expect(within(after).queryByText('On time')).not.toBeInTheDocument();
     });
+
+    // Stage 18 FR-18.6 — the exact defect: a fresh install with an empty dose
+    // log showed "5 of 5 doses taken" with no disclosure that every one of
+    // those 5 was an assumption, not a real record.
+    it('a fresh install with an empty log discloses the headline count as assumed, not silently 100%', () => {
+      seed(
+        [
+          med({ id: 'a', name: 'Lamotrigine', adjustWhenLate: true }),
+          med({ id: 'b', name: 'Levetiracetam', adjustWhenLate: true }),
+        ],
+        [
+          slot({ id: 's1', time: '06:00', items: [{ medId: 'a', dose: 100 }] }),
+          slot({ id: 's2', time: '07:00', items: [{ medId: 'b', dose: 100 }] }),
+        ],
+      );
+      useStore.setState({ settings: settings({ zone: ZONE, assumeTakenOnTime: true }) });
+      render(<TodayScreen />);
+
+      // The ring headline still reads 2/2 taken, but its accessible name
+      // discloses that both are assumed, not logged...
+      expect(
+        screen.getByRole('img', { name: /2 of 2 doses taken today, including 2 assumed/i }),
+      ).toBeInTheDocument();
+      // ...and the composition is disclosed visibly right next to it, not buried.
+      const note = screen.getByTestId('assumed-composition-note');
+      expect(note).toHaveTextContent('2 of 2 assumed taken on time, not logged');
+      expect(note).toHaveTextContent('0 confirmed by you');
+      expect(activeLog()).toHaveLength(0); // nothing was actually logged
+    });
+
+    it('once a dose is genuinely logged, the assumed count only covers what remains unlogged', () => {
+      seedAssumed();
+      render(<TodayScreen />);
+      fireEvent.click(
+        within(screen.getByText('Lamotrigine').closest('li')!).getByRole('button', {
+          name: 'Edit',
+        }),
+      );
+      submitLogDose();
+
+      // The single occurrence is now genuinely logged — no assumption left to
+      // disclose, so the composition note must not render a misleading caveat.
+      expect(screen.queryByTestId('assumed-composition-note')).not.toBeInTheDocument();
+    });
   });
 
   describe('dose correction (Stage 18 FR-18.2)', () => {

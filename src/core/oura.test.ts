@@ -15,7 +15,17 @@ const ZONE = 'Europe/London';
 
 /** An `AdherenceDay` with all-zero counts by default; override what a test cares about. */
 function adherenceDay(date: string, over: Partial<AdherenceDay> = {}): AdherenceDay {
-  return { date, onTime: 0, late: 0, taken: 0, missed: 0, skipped: 0, expected: 0, ...over };
+  return {
+    date,
+    onTime: 0,
+    late: 0,
+    taken: 0,
+    missed: 0,
+    skipped: 0,
+    expected: 0,
+    assumedOnTime: 0,
+    ...over,
+  };
 }
 
 function readiness(over: Partial<OuraDailyReadiness> = {}): OuraDailyReadiness {

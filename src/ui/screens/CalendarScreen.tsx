@@ -49,6 +49,12 @@ interface GroupMember {
   status: OccurrenceStatus;
   logEntryId?: string;
   overridden: boolean;
+  // Stage 18 FR-18.6: "taken" from the assume-on-time policy, not a real log
+  // entry. Without this, an assumed dose and a genuinely-logged one were
+  // indistinguishable on the calendar; it also shares no state with `missed`
+  // or `upcoming`, which is what made all three render as the same dashed
+  // block (the FR-18.6 defect this closes).
+  assumed: boolean;
 }
 
 // A scheduled slot rendered as a single draggable group. Dragging moves every
@@ -61,7 +67,8 @@ interface CalendarGroup {
   scheduledInstant: Instant;
   anchorInstant: Instant; // representative position (earliest member)
   members: GroupMember[];
-  hasLogged: boolean; // at least one member already taken
+  hasLogged: boolean; // at least one member has a real log entry
+  hasAssumed: boolean; // at least one member is "taken" only by assumption (Stage 18 FR-18.6)
   lane: number;
   laneCount: number;
 }
@@ -159,6 +166,7 @@ export function CalendarScreen() {
           status: occ.status,
           logEntryId: occ.logEntryId,
           overridden: occ.overridden ?? false,
+          assumed: occ.assumed ?? false,
         };
       });
       if (members.length === 0) continue;
@@ -170,6 +178,7 @@ export function CalendarScreen() {
         anchorInstant: Math.min(...members.map((m) => m.anchorInstant)),
         members,
         hasLogged: members.some((m) => m.logEntryId),
+        hasAssumed: members.some((m) => m.status === 'taken' && m.assumed),
       });
     }
     return assignLanes(raw);
@@ -430,7 +439,7 @@ function DoseGroup({
       data-block="true"
       className={`absolute flex touch-none select-none flex-col gap-0.5 overflow-hidden rounded-md border bg-slate-900/85 px-2 py-1 text-xs shadow-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-muted ${
         preview != null ? 'z-20 cursor-grabbing ring-2 ring-accent-muted' : 'cursor-grab'
-      } ${group.hasLogged ? 'border-slate-700' : 'border-dashed border-slate-600'}`}
+      } ${groupBorderClass(group)}`}
       style={{
         top,
         height: GROUP_HEIGHT,
@@ -445,28 +454,105 @@ function DoseGroup({
           <span className="text-[10px] text-slate-500">· {group.members.length} meds</span>
         )}
         {moved && <span className="text-[10px] text-accent-muted">· moving</span>}
-        {!group.hasLogged && anyMissed && !moved && (
-          <span className="text-[10px] text-status-missed">· missed</span>
-        )}
+        <GroupStatusChip group={group} anyMissed={anyMissed} moved={moved} />
       </span>
       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden">
         {group.members.map((m) => (
-          <span key={m.medId} className="inline-flex items-center gap-1 truncate text-[11px]">
-            <ColorDot color={m.med?.color ?? '#64748b'} />
-            <span className={m.logEntryId ? 'text-slate-300' : 'text-slate-200'}>
-              {m.med?.name ?? m.medId}
-            </span>
-            <span className="tabular-nums opacity-70">
-              {m.dose}
-              {m.med?.unit ?? ''}
-            </span>
-            {m.logEntryId && <span className="text-[10px] text-status-taken">✓</span>}
-            {m.overridden && <span className="text-[10px] text-amber-400">·adj</span>}
-          </span>
+          <GroupMemberChip key={m.medId} m={m} />
         ))}
       </span>
     </div>
   );
+}
+
+// Stage 18 FR-18.6: three visually distinct border treatments, not one dashed
+// style shared by assumed/missed/upcoming. A real log entry gets a solid
+// border; an assumed-taken group keeps a dashed border but tinted with the
+// "taken" colour (plus the "· assumed" label and the per-member glyph below —
+// never colour alone); anything still unresolved (missed/upcoming) keeps the
+// original neutral dashed style. Extracted so `DoseGroup`'s own branching
+// stays flat.
+function groupBorderClass(group: CalendarGroup): string {
+  if (group.hasLogged) return 'border-slate-700';
+  if (group.hasAssumed) return 'border-dashed border-status-taken/50';
+  return 'border-dashed border-slate-600';
+}
+
+// The "· missed"/"· assumed" chip next to a group's time — mutually
+// exclusive, and both suppressed once the group is genuinely logged or being
+// dragged. Extracted from `DoseGroup` to keep its own branching flat.
+function GroupStatusChip({
+  group,
+  anyMissed,
+  moved,
+}: {
+  group: CalendarGroup;
+  anyMissed: boolean;
+  moved: boolean;
+}) {
+  if (group.hasLogged || moved) return null;
+  if (anyMissed) return <span className="text-[10px] text-status-missed">· missed</span>;
+  if (group.hasAssumed) {
+    return (
+      <span
+        className="text-[10px] text-status-taken/80"
+        title="Assumed taken on time — not a real log entry"
+      >
+        · assumed
+      </span>
+    );
+  }
+  return null;
+}
+
+// One medication within a group block: colour dot, name, dose, and a
+// logged/assumed/adjusted glyph. Extracted from `DoseGroup` to keep its own
+// branching flat — pure rendering, no behaviour of its own.
+function GroupMemberChip({ m }: { m: GroupMember }) {
+  return (
+    <span className="inline-flex items-center gap-1 truncate text-[11px]">
+      <ColorDot color={m.med?.color ?? '#64748b'} />
+      <span className={m.logEntryId ? 'text-slate-300' : 'text-slate-200'}>
+        {m.med?.name ?? m.medId}
+      </span>
+      <span className="tabular-nums opacity-70">
+        {m.dose}
+        {m.med?.unit ?? ''}
+      </span>
+      <MemberStatusGlyph m={m} />
+      {m.overridden && <span className="text-[10px] text-amber-400">·adj</span>}
+    </span>
+  );
+}
+
+// Stage 18 FR-18.6: a real log entry gets "✓"; "taken" that is only the
+// assume-on-time policy's fill-in gets a distinct glyph, "◇" — never the same
+// mark, never colour alone. Extracted from `GroupMemberChip` to keep both
+// functions' branching flat.
+function MemberStatusGlyph({ m }: { m: GroupMember }) {
+  if (m.logEntryId) {
+    return (
+      <span
+        className="text-[10px] text-status-taken"
+        title="Logged by you"
+        aria-label="Logged by you"
+      >
+        ✓
+      </span>
+    );
+  }
+  if (m.status === 'taken' && m.assumed) {
+    return (
+      <span
+        className="text-[10px] text-status-taken/70"
+        title="Assumed taken on time — not a real log entry"
+        aria-label="Assumed taken on time, not a real log entry"
+      >
+        ◇
+      </span>
+    );
+  }
+  return null;
 }
 
 /**

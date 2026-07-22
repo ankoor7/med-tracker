@@ -192,3 +192,81 @@ describe('HistoryScreen — lateness-aware adherence (Stage 18 FR-18.4)', () => 
     expect(within(row).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 });
+
+// Stage 18 FR-18.6 — assumed vs logged doses must be distinguishable, and any
+// adherence figure derived partly from assumption must say so, next to the
+// number rather than only in Settings.
+describe('HistoryScreen — assumed vs logged must be disclosed (Stage 18 FR-18.6)', () => {
+  function seedUnloggedWindow(assumeTakenOnTime: boolean) {
+    useStore.setState({
+      hydrated: true,
+      medications: [med({ id: 'a', name: 'Lamotrigine', unit: 'mg', adjustWhenLate: true })],
+      slots: [
+        slot({ id: 's1', time: '08:00', label: 'Morning', items: [{ medId: 'a', dose: 100 }] }),
+      ],
+      doseLog: [], // the exact fresh-install scenario: nothing has ever been logged
+      settings: settings({ zone: ZONE, adherenceWindowDays: 1, assumeTakenOnTime }),
+    });
+  }
+
+  const countsLine = () => screen.getByTestId('adherence-counts');
+
+  it('a figure entirely from assumption discloses the caveat next to the number', () => {
+    seedUnloggedWindow(true);
+    renderHistory();
+    expect(countsLine()).toHaveTextContent('1 on time (1 assumed) · 0 late · 0 missed');
+    const basis = screen.getByTestId('assumed-basis-note');
+    expect(basis).toHaveTextContent('1 of the 1 on-time doses above are assumed');
+    expect(basis).toHaveTextContent('not confirmed by you');
+  });
+
+  it('a figure derived entirely from real logs carries no assumed caveat', () => {
+    // A single-day window with nothing left unaccounted for by a real log —
+    // no room for the assume-on-time policy to fill anything in.
+    seedUnloggedWindow(true);
+    useStore.setState({
+      doseLog: [
+        logEntry({
+          id: 'l1',
+          slotId: 's1',
+          medId: 'a',
+          scheduledInstant: NOW - 3600_000,
+          actualInstant: NOW - 3600_000,
+          dose: 100,
+          status: 'taken',
+        }),
+      ],
+    });
+    renderHistory();
+    expect(countsLine()).toHaveTextContent('1 on time · 0 late · 0 missed');
+    expect(countsLine()).not.toHaveTextContent('assumed');
+    expect(screen.queryByTestId('assumed-basis-note')).not.toBeInTheDocument();
+  });
+
+  it('turning assumeTakenOnTime off is reversible and returns to the same disclosed figure', () => {
+    seedUnloggedWindow(true);
+    renderHistory();
+    expect(countsLine()).toHaveTextContent('1 on time (1 assumed)');
+
+    fireEvent.click(screen.getByLabelText('Assume doses taken on time'));
+    // Off: the same unlogged dose now reads as missed, not assumed — no caveat,
+    // because there is no longer any assumption in the figure.
+    expect(countsLine()).toHaveTextContent('0 on time · 0 late · 1 missed');
+    expect(screen.queryByTestId('assumed-basis-note')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText('Assume doses taken on time'));
+    // Back on: identical to the original figure — nothing in the dose log
+    // changed at any point, only how it's summarised.
+    expect(countsLine()).toHaveTextContent('1 on time (1 assumed)');
+    const basis = screen.getByTestId('assumed-basis-note');
+    expect(basis).toHaveTextContent('1 of the 1 on-time doses above are assumed');
+  });
+
+  it('the toggle copy explains the swing is an artefact of the setting, not new information about missed doses', () => {
+    renderHistory();
+    expect(screen.getByText(/shown distinctly from ones you actually logged/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/every unlogged past dose will now show as missed instead of assumed/i),
+    ).toBeInTheDocument();
+  });
+});
