@@ -12,6 +12,7 @@ export * from './history';
 export * from './pharmacology';
 export * from './events';
 export * from './regimenChanges';
+export * from './startDate';
 export * from './ids';
 export * from './cloudRecord';
 export * from './oura';

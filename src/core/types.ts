@@ -116,6 +116,7 @@ export type RegimenFieldKey =
   | 'med.guardrails.maxSingleDose'
   | 'med.guardrails.maxDailyDose'
   | 'med.guardrails.minIntervalHours'
+  | 'med.startedAt'
   | 'slot.time'
   | 'slot.label'
   | 'slot.dose'

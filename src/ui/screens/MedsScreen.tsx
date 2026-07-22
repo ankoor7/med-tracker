@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import type { Medication } from '../../core';
+import { isoDateInZone, startOfDayInstant, type Medication } from '../../core';
 import { useStore, type MedicationInput } from '../../store/store';
 import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
 import { Modal } from '../components/Modal';
+import { StartDateField } from '../components/StartDateField';
 
 const BLANK: MedicationInput = {
   name: '',
@@ -18,6 +19,7 @@ const BLANK: MedicationInput = {
 export function MedsScreen() {
   const medications = useStore((s) => s.medications);
   const deleteMedication = useStore((s) => s.deleteMedication);
+  const zone = useStore((s) => s.settings.zone);
   const [editing, setEditing] = useState<Medication | 'new' | null>(null);
 
   const visible = medications.filter((m) => !m.deleted);
@@ -47,6 +49,7 @@ export function MedsScreen() {
               <p className="mt-1 text-xs text-slate-400">
                 Half-life {med.halfLifeHours}h ·{' '}
                 {med.adjustWhenLate ? 'timing-sensitive' : 'flexible'}
+                {med.startedAt != null && <> · Started {isoDateInZone(med.startedAt, zone)}</>}
               </p>
               <p className="text-xs text-slate-500">
                 Caps: single {fmt(med.guardrails.maxSingleDose, med.unit)}, daily{' '}
@@ -83,6 +86,8 @@ function fmt(v: number | null, unit: string): string {
 function MedEditor({ initial, onClose }: { initial: Medication | null; onClose: () => void }) {
   const addMedication = useStore((s) => s.addMedication);
   const updateMedication = useStore((s) => s.updateMedication);
+  const zone = useStore((s) => s.settings.zone);
+  const doseLog = useStore((s) => s.doseLog);
 
   const [form, setForm] = useState<MedicationInput>(
     initial
@@ -98,6 +103,18 @@ function MedEditor({ initial, onClose }: { initial: Medication | null; onClose: 
         }
       : { ...BLANK },
   );
+  // A start date is captured going forward (FR-18.1 piece 3): a new medication
+  // defaults to today so the upgrade prompt stays a one-off for existing data;
+  // an existing medication with no `startedAt` is left blank rather than
+  // forcing one — "always existed" is a valid answer too. Kept as the wall-
+  // clock ISO string the date input speaks; converted to an Instant on save.
+  const [startDateStr, setStartDateStr] = useState<string>(() =>
+    initial
+      ? initial.startedAt != null
+        ? isoDateInZone(initial.startedAt, zone)
+        : ''
+      : isoDateInZone(Date.now(), zone),
+  );
 
   const setG = (key: keyof MedicationInput['guardrails'], value: string) =>
     setForm((f) => ({
@@ -107,8 +124,12 @@ function MedEditor({ initial, onClose }: { initial: Medication | null; onClose: 
 
   const save = () => {
     if (!form.name.trim()) return;
-    if (initial) updateMedication(initial.id, form);
-    else addMedication(form);
+    const payload: MedicationInput = {
+      ...form,
+      startedAt: startDateStr === '' ? undefined : startOfDayInstant(startDateStr, zone),
+    };
+    if (initial) updateMedication(initial.id, payload);
+    else addMedication(payload);
     onClose();
   };
 
@@ -155,6 +176,15 @@ function MedEditor({ initial, onClose }: { initial: Medication | null; onClose: 
             aria-label="Colour"
           />
         </Field>
+
+        <StartDateField
+          label="Start date"
+          value={startDateStr}
+          onChange={setStartDateStr}
+          zone={zone}
+          doseLog={doseLog}
+          medId={initial?.id}
+        />
 
         <fieldset className="grid grid-cols-3 gap-3 rounded-md border border-slate-800 p-3">
           <legend className="px-1 text-xs text-slate-400">Guardrails</legend>

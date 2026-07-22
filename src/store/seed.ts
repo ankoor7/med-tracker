@@ -1,12 +1,22 @@
 // First-run seed data — a small, realistic AED-style regimen so the app is
 // usable immediately. Stage 2 seeds this into IndexedDB on first run.
 
+import { startOfDayInstant } from '../core/startDate';
+import { isoDateInZone } from '../core/time';
 import type { Dataset, Slot } from '../core/types';
 
 export function seedDataset(now: number): Dataset {
   const hostZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London';
   const fiveDaysAgo = now - 5 * 24 * 60 * 60 * 1000;
   const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+  // Every seeded medication gets a `startedAt` (Stage 18 FR-18.1 piece 3) so a
+  // fresh install never sees the upgrade-time start-date prompt — only a
+  // dataset that predates the field does. Well before the 30-day snapshot
+  // history so it never excludes any of the seeded days.
+  const seedStartedAt = startOfDayInstant(
+    isoDateInZone(now - 200 * 24 * 60 * 60 * 1000, hostZone),
+    hostZone,
+  );
 
   const lamotrigine = {
     id: 'seed-med-lamotrigine',
@@ -18,6 +28,7 @@ export function seedDataset(now: number): Dataset {
     active: true,
     notes: 'Timing-sensitive — take an adjusted dose if late.',
     guardrails: { maxSingleDose: 200, maxDailyDose: 400, minIntervalHours: 6 },
+    startedAt: seedStartedAt,
     updatedAt: now,
     version: 1,
   };
@@ -31,6 +42,7 @@ export function seedDataset(now: number): Dataset {
     adjustWhenLate: true,
     active: true,
     guardrails: { maxSingleDose: 1000, maxDailyDose: 3000, minIntervalHours: 8 },
+    startedAt: seedStartedAt,
     updatedAt: now,
     version: 1,
   };
@@ -45,6 +57,7 @@ export function seedDataset(now: number): Dataset {
     active: true,
     notes: 'Flexible — timing not critical.',
     guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
+    startedAt: seedStartedAt,
     updatedAt: now,
     version: 1,
   };

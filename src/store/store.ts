@@ -7,8 +7,10 @@ import {
   describeMedicationReactivated,
   describeMedicationRetired,
   describeMedicationSlotCascade,
+  describeMedicationStartDate,
   describeSlot,
   diffMedication,
+  diffMedicationStartDate,
   diffSlot,
   entryMatchesOccurrence,
   isoDateInZone,
@@ -56,6 +58,9 @@ export interface MedicationInput {
   active: boolean;
   notes?: string;
   guardrails: Guardrails;
+  // When this medication was first prescribed (Stage 18 FR-18.1 piece 3).
+  // Optional: absent means "treat as always prescribed" — see `Medication.startedAt`.
+  startedAt?: Instant;
 }
 
 export interface SlotInput {
@@ -321,7 +326,7 @@ export const useStore = create<StoreState>((set, get) => {
           kind: 'medication-added',
           subject: med.name,
           medId: med.id,
-          changes: describeMedicationAdded(med),
+          changes: [...describeMedicationAdded(med), ...describeMedicationStartDate(med, zone)],
           now,
           zone,
         }),
@@ -346,6 +351,9 @@ export const useStore = create<StoreState>((set, get) => {
       }));
       if (!prev || !updated) return;
       persistUpsert('medications', updated);
+      // `startedAt` can change alongside any of the three transitions below, so
+      // it's diffed once and folded into whichever change ends up recorded.
+      const startDateChanges = diffMedicationStartDate(prev, updated, zone);
       // Derive a change from the pre-edit entity. An active → inactive transition
       // is a retirement; the reverse re-introduces the medication; otherwise a
       // prescription edit records only the fields that actually differ (no-op = none).
@@ -355,7 +363,7 @@ export const useStore = create<StoreState>((set, get) => {
             kind: 'medication-retired',
             subject: updated.name,
             medId: id,
-            changes: describeMedicationRetired(updated),
+            changes: [...describeMedicationRetired(updated), ...startDateChanges],
             now,
             zone,
           }),
@@ -369,13 +377,13 @@ export const useStore = create<StoreState>((set, get) => {
             kind: 'medication-reactivated',
             subject: updated.name,
             medId: id,
-            changes: describeMedicationReactivated(updated),
+            changes: [...describeMedicationReactivated(updated), ...startDateChanges],
             now,
             zone,
           }),
         );
       } else {
-        const changes = diffMedication(prev, updated);
+        const changes = [...diffMedication(prev, updated), ...startDateChanges];
         if (changes.length > 0) {
           recordChange(
             buildRegimenChange({

@@ -64,4 +64,23 @@ describe('computeAdherence (timing-sensitive only)', () => {
     expect(r.expected).toBe(0);
     expect(r.ratio).toBe(1); // nothing expected → treated as fully adherent
   });
+
+  // FR-18.1 piece 3, AC3 end-to-end: widening the window must not fabricate
+  // 100% adherence for days before a medication was actually prescribed.
+  // `resolveScheduleAsOf` (piece 1) already excludes it at the core level;
+  // this proves the exclusion actually reaches the adherence computation the
+  // History screen renders.
+  it('excludes days before a medication started from its expected-dose count (AC3)', () => {
+    // Started on the middle day of a 5-day window; nothing was logged.
+    const started = med({ id: 'sens', adjustWhenLate: true, startedAt: at('2026-06-13', '00:00') });
+    const r = computeAdherence([s], [started, flexible], [], ZONE, 5, 2, NOW);
+    // Window is 06-11..06-15. Only 06-13, 06-14, 06-15 count for this med.
+    expect(r.expected).toBe(3);
+    expect(r.missed).toBe(3);
+
+    // Without a start date, the same window counts every day.
+    const alwaysExisted = med({ id: 'sens', adjustWhenLate: true });
+    const rWide = computeAdherence([s], [alwaysExisted, flexible], [], ZONE, 5, 2, NOW);
+    expect(rWide.expected).toBe(5);
+  });
 });

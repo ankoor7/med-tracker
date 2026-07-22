@@ -161,6 +161,57 @@ export function diffMedication(prev: Medication, next: Medication): RegimenField
   return out;
 }
 
+/** Format a medication's `startedAt` for display: the calendar date in `zone`. */
+function formatStartedAt(startedAt: Instant | undefined, zone: IanaZone): string | null {
+  return startedAt == null ? null : isoDateInZone(startedAt, zone);
+}
+
+/**
+ * Field change for a medication's `startedAt`, when it changed (Stage 18
+ * FR-18.1 piece 3). Kept separate from `diffMedication`/`MED_FIELDS` rather than
+ * folded in: every other prescription field's display string is zone-agnostic,
+ * but a date must be rendered in the zone it was chosen in, so this alone needs
+ * a `zone` argument. Call it alongside `diffMedication` at every edit site.
+ */
+export function diffMedicationStartDate(
+  prev: Medication,
+  next: Medication,
+  zone: IanaZone,
+): RegimenFieldChange[] {
+  if (prev.startedAt === next.startedAt) return [];
+  return [
+    fieldChange(
+      'Start date',
+      formatStartedAt(prev.startedAt, zone),
+      formatStartedAt(next.startedAt, zone),
+      {
+        key: 'med.startedAt',
+        medId: next.id,
+        fromValue: prev.startedAt ?? null,
+        toValue: next.startedAt ?? null,
+      },
+    ),
+  ];
+}
+
+/**
+ * Field change describing a start date chosen on a newly added medication.
+ * Emits nothing when none was chosen — the default "treated as always
+ * existed" is not itself a change worth a marker. Call alongside
+ * `describeMedicationAdded` in the add-medication path.
+ */
+export function describeMedicationStartDate(med: Medication, zone: IanaZone): RegimenFieldChange[] {
+  if (med.startedAt == null) return [];
+  return [
+    fieldChange('Start date', null, formatStartedAt(med.startedAt, zone), {
+      key: 'med.startedAt',
+      medId: med.id,
+      fromValue: null,
+      toValue: med.startedAt,
+    }),
+  ];
+}
+
 /** The slot's own attributes (time, label) — everything except its doses. */
 function diffSlotAttributes(prev: Slot, next: Slot): RegimenFieldChange[] {
   const out: RegimenFieldChange[] = [];

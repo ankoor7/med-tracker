@@ -4,6 +4,7 @@ import { parseTakeParam } from '../reminders/push';
 import { RemindersProvider } from '../reminders/context';
 import { Disclaimer } from './components/Disclaimer';
 import { CatchUpBanner } from './components/CatchUpBanner';
+import { StartDatePrompt } from './components/StartDatePrompt';
 import { TodayScreen } from './screens/TodayScreen';
 import { CalendarScreen } from './screens/CalendarScreen';
 import { ScheduleScreen } from './screens/ScheduleScreen';
@@ -108,6 +109,7 @@ export default function App() {
         </header>
         <Disclaimer />
         <CatchUpBanner />
+        {hydrated && <StartDatePrompt />}
 
         <main className="flex-1 px-4 py-5 pb-28" role="main">
           {!hydrated ? (

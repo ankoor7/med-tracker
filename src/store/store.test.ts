@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { useStore } from './store';
 import { LocalRepository, SteadyDoseDB } from './localRepository';
 import { setRepository, nullRepository } from './repository';
+import { resolveWallTimeToInstant } from '../core';
 
 let dbName: string;
 let db: SteadyDoseDB;
@@ -299,6 +300,48 @@ describe('store + LocalRepository', () => {
     // Retiring the medication records a medication-retired change.
     useStore.getState().deleteMedication(med.id);
     expect(liveChanges().at(-1)!.kind).toBe('medication-retired');
+  });
+
+  // FR-18.1 piece 3 — setting/editing `startedAt` is itself a regimen change,
+  // not a silent field like the others `updateMedication` touches.
+  it('records a medication-updated change when startedAt is set/edited afterwards', async () => {
+    const med = await freshRegimen(); // added with no startedAt
+    expect(med.startedAt).toBeUndefined();
+    expect(
+      liveChanges()
+        .at(-1)!
+        .changes.some((c) => c.key === 'med.startedAt'),
+    ).toBe(false);
+
+    const zone = useStore.getState().settings.zone;
+    const startedAt = resolveWallTimeToInstant('2026-06-01', '00:00', zone);
+    useStore.getState().updateMedication(med.id, { startedAt });
+    let change = liveChanges().at(-1)!;
+    expect(change.kind).toBe('medication-updated');
+    expect(change.changes).toContainEqual(
+      expect.objectContaining({
+        key: 'med.startedAt',
+        field: 'Start date',
+        from: null,
+        to: '2026-06-01',
+        fromValue: null,
+        toValue: startedAt,
+      }),
+    );
+    expect(useStore.getState().medications.find((m) => m.id === med.id)?.startedAt).toBe(startedAt);
+
+    // Editing an already-set date afterwards records another change.
+    const startedAt2 = resolveWallTimeToInstant('2026-06-05', '00:00', zone);
+    useStore.getState().updateMedication(med.id, { startedAt: startedAt2 });
+    change = liveChanges().at(-1)!;
+    expect(change.changes).toContainEqual(
+      expect.objectContaining({ key: 'med.startedAt', from: '2026-06-01', to: '2026-06-05' }),
+    );
+
+    // A no-op save (same date) records nothing further.
+    const before = liveChanges().length;
+    useStore.getState().updateMedication(med.id, { startedAt: startedAt2 });
+    expect(liveChanges()).toHaveLength(before);
   });
 
   it('emits slot-added / slot-updated / slot-removed for schedule edits (Stage 16 AC2)', async () => {
