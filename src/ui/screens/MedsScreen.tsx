@@ -3,6 +3,7 @@ import { isoDateInZone, startOfDayInstant, type Medication } from '../../core';
 import { useStore, type MedicationInput } from '../../store/store';
 import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
 import { Modal } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { StartDateField } from '../components/StartDateField';
 
 const BLANK: MedicationInput = {
@@ -18,9 +19,16 @@ const BLANK: MedicationInput = {
 
 export function MedsScreen() {
   const medications = useStore((s) => s.medications);
+  const updateMedication = useStore((s) => s.updateMedication);
   const deleteMedication = useStore((s) => s.deleteMedication);
   const zone = useStore((s) => s.settings.zone);
   const [editing, setEditing] = useState<Medication | 'new' | null>(null);
+  // Stage 18 FR-18.5: Delete is destructive-in-appearance (it isn't, at the
+  // storage layer — see below) and MUST be confirmed. "Stop taking" is the
+  // safe, reversible alternative and is offered first so a patient reaching
+  // for Delete to mean "I've stopped this" finds the correct action before
+  // the drastic-looking one.
+  const [confirmDelete, setConfirmDelete] = useState<Medication | null>(null);
 
   const visible = medications.filter((m) => !m.deleted);
 
@@ -64,7 +72,16 @@ export function MedsScreen() {
               <Button variant="secondary" onClick={() => setEditing(med)}>
                 Edit
               </Button>
-              <Button variant="ghost" onClick={() => deleteMedication(med.id)}>
+              {med.active && (
+                <Button
+                  variant="secondary"
+                  className="border border-amber-700/60 text-amber-300 hover:bg-amber-900/30"
+                  onClick={() => updateMedication(med.id, { active: false })}
+                >
+                  Stop taking
+                </Button>
+              )}
+              <Button variant="danger" onClick={() => setConfirmDelete(med)}>
                 Delete
               </Button>
             </div>
@@ -74,6 +91,31 @@ export function MedsScreen() {
 
       {editing && (
         <MedEditor initial={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete ${confirmDelete.name}?`}
+          confirmLabel="Delete medication"
+          body={
+            <>
+              <p>
+                This removes <strong>{confirmDelete.name}</strong> from your medication list and any
+                schedule slots it appears in.
+              </p>
+              <p className="mt-2 text-slate-400">
+                Its dose history is retained — nothing already logged is deleted. If you only want
+                to pause it, use <strong>Stop taking</strong> instead; it can be reactivated later
+                from Edit.
+              </p>
+            </>
+          }
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            deleteMedication(confirmDelete.id);
+            setConfirmDelete(null);
+          }}
+        />
       )}
     </div>
   );

@@ -10,16 +10,27 @@ import { useStore } from '../../store/store';
 import { Button, Card, ColorDot, Ring, Stat } from '../components/ui';
 import { StatusBadge } from '../components/StatusBadge';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useNow } from '../lib/useNow';
 import { useScheduleData } from '../lib/useScheduleData';
+
+// A genuinely-logged (not merely assumed) occurrence can be edited or deleted
+// in place (Stage 18 FR-18.2) — the fix belongs on the screen where the
+// mistake is noticed.
+interface DeleteTarget {
+  id: string;
+  medName: string;
+}
 
 export function TodayScreen() {
   const now = useNow();
   const { zone, assumeTakenOnTime, medications, doseLog, doseOverrides, regimen } =
     useScheduleData();
   const takeGroup = useStore((s) => s.takeGroup);
+  const deleteLogEntry = useStore((s) => s.deleteLogEntry);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
 
   const today = isoDateInZone(now, zone);
   const planned = useMemo(
@@ -111,6 +122,15 @@ export function TodayScreen() {
                       medId: occ.medId,
                       scheduledInstant: occ.scheduledInstant,
                       normalDose: occ.dose,
+                      // A genuinely-taken occurrence (not merely assumed) edits its
+                      // real log entry rather than creating a new one.
+                      entryId: occ.status === 'taken' && !occ.assumed ? occ.logEntryId : undefined,
+                    })
+                  }
+                  onDelete={() =>
+                    setDeleteTarget({
+                      id: occ.logEntryId!,
+                      medName: medById.get(occ.medId)?.name ?? occ.medId,
                     })
                   }
                 />
@@ -121,6 +141,24 @@ export function TodayScreen() {
       })}
 
       {target && <DoseLogger target={target} onClose={() => setTarget(null)} />}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this logged dose?"
+          confirmLabel="Delete dose"
+          body={
+            <p>
+              This removes the logged {deleteTarget.medName} dose. It will stop counting toward
+              adherence and the occurrence will show as not yet taken.
+            </p>
+          }
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteLogEntry(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -129,10 +167,12 @@ function OccurrenceRow({
   occ,
   med,
   onLog,
+  onDelete,
 }: {
   occ: PlannedOccurrence;
   med: Medication | undefined;
   onLog: () => void;
+  onDelete: () => void;
 }) {
   return (
     <li className="flex items-center justify-between gap-2 py-2">
@@ -152,21 +192,38 @@ function OccurrenceRow({
           </span>
         )}
       </div>
-      <OccurrenceActions occ={occ} onLog={onLog} />
+      <OccurrenceActions occ={occ} onLog={onLog} onDelete={onDelete} />
     </li>
   );
 }
 
-// An assumed-taken dose stays editable (so the user can mark it late/missed); an
-// explicitly-taken one is done. Anything else (upcoming/due/missed) can be logged.
-function OccurrenceActions({ occ, onLog }: { occ: PlannedOccurrence; onLog: () => void }) {
-  const editable = occ.status !== 'taken' || occ.assumed === true;
+// Anything not-yet-taken (or only assumed-taken) offers "Log"/"Edit" to record
+// it. A genuinely-logged dose (a real entry, not the assume-on-time fill-in)
+// is also editable in place and deletable — the correction paths a mistake is
+// actually noticed from (Stage 18 FR-18.2).
+function OccurrenceActions({
+  occ,
+  onLog,
+  onDelete,
+}: {
+  occ: PlannedOccurrence;
+  onLog: () => void;
+  onDelete: () => void;
+}) {
+  const genuinelyLogged = occ.status === 'taken' && !occ.assumed && occ.logEntryId != null;
   return (
     <div className="flex shrink-0 items-center gap-2">
       <StatusBadge status={occ.status} assumed={occ.assumed} />
-      {editable && (
-        <Button variant="secondary" onClick={onLog}>
-          {occ.assumed ? 'Edit' : 'Log'}
+      <Button variant="secondary" onClick={onLog}>
+        {occ.status !== 'taken' ? 'Log' : 'Edit'}
+      </Button>
+      {genuinelyLogged && (
+        <Button
+          variant="ghost"
+          className="text-status-missed hover:bg-status-missed/10"
+          onClick={onDelete}
+        >
+          Delete
         </Button>
       )}
     </div>

@@ -20,6 +20,8 @@ import { AdherenceChart } from '../components/AdherenceChart';
 import { FieldDiffList } from '../components/ChangeMarkers';
 import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
+import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useNow } from '../lib/useNow';
 
 const COMMON_ZONES = [
@@ -45,6 +47,11 @@ export function HistoryScreen() {
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
 
   const [filter, setFilter] = useState<HistoryFilter>({});
+  // Correction paths for an already-logged dose (Stage 18 FR-18.2): edit its
+  // time/amount (re-runs guardrails) or delete it (confirmed — see LogRow).
+  const [editTarget, setEditTarget] = useState<LoggerTarget | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DoseLogEntry | null>(null);
+  const deleteLogEntry = useStore((s) => s.deleteLogEntry);
 
   const assumeTakenOnTime = settings.assumeTakenOnTime ?? true;
 
@@ -238,15 +245,65 @@ export function HistoryScreen() {
         )}
         <ul className="flex flex-col divide-y divide-slate-800">
           {entries.map((entry) => (
-            <LogRow key={entry.id} entry={entry} med={medById.get(entry.medId)} />
+            <LogRow
+              key={entry.id}
+              entry={entry}
+              med={medById.get(entry.medId)}
+              onEdit={() =>
+                setEditTarget({
+                  slotId: entry.slotId,
+                  medId: entry.medId,
+                  scheduledInstant: entry.scheduledInstant,
+                  // Current slot dose, if the slot/item still exists — used only
+                  // to flag "adjusted" against; the entry's own dose seeds the form.
+                  normalDose:
+                    slots
+                      .find((s) => s.id === entry.slotId)
+                      ?.items.find((i) => i.medId === entry.medId)?.dose ?? entry.dose,
+                  entryId: entry.id,
+                })
+              }
+              onDelete={() => setDeleteTarget(entry)}
+            />
           ))}
         </ul>
       </Card>
+
+      {editTarget && <DoseLogger target={editTarget} onClose={() => setEditTarget(null)} />}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this logged dose?"
+          confirmLabel="Delete dose"
+          body={
+            <p>
+              This removes the {medById.get(deleteTarget.medId)?.name ?? deleteTarget.medId} dose
+              logged at {formatDateTimeWithZone(deleteTarget.actualInstant, deleteTarget.zone)}. It
+              will stop counting toward adherence.
+            </p>
+          }
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteLogEntry(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function LogRow({ entry, med: m }: { entry: DoseLogEntry; med: Medication | undefined }) {
+function LogRow({
+  entry,
+  med: m,
+  onEdit,
+  onDelete,
+}: {
+  entry: DoseLogEntry;
+  med: Medication | undefined;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const late = entry.actualInstant > entry.scheduledInstant + 60_000;
   const overCap = entry.warnings.length > 0;
   return (
@@ -267,10 +324,24 @@ function LogRow({ entry, med: m }: { entry: DoseLogEntry; med: Medication | unde
         </p>
         {overCap && <p className="text-xs text-red-300">⚠ {entry.warnings.join(' ')}</p>}
       </div>
-      <div className="flex shrink-0 flex-wrap justify-end gap-1">
-        {entry.adjusted && <Tag className="border-amber-700 text-amber-300">adjusted</Tag>}
-        {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
-        {overCap && <Tag className="border-red-700 text-red-300">over-cap</Tag>}
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <div className="flex flex-wrap justify-end gap-1">
+          {entry.adjusted && <Tag className="border-amber-700 text-amber-300">adjusted</Tag>}
+          {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
+          {overCap && <Tag className="border-red-700 text-red-300">over-cap</Tag>}
+        </div>
+        <div className="flex gap-1">
+          <Button variant="secondary" onClick={onEdit}>
+            Edit
+          </Button>
+          <Button
+            variant="ghost"
+            className="text-status-missed hover:bg-status-missed/10"
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        </div>
       </div>
     </li>
   );

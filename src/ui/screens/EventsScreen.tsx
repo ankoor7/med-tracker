@@ -20,6 +20,7 @@ import {
 import { useStore, type EventInstanceInput, type EventTypeInput } from '../../store/store';
 import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
 import { Modal } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 const BLANK_TYPE = (): EventTypeInput => ({
   name: '',
@@ -37,6 +38,7 @@ export function EventsScreen() {
 
   const [editingType, setEditingType] = useState<EventType | 'new' | null>(null);
   const [logging, setLogging] = useState<EventInstance | 'new' | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<EventInstance | null>(null);
 
   const types = eventTypes.filter((t) => !t.deleted && !t.archived);
   const archivedTypes = eventTypes.filter((t) => !t.deleted && t.archived);
@@ -153,7 +155,7 @@ export function EventsScreen() {
                         Edit
                       </Button>
                     )}
-                    <Button variant="ghost" onClick={() => deleteEventInstance(e.id)}>
+                    <Button variant="danger" onClick={() => setConfirmDelete(e)}>
                       Delete
                     </Button>
                   </div>
@@ -176,6 +178,25 @@ export function EventsScreen() {
           zone={settings.zone}
           initial={logging === 'new' ? null : logging}
           onClose={() => setLogging(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this event?"
+          confirmLabel="Delete event"
+          body={
+            <p>
+              This removes the {typeById.get(confirmDelete.typeId)?.name ?? 'event'} logged at{' '}
+              {formatDateTimeWithZone(confirmDelete.occurredAt, confirmDelete.zone)} from your
+              records. There's no way to restore it from within the app.
+            </p>
+          }
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            deleteEventInstance(confirmDelete.id);
+            setConfirmDelete(null);
+          }}
         />
       )}
     </div>

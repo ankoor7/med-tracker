@@ -144,6 +144,17 @@ interface StoreState {
    */
   adjustDoseTime: (id: string, actualInstant: Instant) => DoseLogEntry | undefined;
 
+  /**
+   * Correct an already-logged dose's amount and/or time (Stage 18 FR-18.2,
+   * Today/History edit paths). Re-runs the shared guardrail check with the
+   * entry excluded from its own history. A correction of the record, not a
+   * regimen change — never records a Stage 16 `RegimenChange`.
+   */
+  editLogEntry: (
+    id: string,
+    patch: { dose?: number; actualInstant?: Instant },
+  ) => DoseLogEntry | undefined;
+
   /** Set/replace a one-time override of a future occurrence's dose (Stage 12). */
   setDoseOverride: (input: DoseOverrideInput) => DoseOverride;
   clearDoseOverride: (id: string) => void;
@@ -628,24 +639,38 @@ export const useStore = create<StoreState>((set, get) => {
       if (tombstoned) persistUpsert('doseLog', tombstoned);
     },
 
-    adjustDoseTime: (id, actualInstant) => {
-      const { doseLog, medications, settings } = get();
+    // Re-time an already-logged dose (calendar drag, Stage 13) — delegates to
+    // `editLogEntry` so the two correction paths (drag vs. edit form, Stage 18
+    // FR-18.2) share one guardrail-recheck implementation.
+    adjustDoseTime: (id, actualInstant) => get().editLogEntry(id, { actualInstant }),
+
+    // Correct an already-logged dose's amount and/or time (Stage 18 FR-18.2).
+    // This is a correction of the record, not a regimen change: it never
+    // originates a dose (the caller supplies both fields), and — unlike
+    // `updateMedication`/`updateSlot` — it deliberately does NOT call
+    // `recordChange`; Stage 16 markers describe changes to the *regimen*, not
+    // fixes to what was recorded about a single past dose.
+    editLogEntry: (id, patch) => {
+      const { doseLog, slots, medications, settings } = get();
       const entry = doseLog.find((e) => e.id === id);
       if (!entry || entry.deleted) return undefined;
       const now = Date.now();
       const med = medications.find((m) => m.id === entry.medId);
-      // Re-validate the (unchanged) dose at the new time against the shared
-      // guardrails, excluding this entry from the prior-dose history so it never
-      // counts against itself.
+      const dose = patch.dose ?? entry.dose;
+      const actualInstant = patch.actualInstant ?? entry.actualInstant;
+      // Re-validate against the shared guardrails, excluding this entry from the
+      // prior-dose history so an edit never counts against itself.
       const others = doseLog.filter((e) => e.id !== id);
       const warnings = med
-        ? checkGuardrails(med, entry.dose, actualInstant, others, settings.zone)
+        ? checkGuardrails(med, dose, actualInstant, others, settings.zone)
         : entry.warnings;
+      const normalDose = scheduledDoseFor(slots, entry.slotId, entry.medId);
+      const adjusted = normalDose != null && dose !== normalDose;
       let updated: DoseLogEntry | undefined;
       set((s) => ({
         doseLog: s.doseLog.map((e) => {
           if (e.id !== id) return e;
-          updated = stamp({ ...e, actualInstant, warnings }, now);
+          updated = stamp({ ...e, dose, actualInstant, warnings, adjusted }, now);
           return updated;
         }),
       }));

@@ -1,8 +1,17 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { TodayScreen } from './TodayScreen';
 import { useStore } from '../../store/store';
 import { med, settings, slot } from '../../test/fixtures';
+import { withFixedClock } from '../../test/fixedClock';
+import {
+  submitLogDose,
+  openDeleteConfirm,
+  cancelDialog,
+  confirmDeleteDose,
+  openEditDialog,
+  setDoseValue,
+} from '../../test/doseLogDialogHelpers';
 
 const ZONE = 'Europe/London';
 // Fixed clock: 2026-06-15 10:00 London (BST) == 09:00 UTC. Slots earlier than
@@ -24,15 +33,8 @@ function seed(
   });
 }
 
-beforeEach(() => {
-  vi.useFakeTimers();
-  vi.setSystemTime(NOW);
-  seed();
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-});
+withFixedClock(NOW);
+beforeEach(() => seed());
 
 const activeLog = () => useStore.getState().doseLog.filter((e) => !e.deleted);
 
@@ -197,6 +199,73 @@ describe('TodayScreen', () => {
       const after = screen.getByText('Lamotrigine').closest('li')!;
       expect(within(after).getByText('Taken')).toBeInTheDocument();
       expect(within(after).queryByText('On time')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('dose correction (Stage 18 FR-18.2)', () => {
+    // Log the single Lamotrigine dose via the normal "Log" flow, returning the
+    // now-Taken row for the follow-on edit/delete interaction.
+    function logAndGetRow(): HTMLElement {
+      render(<TodayScreen />);
+      fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+      submitLogDose();
+      expect(activeLog()).toHaveLength(1);
+      return screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+    }
+
+    it('a genuinely-logged dose is editable in place and re-runs guardrails (AC5)', () => {
+      seed([
+        med({
+          id: 'a',
+          name: 'Lamotrigine',
+          unit: 'mg',
+          guardrails: { maxSingleDose: 150, maxDailyDose: null, minIntervalHours: null },
+        }),
+      ]);
+      const row = logAndGetRow();
+      const originalId = activeLog()[0]!.id;
+
+      // A real (non-assumed) taken dose now offers Edit — open it.
+      const dialog = openEditDialog(row);
+      expect(dialog).toHaveTextContent(/edit lamotrigine dose/i);
+
+      // Correcting to an over-cap amount re-runs the shared guardrail check
+      // and gates the save behind the same acknowledgement pattern as a fresh log.
+      setDoseValue(dialog, '200');
+      const saveBtn = within(dialog).getByRole('button', { name: /save over-cap dose/i });
+      expect(saveBtn).toBeDisabled();
+      fireEvent.click(
+        within(dialog).getByRole('checkbox', { name: /understand and want to log/i }),
+      );
+      expect(saveBtn).toBeEnabled();
+      fireEvent.click(saveBtn);
+
+      // Edits the existing entry — no second entry is created.
+      const log = activeLog();
+      expect(log).toHaveLength(1);
+      expect(log[0]!.id).toBe(originalId);
+      expect(log[0]!.dose).toBe(200);
+      expect(log[0]!.warnings.some((w) => /max single dose/i.test(w))).toBe(true);
+    });
+
+    it('a genuinely-logged dose can be deleted from Today, gated by confirmation (AC5)', () => {
+      const row = logAndGetRow();
+
+      const dialog = openDeleteConfirm(row);
+      expect(dialog).toHaveTextContent(/delete this logged dose/i);
+
+      // Cancelling performs no mutation.
+      cancelDialog(dialog);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(activeLog()).toHaveLength(1);
+
+      // Confirming tombstones the entry — it stops counting toward adherence,
+      // reflected here by the occurrence no longer reading "Taken".
+      confirmDeleteDose(openDeleteConfirm(row));
+      expect(activeLog()).toHaveLength(0);
+      expect(useStore.getState().doseLog).toHaveLength(1); // tombstoned, not hard-deleted
+      const after = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
+      expect(within(after).queryByText('Taken')).not.toBeInTheDocument();
     });
   });
 });

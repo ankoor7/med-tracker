@@ -3,12 +3,14 @@ import type { ScheduleItem, Slot } from '../../core';
 import { useStore, type SlotInput } from '../../store/store';
 import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
 import { Modal } from '../components/Modal';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 
 export function ScheduleScreen() {
   const slots = useStore((s) => s.slots);
   const deleteSlot = useStore((s) => s.deleteSlot);
   const medications = useStore((s) => s.medications);
   const [editing, setEditing] = useState<Slot | 'new' | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Slot | null>(null);
 
   const medById = new Map(medications.map((m) => [m.id, m]));
   const visible = [...slots.filter((s) => !s.deleted)].sort((a, b) => a.time.localeCompare(b.time));
@@ -54,7 +56,7 @@ export function ScheduleScreen() {
               <Button variant="secondary" onClick={() => setEditing(slot)}>
                 Edit
               </Button>
-              <Button variant="ghost" onClick={() => deleteSlot(slot.id)}>
+              <Button variant="danger" onClick={() => setConfirmDelete(slot)}>
                 Delete
               </Button>
             </div>
@@ -64,6 +66,32 @@ export function ScheduleScreen() {
 
       {editing && (
         <SlotEditor initial={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete the ${confirmDelete.time} time-slot?`}
+          confirmLabel="Delete time-slot"
+          body={
+            <>
+              <p>
+                This removes the {confirmDelete.time}
+                {confirmDelete.label ? ` (${confirmDelete.label})` : ''} slot and stops scheduling{' '}
+                {confirmDelete.items.map((i) => medById.get(i.medId)?.name ?? i.medId).join(', ') ||
+                  'its medications'}{' '}
+                at this time.
+              </p>
+              <p className="mt-2 text-slate-400">
+                Doses already logged for this slot are retained.
+              </p>
+            </>
+          }
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            deleteSlot(confirmDelete.id);
+            setConfirmDelete(null);
+          }}
+        />
       )}
     </div>
   );

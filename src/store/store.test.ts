@@ -52,6 +52,21 @@ function liveChanges() {
 }
 
 /**
+ * Simulate a reload: flush the async write-through, close the current DB
+ * connection, then hydrate a fresh store against a new repository on the same
+ * IndexedDB database — proving a mutation was actually persisted (and would
+ * therefore sync), not just held in memory.
+ */
+async function reloadFromFreshRepo() {
+  await new Promise((r) => setTimeout(r, 50));
+  db.close();
+  db = new SteadyDoseDB(dbName);
+  setRepository(new LocalRepository(db));
+  resetStore();
+  await useStore.getState().hydrate();
+}
+
+/**
  * Hydrate, then clear medications/slots/changes so the seeded demo dataset does
  * not skew emission counts. Returns a freshly added medication to edit.
  */
@@ -130,19 +145,10 @@ describe('store + LocalRepository', () => {
       active: true,
       guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
     });
-    // Flush async write-through.
-    await new Promise((r) => setTimeout(r, 50));
-
-    // Simulate a reload: reset in-memory store, attach a fresh repo on same DB.
-    db.close();
-    const db2 = new SteadyDoseDB(dbName);
-    setRepository(new LocalRepository(db2));
-    resetStore();
-    await useStore.getState().hydrate();
+    await reloadFromFreshRepo();
 
     const names = useStore.getState().medications.map((m) => m.name);
     expect(names).toContain('Persisted');
-    db2.close();
   });
 
   it('sets a one-time next-dose override and consumes it when the dose is logged (Stage 12)', async () => {
@@ -223,6 +229,124 @@ describe('store + LocalRepository', () => {
     expect(updated?.version).toBe((entry.version ?? 0) + 1);
   });
 
+  /**
+   * Hydrate an empty regimen and log one bare dose entry (no real slot/med —
+   * these tests only care about the log entry's own lifecycle), for the
+   * editLogEntry/deleteLogEntry correction-path tests below.
+   */
+  async function logBareEntry() {
+    await useStore.getState().hydrate();
+    useStore.setState({ medications: [], slots: [], doseLog: [] });
+    return useStore.getState().logDose({
+      slotId: 's1',
+      medId: 'm1',
+      scheduledInstant: 0,
+      dose: 100,
+      actualInstant: 0,
+    });
+  }
+
+  describe('editLogEntry (Stage 18 FR-18.2 — dose correction)', () => {
+    it('corrects both dose and time, re-running guardrails excluding itself (AC5)', async () => {
+      await useStore.getState().hydrate();
+      useStore.setState({
+        medications: [
+          {
+            id: 'm1',
+            name: 'Med',
+            color: '#fff',
+            unit: 'mg',
+            halfLifeHours: 10,
+            adjustWhenLate: true,
+            active: true,
+            guardrails: { maxSingleDose: 100, maxDailyDose: null, minIntervalHours: null },
+            updatedAt: 0,
+          },
+        ],
+        slots: [{ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }], updatedAt: 0 }],
+        doseLog: [],
+      });
+      const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0);
+      const entry = useStore.getState().logDose({
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant,
+        dose: 100,
+        actualInstant: scheduledInstant,
+      });
+      expect(entry.warnings).toHaveLength(0);
+
+      // Correct both the amount and the time in one edit.
+      const updated = useStore
+        .getState()
+        .editLogEntry(entry.id, { dose: 90, actualInstant: scheduledInstant + 3_600_000 });
+      expect(updated?.dose).toBe(90);
+      expect(updated?.actualInstant).toBe(scheduledInstant + 3_600_000);
+      // 90mg differs from the slot's normal 100mg, so it's flagged adjusted.
+      expect(updated?.adjusted).toBe(true);
+      expect(updated?.version).toBe((entry.version ?? 0) + 1);
+
+      // Guardrail excludes the entry from its own history: editing dose to
+      // 100mg (the max) alone must not warn against the pre-edit 100mg copy of
+      // itself still sitting in the log.
+      const atCap = useStore.getState().editLogEntry(entry.id, { dose: 100 });
+      expect(atCap?.warnings).toHaveLength(0);
+
+      // Exceeding the cap does warn, same shared checkGuardrails as logDose.
+      const overCap = useStore.getState().editLogEntry(entry.id, { dose: 150 });
+      expect(overCap?.warnings.some((w) => /max single dose/i.test(w))).toBe(true);
+    });
+
+    it('does not record a Stage 16 RegimenChange — a dose correction, not a regimen change', async () => {
+      await useStore.getState().hydrate();
+      useStore.setState({ medications: [], slots: [], regimenChanges: [] });
+      const med = useStore.getState().addMedication(MED_INPUT);
+      useStore.setState({ regimenChanges: [] }); // ignore the medication-added marker
+      const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0);
+      const entry = useStore.getState().logDose({
+        slotId: 'no-slot',
+        medId: med.id,
+        scheduledInstant,
+        dose: 100,
+        actualInstant: scheduledInstant,
+      });
+      useStore
+        .getState()
+        .editLogEntry(entry.id, { dose: 120, actualInstant: scheduledInstant + 1000 });
+      expect(liveChanges()).toHaveLength(0);
+    });
+
+    it('returns undefined for a deleted or unknown entry, mutating nothing', async () => {
+      const entry = await logBareEntry();
+      useStore.getState().deleteLogEntry(entry.id);
+      expect(useStore.getState().editLogEntry(entry.id, { dose: 999 })).toBeUndefined();
+      expect(useStore.getState().editLogEntry('does-not-exist', { dose: 999 })).toBeUndefined();
+      // The tombstoned entry's dose was not resurrected/changed by the no-op edit.
+      const stillTombstoned = useStore.getState().doseLog.find((e) => e.id === entry.id)!;
+      expect(stillTombstoned.deleted).toBe(true);
+      expect(stillTombstoned.dose).toBe(100);
+    });
+  });
+
+  describe('deleteLogEntry (Stage 18 FR-18.2 — dose correction)', () => {
+    it('tombstones rather than hard-deletes, and the tombstone persists/syncs (AC7-style retention)', async () => {
+      const entry = await logBareEntry();
+      useStore.getState().deleteLogEntry(entry.id);
+
+      const inMemory = useStore.getState().doseLog.find((e) => e.id === entry.id);
+      expect(inMemory).toBeDefined();
+      expect(inMemory?.deleted).toBe(true);
+      // Never hard-deleted: the record is still present, just tombstoned.
+      expect(useStore.getState().doseLog).toHaveLength(1);
+
+      // Prove the tombstone was actually persisted (i.e. "syncs"), not just
+      // held in memory.
+      await reloadFromFreshRepo();
+      const reloaded = useStore.getState().doseLog.find((e) => e.id === entry.id);
+      expect(reloaded?.deleted).toBe(true);
+    });
+  });
+
   it('defines an event type, logs an instance, and persists both (Stage 15)', async () => {
     await useStore.getState().hydrate();
     const type = useStore.getState().addEventType({
@@ -242,19 +366,12 @@ describe('store + LocalRepository', () => {
     expect(inst.zone).toBeTruthy();
     expect(inst.values.severity).toBe(4);
 
-    // Flush async write-through, then reload from a fresh repo on the same DB.
-    await new Promise((r) => setTimeout(r, 50));
-    db.close();
-    const db2 = new SteadyDoseDB(dbName);
-    setRepository(new LocalRepository(db2));
-    resetStore();
-    await useStore.getState().hydrate();
+    await reloadFromFreshRepo();
 
     expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.name).toBe('Migraine');
     expect(useStore.getState().eventInstances.find((e) => e.id === inst.id)?.values.severity).toBe(
       4,
     );
-    db2.close();
   });
 
   it('archives an event type (reversibly) without deleting it or its instances (Stage 15)', async () => {
@@ -495,15 +612,8 @@ describe('store + LocalRepository', () => {
   it('does not re-seed when data already exists', async () => {
     await useStore.getState().hydrate();
     const firstCount = useStore.getState().medications.length;
-    // Flush writes, then reload.
-    await new Promise((r) => setTimeout(r, 50));
-    db.close();
-    const db2 = new SteadyDoseDB(dbName);
-    setRepository(new LocalRepository(db2));
-    resetStore();
-    await useStore.getState().hydrate();
+    await reloadFromFreshRepo();
     expect(useStore.getState().medications.length).toBe(firstCount);
-    db2.close();
   });
 });
 

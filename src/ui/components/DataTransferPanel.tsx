@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import { useStore } from '../../store/store';
 import { exportCSV, exportJSON, parseImport, type ImportMode } from '../../store/transfer';
+import type { Dataset } from '../../core/types';
 import { Button, Card } from './ui';
+import { ConfirmDialog } from './ConfirmDialog';
 
 function download(filename: string, mime: string, text: string) {
   const blob = new Blob([text], { type: mime });
@@ -21,6 +23,11 @@ export function DataTransferPanel() {
   const [mode, setMode] = useState<ImportMode>('merge');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // A parsed-but-not-yet-applied 'replace' import (Stage 18 FR-18.5): replace
+  // overwrites the whole local dataset, so it's confirmed before it's applied.
+  // 'merge' only fills in/updates per-record on a last-write-wins basis and
+  // never wholesale discards data, so it applies immediately as before.
+  const [pendingReplace, setPendingReplace] = useState<Dataset | null>(null);
 
   const dataset = () => ({
     medications: store.medications,
@@ -36,6 +43,13 @@ export function DataTransferPanel() {
 
   const stamp = () => new Date().toISOString().slice(0, 10);
 
+  const applyImport = (data: Dataset, mode: ImportMode) => {
+    store.importData(data, mode);
+    setMessage(
+      `Imported ${data.medications.length} meds, ${data.slots.length} slots, ${data.doseLog.length} log entries (${mode}).`,
+    );
+  };
+
   const onImportFile = async (file: File) => {
     setError(null);
     setMessage(null);
@@ -44,10 +58,12 @@ export function DataTransferPanel() {
       setError(`Import failed — ${result.reason}`);
       return;
     }
-    store.importData(result.data, mode);
-    setMessage(
-      `Imported ${result.data.medications.length} meds, ${result.data.slots.length} slots, ${result.data.doseLog.length} log entries (${mode}).`,
-    );
+    if (mode === 'replace') {
+      // Destructive: hold off applying until the user confirms what it wipes.
+      setPendingReplace(result.data);
+      return;
+    }
+    applyImport(result.data, mode);
   };
 
   return (
@@ -117,6 +133,32 @@ export function DataTransferPanel() {
 
       {message && <p className="mt-2 text-xs text-status-taken">{message}</p>}
       {error && <p className="mt-2 text-xs text-status-missed">{error}</p>}
+
+      {pendingReplace && (
+        <ConfirmDialog
+          title="Replace all data?"
+          confirmLabel="Replace all data"
+          body={
+            <>
+              <p>
+                This replaces everything currently stored — medications, schedule, dose log, event
+                history and settings — with the {pendingReplace.medications.length} medication(s),{' '}
+                {pendingReplace.slots.length} slot(s) and {pendingReplace.doseLog.length} dose-log
+                entries from the imported file.
+              </p>
+              <p className="mt-2 text-slate-400">
+                Anything not in the file is discarded. Export your current data first if you want to
+                keep it.
+              </p>
+            </>
+          }
+          onCancel={() => setPendingReplace(null)}
+          onConfirm={() => {
+            applyImport(pendingReplace, 'replace');
+            setPendingReplace(null);
+          }}
+        />
+      )}
     </Card>
   );
 }

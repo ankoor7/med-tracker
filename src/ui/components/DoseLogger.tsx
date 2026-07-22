@@ -26,22 +26,38 @@ export interface LoggerTarget {
    * 13). Clamped to ≤ now. Defaults to now-rounded-to-5-min when absent.
    */
   actualInstant?: Instant;
+  /**
+   * When set, this modal edits the already-logged entry with this id (Stage 18
+   * FR-18.2 — Today/History correction paths) instead of creating a new one.
+   * Its stored dose/time seed the form; guardrails are re-run excluding this
+   * entry so an edit never counts against itself.
+   */
+  entryId?: string;
 }
 
 export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose: () => void }) {
   const { medications, slots, doseLog, zone } = useScheduleData();
   const logDose = useStore((s) => s.logDose);
+  const editLogEntry = useStore((s) => s.editLogEntry);
   const setDoseOverride = useStore((s) => s.setDoseOverride);
 
   const med = medications.find((m) => m.id === target.medId);
+  const editingEntry = target.entryId
+    ? doseLog.find((e) => e.id === target.entryId && !e.deleted)
+    : undefined;
   // "Now", rounded to the 5-minute step so the common path needs no adjustment.
   const now = useMemo(() => roundInstantToStep(Date.now()), []);
 
-  const [doseStr, setDoseStr] = useState(String(target.normalDose));
-  // Seed "time taken" from a dragged calendar time when given (clamped to ≤ now),
-  // otherwise the rounded "now" default.
+  const [doseStr, setDoseStr] = useState(
+    String(editingEntry ? editingEntry.dose : target.normalDose),
+  );
+  // Seed "time taken" from the entry being edited, else a dragged calendar
+  // time when given (clamped to ≤ now), else the rounded "now" default.
   const [whenStr, setWhenStr] = useState(() =>
-    instantToDatetimeLocal(Math.min(target.actualInstant ?? now, now), zone),
+    instantToDatetimeLocal(
+      editingEntry ? editingEntry.actualInstant : Math.min(target.actualInstant ?? now, now),
+      zone,
+    ),
   );
   const [confirmed, setConfirmed] = useState(false);
   const [adjustNext, setAdjustNext] = useState(false);
@@ -50,6 +66,10 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
 
   const dose = Number(doseStr);
   const actualInstant = datetimeLocalToInstant(whenStr, zone);
+  // Excludes the entry being edited from its own guardrail history — matches
+  // `editLogEntry`'s server-side recheck so the preview shown here agrees with
+  // what actually gets saved.
+  const guardrailLog = target.entryId ? doseLog.filter((e) => e.id !== target.entryId) : doseLog;
 
   // The next scheduled occurrence of this med (Stage 12 — adjust next dose).
   const nextOcc = useMemo(
@@ -69,7 +89,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   // Optional pharmacology extension suggestion (no-op default → null).
   const suggestion = useMemo(() => {
     if (!med) return null;
-    const recentDoses = doseLog.filter(
+    const recentDoses = guardrailLog.filter(
       (e) => !e.deleted && e.status === 'taken' && e.medId === med.id,
     );
     return activeStrategy.computeAdjustment({
@@ -78,24 +98,26 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
       actualInstant,
       recentDoses,
     });
-  }, [med, target.scheduledInstant, actualInstant, doseLog]);
+  }, [med, target.scheduledInstant, actualInstant, guardrailLog]);
 
   if (!med) return null;
 
   const validDose = Number.isFinite(dose) && dose > 0;
-  const warnings = validDose ? checkGuardrails(med, dose, actualInstant, doseLog, zone) : [];
+  const warnings = validDose ? checkGuardrails(med, dose, actualInstant, guardrailLog, zone) : [];
   const overCap = warnings.length > 0;
   const isAdjusted = dose !== target.normalDose;
   const isLate = actualInstant > target.scheduledInstant + MINUTE_MS;
   // Offer the next-dose adjustment when this dose was changed or taken late
-  // (Stage 12 FR-12.1) and there's an upcoming occurrence to adjust.
-  const offerAdjustNext = (isAdjusted || isLate) && nextOcc != null;
+  // (Stage 12 FR-12.1) and there's an upcoming occurrence to adjust. Not
+  // offered while editing a past entry (Stage 18 FR-18.2) — that's a
+  // correction of what already happened, not a cue to plan the next dose.
+  const offerAdjustNext = !target.entryId && (isAdjusted || isLate) && nextOcc != null;
 
   const nextDose = Number(nextDoseStr);
   const validNextDose = Number.isFinite(nextDose) && nextDose > 0;
   const nextWarnings =
     adjustNext && validNextDose && nextOcc
-      ? checkGuardrails(med, nextDose, nextOcc.scheduledInstant, doseLog, zone)
+      ? checkGuardrails(med, nextDose, nextOcc.scheduledInstant, guardrailLog, zone)
       : [];
   const nextOverCap = nextWarnings.length > 0;
   const canSetNext = !adjustNext || (validNextDose && (!nextOverCap || nextConfirmed));
@@ -111,13 +133,17 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
 
   const submit = () => {
     if (!canLog) return;
-    logDose({
-      slotId: target.slotId,
-      medId: target.medId,
-      scheduledInstant: target.scheduledInstant,
-      dose,
-      actualInstant,
-    });
+    if (target.entryId) {
+      editLogEntry(target.entryId, { dose, actualInstant });
+    } else {
+      logDose({
+        slotId: target.slotId,
+        medId: target.medId,
+        scheduledInstant: target.scheduledInstant,
+        dose,
+        actualInstant,
+      });
+    }
     if (adjustNext && nextOcc && validNextDose) {
       setDoseOverride({
         slotId: nextOcc.slotId,
@@ -130,7 +156,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   };
 
   return (
-    <Modal title={`Log ${med.name}`} onClose={onClose}>
+    <Modal title={target.entryId ? `Edit ${med.name} dose` : `Log ${med.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-xs text-slate-400">
           Scheduled for {formatTimeWithZone(target.scheduledInstant, zone)}. Normal dose{' '}
@@ -285,7 +311,13 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
             Cancel
           </Button>
           <Button variant={overCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
-            {overCap ? 'Log over-cap dose' : 'Log dose'}
+            {target.entryId
+              ? overCap
+                ? 'Save over-cap dose'
+                : 'Save changes'
+              : overCap
+                ? 'Log over-cap dose'
+                : 'Log dose'}
           </Button>
         </div>
       </div>
