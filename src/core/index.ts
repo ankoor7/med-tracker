@@ -3,6 +3,7 @@ export * from './types';
 export * from './time';
 export * from './schedule';
 export * from './scheduleHistory';
+export * from './scheduleEdit';
 export * from './calendar';
 export * from './occurrence';
 export * from './guardrails';

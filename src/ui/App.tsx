@@ -7,12 +7,13 @@ import { CatchUpBanner } from './components/CatchUpBanner';
 import { StartDatePrompt } from './components/StartDatePrompt';
 import { TodayScreen } from './screens/TodayScreen';
 import { CalendarScreen } from './screens/CalendarScreen';
-import { ScheduleScreen } from './screens/ScheduleScreen';
 import { MedsScreen } from './screens/MedsScreen';
 import { EventsScreen } from './screens/EventsScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
 
-const TABS = ['Today', 'Calendar', 'Schedule', 'Meds', 'Events', 'History'] as const;
+// Stage 18 FR-18.12 merged the old Schedule tab into Meds: one tab owns a
+// medication end to end, including the times and amounts it is taken at.
+const TABS = ['Today', 'Calendar', 'Meds', 'Events', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
 // Minimal line icons (Oura-style) so the bottom nav reads at a glance.
@@ -41,18 +42,14 @@ function TabIcon({ tab }: { tab: Tab }) {
         <path d="M3.5 9h17M8 3v3M16 3v3" />
       </>
     ),
-    Schedule: (
-      <>
-        <path d="M8 6h12M8 12h12M8 18h12" />
-        <circle cx="4" cy="6" r="1" />
-        <circle cx="4" cy="12" r="1" />
-        <circle cx="4" cy="18" r="1" />
-      </>
-    ),
+    // The pill now carries a clock hand: this tab owns both the medication and
+    // the times it is taken at.
     Meds: (
       <>
-        <rect x="3" y="8" width="18" height="8" rx="4" />
-        <path d="M12 8v8" />
+        <rect x="2.5" y="8" width="13" height="8" rx="4" />
+        <path d="M9 8v8" />
+        <circle cx="18" cy="16" r="4.5" />
+        <path d="M18 13.8V16l1.5 1" />
       </>
     ),
     Events: <path d="M3 13h4l2.5 6 5-15L17 13h4" />,
@@ -118,7 +115,6 @@ export default function App() {
             <>
               {tab === 'Today' && <TodayScreen />}
               {tab === 'Calendar' && <CalendarScreen />}
-              {tab === 'Schedule' && <ScheduleScreen />}
               {tab === 'Meds' && <MedsScreen />}
               {tab === 'Events' && <EventsScreen />}
               {tab === 'History' && <HistoryScreen />}
@@ -130,7 +126,7 @@ export default function App() {
           aria-label="Primary"
           className="fixed inset-x-0 bottom-0 z-30 mx-auto max-w-2xl px-4 pb-[env(safe-area-inset-bottom)]"
         >
-          <div className="mb-3 grid grid-cols-6 gap-0.5 rounded-3xl border border-white/10 bg-slate-900/80 p-1.5 shadow-soft backdrop-blur-md">
+          <div className="mb-3 grid grid-cols-5 gap-0.5 rounded-3xl border border-white/10 bg-slate-900/80 p-1.5 shadow-soft backdrop-blur-md">
             {TABS.map((t) => {
               const active = tab === t;
               return (

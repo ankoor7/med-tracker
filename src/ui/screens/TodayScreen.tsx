@@ -89,9 +89,7 @@ export function TodayScreen() {
 
       {planned.length === 0 && (
         <Card>
-          <p className="text-sm text-slate-400">
-            No doses scheduled. Add time-slots on the Schedule tab.
-          </p>
+          <p className="text-sm text-slate-400">No doses scheduled. Add times on the Meds tab.</p>
         </Card>
       )}
 

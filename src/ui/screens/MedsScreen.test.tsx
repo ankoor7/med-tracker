@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MedsScreen } from './MedsScreen';
+import { TodayScreen } from './TodayScreen';
 import { useStore } from '../../store/store';
+import type { RegimenChange } from '../../core';
 import { med, settings, slot, logEntry } from '../../test/fixtures';
 import { openDeleteConfirm } from '../../test/doseLogDialogHelpers';
 
@@ -33,8 +35,66 @@ function seed() {
       }),
     ],
     regimenChanges: [],
+    scheduleSnapshots: [],
     settings: settings({ zone: ZONE }),
   });
+}
+
+/** Put both medications in one 08:00 slot, as the seeded data does. */
+function seedSharedMorningSlot() {
+  useStore.setState({
+    slots: [
+      slot({
+        id: 's1',
+        time: '08:00',
+        items: [
+          { medId: 'a', dose: 100 },
+          { medId: 'b', dose: 500 },
+        ],
+      }),
+    ],
+  });
+}
+
+/** Lamotrigine at 08:00 and Levetiracetam at 20:00, sharing nothing. */
+function seedTwoIndependentSlots() {
+  useStore.setState({
+    slots: [
+      slot({ id: 's1', time: '08:00', items: [{ medId: 'a', dose: 100 }] }),
+      slot({ id: 's2', time: '20:00', items: [{ medId: 'b', dose: 500 }] }),
+    ],
+  });
+}
+
+/** Drive the merged editor to move Lamotrigine's only dose to `time`. */
+function retimeLamotrigineTo(time: string) {
+  render(<MedsScreen />);
+  const dialog = openMedEditor('Lamotrigine');
+  setValue(dialog, 'Time for dose 1', time);
+  saveDialog(dialog);
+}
+
+/** Switch the merged tab between its two projections of the same slots. */
+function showView(name: 'By medication' | 'By time') {
+  fireEvent.click(screen.getByRole('button', { name }));
+}
+
+function openMedEditor(name: string): HTMLElement {
+  fireEvent.click(within(medRow(name)).getByRole('button', { name: 'Edit' }));
+  return screen.getByRole('dialog');
+}
+
+function saveDialog(dialog: HTMLElement) {
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+}
+
+function setValue(dialog: HTMLElement, label: string, value: string) {
+  fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
+}
+
+/** Change records minus the fields that legitimately differ per run. */
+function comparableChanges(changes: RegimenChange[]) {
+  return changes.map(({ id: _id, changedAt: _c, updatedAt: _u, ...rest }) => rest);
 }
 
 beforeEach(() => {
@@ -47,8 +107,9 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-// Stage 18 FR-18.5 — destructive actions on the medication card.
-describe('MedsScreen — destructive actions (FR-18.5)', () => {
+// Stage 18 FR-18.5 — destructive actions on the medication card. Migrated from
+// the pre-merge MedsScreen; the card still owns these actions.
+describe('Meds tab — destructive actions (FR-18.5)', () => {
   it('Delete requires explicit confirmation naming the medication (AC7)', () => {
     render(<MedsScreen />);
     const dialog = openDeleteConfirm(medRow('Lamotrigine'));
@@ -105,5 +166,329 @@ describe('MedsScreen — destructive actions (FR-18.5)', () => {
     render(<MedsScreen />);
     const row = medRow('Levetiracetam');
     expect(within(row).queryByRole('button', { name: 'Stop taking' })).not.toBeInTheDocument();
+  });
+
+  it('deleting a time-slot from the by-time view is confirmed and names what it affects', () => {
+    render(<MedsScreen />);
+    showView('By time');
+    const card = screen.getByText('08:00').closest<HTMLElement>('[class*="rounded-2xl"]')!;
+    const dialog = openDeleteConfirm(card);
+
+    expect(dialog).toHaveTextContent(/delete the 08:00 time-slot/i);
+    expect(dialog).toHaveTextContent(/Lamotrigine/);
+    expect(dialog).toHaveTextContent(/already logged for this slot are retained/i);
+  });
+});
+
+// Stage 18 FR-18.12 — the merge itself.
+describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
+  it('answers "when do I take this, and how much?" on the medication card', () => {
+    render(<MedsScreen />);
+    const list = within(medRow('Lamotrigine')).getByRole('list', {
+      name: 'Lamotrigine schedule',
+    });
+    expect(list).toHaveTextContent('08:00');
+    expect(list).toHaveTextContent('100mg');
+  });
+
+  it('answers "what do I take at 08:00?" in the by-time projection', () => {
+    render(<MedsScreen />);
+    showView('By time');
+    const card = screen.getByText('08:00').closest<HTMLElement>('[class*="rounded-2xl"]')!;
+    expect(card).toHaveTextContent('Lamotrigine');
+    expect(card).toHaveTextContent('100mg');
+  });
+
+  it('flags a medication with no times rather than leaving it silently invisible', () => {
+    useStore.setState({ slots: [] });
+    render(<MedsScreen />);
+    expect(medRow('Lamotrigine')).toHaveTextContent(/not scheduled/i);
+  });
+
+  it('AC13: adds a medication with guardrails and a twice-daily schedule without leaving the tab, and it appears on Today', () => {
+    render(<MedsScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Add medication' }));
+    const dialog = screen.getByRole('dialog');
+
+    setValue(dialog, 'Name', 'Carbamazepine');
+    setValue(dialog, 'Unit', 'mg');
+    setValue(dialog, 'Max single dose', '400');
+    setValue(dialog, 'Max daily dose', '800');
+
+    // Two different times, two different amounts — dose stays per-time-of-day.
+    setValue(dialog, 'Time for dose 1', '08:00');
+    setValue(dialog, 'Amount for dose 1', '400');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add a time' }));
+    setValue(dialog, 'Time for dose 2', '20:00');
+    setValue(dialog, 'Amount for dose 2', '300');
+    saveDialog(dialog);
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    const state = useStore.getState();
+    const created = state.medications.find((m) => m.name === 'Carbamazepine')!;
+    expect(created.guardrails).toMatchObject({ maxSingleDose: 400, maxDailyDose: 800 });
+
+    // The 08:00 dose joined the existing slot; the 20:00 one created a slot.
+    const doses = state.slots
+      .filter((s) => !s.deleted)
+      .flatMap((s) => s.items.filter((i) => i.medId === created.id).map((i) => [s.time, i.dose]));
+    expect(doses.sort()).toEqual([
+      ['08:00', 400],
+      ['20:00', 300],
+    ]);
+    expect(state.slots.filter((s) => !s.deleted && s.time === '08:00')).toHaveLength(1);
+
+    // …and it is visible on Today without visiting any other tab.
+    render(<TodayScreen />);
+    expect(screen.getAllByText('Carbamazepine').length).toBeGreaterThan(0);
+  });
+
+  it('edits a dose amount from the medication editor without disturbing co-scheduled medications', () => {
+    seedSharedMorningSlot();
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    setValue(dialog, 'Amount for dose 1', '200');
+    saveDialog(dialog);
+
+    const updated = useStore.getState().slots.find((s) => s.id === 's1')!;
+    expect(updated.items).toEqual([
+      { medId: 'a', dose: 200 },
+      { medId: 'b', dose: 500 },
+    ]);
+  });
+
+  it('removes a time from the medication editor, tombstoning a slot left empty', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove dose 1' }));
+    saveDialog(dialog);
+
+    expect(useStore.getState().slots.find((s) => s.id === 's1')?.deleted).toBe(true);
+  });
+
+  it('discloses that a shared time moves the other medication’s dose too', () => {
+    seedSharedMorningSlot();
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+
+    // The slot's time belongs to the slot, not to one medication — the editor
+    // must say so rather than let a retime silently move Levetiracetam.
+    expect(dialog).toHaveTextContent(
+      /08:00 is shared with Levetiracetam — changing this time moves their dose too/i,
+    );
+  });
+
+  it('warns that retiming onto an occupied time will group the doses together', () => {
+    // Two independent slots: Lamotrigine at 08:00, Levetiracetam at 20:00.
+    seedTwoIndependentSlots();
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    setValue(dialog, 'Time for dose 1', '20:00');
+
+    expect(dialog).toHaveTextContent(
+      /Moving to 20:00 groups this dose with Levetiracetam, already taken then/i,
+    );
+  });
+
+  it('retiming onto an occupied time joins that slot instead of forking a second one at the same time', () => {
+    seedTwoIndependentSlots();
+    retimeLamotrigineTo('20:00');
+
+    const live = useStore.getState().slots.filter((sl) => !sl.deleted);
+    // The emptied source is tombstoned; one slot remains at 20:00 holding both.
+    expect(live).toHaveLength(1);
+    expect(live[0]!.id).toBe('s2');
+    expect(live[0]!.time).toBe('20:00');
+    expect(live[0]!.items).toEqual([
+      { medId: 'b', dose: 500 },
+      { medId: 'a', dose: 100 },
+    ]);
+
+    // Two slots genuinely changed, so two honest records — not one synthetic one.
+    const kinds = useStore.getState().regimenChanges.map((c) => c.kind);
+    expect(kinds).toEqual(['slot-removed', 'slot-updated']);
+  });
+
+  it('keeps a shared source slot alive when only this medication moves away', () => {
+    useStore.setState({
+      slots: [
+        slot({
+          id: 's1',
+          time: '08:00',
+          items: [
+            { medId: 'a', dose: 100 },
+            { medId: 'b', dose: 500 },
+          ],
+        }),
+        slot({ id: 's2', time: '20:00', items: [{ medId: 'b', dose: 250 }] }),
+      ],
+    });
+    retimeLamotrigineTo('20:00');
+
+    const live = useStore.getState().slots.filter((sl) => !sl.deleted);
+    expect(live.map((sl) => [sl.time, sl.items.map((i) => i.medId)])).toEqual([
+      ['08:00', ['b']],
+      ['20:00', ['b', 'a']],
+    ]);
+    expect(useStore.getState().regimenChanges.map((c) => c.kind)).toEqual([
+      'slot-updated',
+      'slot-updated',
+    ]);
+  });
+
+  // NOTE: the user-visible counterpart of this — "Today shows one group at the
+  // new time" — cannot be asserted yet. Two pre-existing `core/scheduleHistory`
+  // behaviours intercept it, both documented in the FR-18.12 report:
+  // `resolveScheduleAsOf` breaks same-instant snapshot ties by random id, and it
+  // does not filter tombstoned slots out of a snapshot. A single Save now fires
+  // several store actions in the same millisecond, so both are reachable here.
+  // The slot state and change records asserted above are what this layer owns.
+
+  it('says nothing about sharing when the medication is alone at that time', () => {
+    render(<MedsScreen />);
+    expect(openMedEditor('Lamotrigine')).not.toHaveTextContent(/is shared with/i);
+  });
+
+  it('refuses to save two doses at the same time, explaining why', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add a time' }));
+    setValue(dialog, 'Time for dose 2', '08:00');
+    setValue(dialog, 'Amount for dose 2', '50');
+
+    expect(dialog).toHaveTextContent(/08:00 is listed twice/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('the by-time editor still adds a medication to a slot (migrated ScheduleScreen behaviour)', () => {
+    render(<MedsScreen />);
+    showView('By time');
+    fireEvent.click(screen.getByRole('button', { name: 'Add time-slot' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText('Time'), { target: { value: '13:00' } });
+    fireEvent.change(within(dialog).getByLabelText('Add medication to slot'), {
+      target: { value: 'a' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Dose for Lamotrigine'), {
+      target: { value: '50' },
+    });
+    saveDialog(dialog);
+
+    const added = useStore.getState().slots.find((s) => s.time === '13:00')!;
+    expect(added.items).toEqual([{ medId: 'a', dose: 50 }]);
+  });
+});
+
+// Stage 18 FR-18.12 AC14 — the merge is presentation-level: each edit must still
+// drive the same store action, and therefore emit a byte-identical Stage 16
+// change record. Each case compares the UI-driven record against the record the
+// store action produces directly from the same seed.
+/**
+ * Run the same regimen edit twice from an identical seed — once by driving the
+ * merged UI, once by calling the store action the pre-merge screens called —
+ * and return both sets of change records for comparison.
+ */
+function recordsForBothRoutes(
+  uiEdit: (dialog: HTMLElement) => void,
+  controlEdit: () => void,
+): [ReturnType<typeof comparableChanges>, ReturnType<typeof comparableChanges>] {
+  const { unmount } = render(<MedsScreen />);
+  const dialog = openMedEditor('Lamotrigine');
+  uiEdit(dialog);
+  saveDialog(dialog);
+  const viaUi = comparableChanges(useStore.getState().regimenChanges);
+
+  // Unmount before re-seeding: the control run is a pure store exercise.
+  unmount();
+  seed();
+  controlEdit();
+  return [viaUi, comparableChanges(useStore.getState().regimenChanges)];
+}
+
+describe('Meds tab — Stage 16 change records are unchanged by the merge (AC14)', () => {
+  it('a dose amount edit emits the same slot-updated record as updateSlot', () => {
+    const [viaUi, viaStore] = recordsForBothRoutes(
+      (dialog) => setValue(dialog, 'Amount for dose 1', '200'),
+      () => useStore.getState().updateSlot('s1', { items: [{ medId: 'a', dose: 200 }] }),
+    );
+
+    expect(viaUi).toEqual(viaStore);
+    expect(viaUi).toHaveLength(1);
+    expect(viaUi[0]!).toMatchObject({ kind: 'slot-updated', slotId: 's1' });
+    expect(viaUi[0]!.changes.length).toBeGreaterThan(0);
+  });
+
+  it('a slot time edit emits the same slot-updated record as updateSlot', () => {
+    const [viaUi, viaStore] = recordsForBothRoutes(
+      (dialog) => setValue(dialog, 'Time for dose 1', '09:00'),
+      () => useStore.getState().updateSlot('s1', { time: '09:00' }),
+    );
+
+    expect(viaUi).toEqual(viaStore);
+    expect(viaUi[0]!).toMatchObject({ kind: 'slot-updated', slotId: 's1' });
+    expect(viaUi[0]!.changes.some((c) => JSON.stringify(c).includes('09:00'))).toBe(true);
+  });
+
+  it('a guardrail edit emits the same medication-updated record as updateMedication', () => {
+    const [viaUi, viaStore] = recordsForBothRoutes(
+      (dialog) => setValue(dialog, 'Max daily dose', '400'),
+      () => {
+        const before = useStore.getState().medications.find((m) => m.id === 'a')!;
+        useStore.getState().updateMedication('a', {
+          name: before.name,
+          color: before.color,
+          unit: before.unit,
+          halfLifeHours: before.halfLifeHours,
+          adjustWhenLate: before.adjustWhenLate,
+          active: before.active,
+          notes: before.notes ?? '',
+          guardrails: { ...before.guardrails, maxDailyDose: 400 },
+        });
+      },
+    );
+
+    expect(viaUi).toEqual(viaStore);
+    expect(viaUi).toHaveLength(1);
+    expect(viaUi[0]!).toMatchObject({ kind: 'medication-updated', medId: 'a' });
+  });
+
+  it('saving with nothing changed emits no change record at all', () => {
+    render(<MedsScreen />);
+    saveDialog(openMedEditor('Lamotrigine'));
+    expect(useStore.getState().regimenChanges).toEqual([]);
+  });
+});
+
+describe('Meds tab — keyboard and accessibility', () => {
+  it('the whole surface is reachable by keyboard: view switch, add, edit, save', () => {
+    render(<MedsScreen />);
+
+    const byTime = screen.getByRole('button', { name: 'By time' });
+    byTime.focus();
+    expect(byTime).toHaveFocus();
+    fireEvent.click(byTime); // Enter/Space on a native button dispatches click
+    expect(byTime).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Add time-slot' })).toBeInTheDocument();
+
+    const byMed = screen.getByRole('button', { name: 'By medication' });
+    fireEvent.click(byMed);
+    expect(byMed).toHaveAttribute('aria-pressed', 'true');
+    expect(byTime).toHaveAttribute('aria-pressed', 'false');
+
+    // The editor opens focused, so a keyboard user lands inside it, and Escape
+    // closes it again without a mouse.
+    const dialog = openMedEditor('Lamotrigine');
+    expect(dialog).toHaveFocus();
+    expect(within(dialog).getByLabelText('Time for dose 1')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('uses a heading hierarchy under the screen heading and labels the view switch', () => {
+    render(<MedsScreen />);
+    expect(screen.getByRole('heading', { level: 2 })).toHaveTextContent('Medications & schedule');
+    expect(screen.getByRole('heading', { level: 3, name: 'Lamotrigine' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'View regimen by' })).toBeInTheDocument();
   });
 });
