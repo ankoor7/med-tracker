@@ -1,7 +1,8 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Written 2026-07-23. Branch: `stage-18-ux-hardening`. 9 of 12 FRs committed **and pushed**.
-One fix sits uncommitted in the working tree — read §"Uncommitted work" first._
+_Written 2026-07-23. Branch: `stage-18-ux-hardening`. Everything is committed **and
+pushed** — tree clean, HEAD `17e78b7`. One committed unit is WIP (not review-signed-
+off): read §"Unfinished work" first._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
@@ -9,21 +10,25 @@ the authority for what "fixed" means; each FR maps to acceptance criteria (ACn).
 
 ---
 
-## ⚠️ Uncommitted work — the first thing to deal with
+## ⚠️ Unfinished work — the first thing to deal with
 
-The working tree holds an **FR-18.1 follow-up** (schedule-history correctness),
-6 files, **not committed and not pushed**:
+Commit **`17e78b7`** (the FR-18.1 snapshot follow-up) is committed and pushed **but
+is WIP** — implemented and green, but validation was only PARTIAL and it had **no
+reviewer pass**. Its commit message says so; it is isolated in its own commit so it
+is easy to finish, amend, or revert. Close it out before building on this area.
+
+Files in that commit:
 
 ```
-M src/core/scheduleHistory.ts        # tombstone filter in resolveScheduleAsOf
-M src/core/scheduleHistory.test.ts
-M src/store/store.ts                 # reentrant begin/endRegimenEdit + runRegimenEdit
-M src/store/store.test.ts
-M src/ui/screens/MedicationEditor.tsx # Save wrapped in runRegimenEdit
-M src/ui/screens/MedsScreen.test.tsx  # re-enabled Today-grouping test
+src/core/scheduleHistory.ts          # tombstone filter in resolveScheduleAsOf
+src/core/scheduleHistory.test.ts
+src/store/store.ts                   # reentrant begin/endRegimenEdit + runRegimenEdit
+src/store/store.test.ts
+src/ui/screens/MedicationEditor.tsx  # Save wrapped in runRegimenEdit
+src/ui/screens/MedsScreen.test.tsx   # re-enabled Today-grouping test
 ```
 
-**What it fixes (two bugs in already-committed FR-18.1 code):**
+**What it fixes (two bugs in earlier FR-18.1 code):**
 
 1. **Live bug** — every mutating store action appended a schedule snapshot stamped
    `Date.now()`, and one Save in the merged editor fires 2–4 of them in the same
@@ -35,27 +40,18 @@ M src/ui/screens/MedsScreen.test.tsx  # re-enabled Today-grouping test
 2. **Latent bug** — `resolveScheduleAsOf` never filtered `slot.deleted`. Inert
    today (downstream `plannedSlotsForDate` filters deleted slots), fixed anyway.
 
-**Status: implementer done (reported 478 tests + 79 pgTAP green, fallow clean).
-Validation is PARTIAL. No reviewer pass. DO NOT COMMIT until finished.**
-
-- Live-passed: past-day render after multi-action retime, one-Save-one-snapshot,
-  FR-18.1 ACs, FR-18.12 AC14 records, tombstone filter, console clean.
-- **Not done:** pre-upgrade baseline path (item 3), the early-return depth-leak
-  provocation (item 4 — worst blast radius: a leaked depth counter silently stops
-  ALL future snapshot recording), and the Part 2 test audit + mutation test.
-
-**To resume:** finish those validation items, then a reviewer pass (which must
-also clear the fallow gate), then commit + push. The full validator brief is in
-the conversation; the protocol is in the scratchpad (§Method).
-
-If you'd rather not resume mid-validation, `git stash` it and pick a fresh FR —
-but the fix is worth keeping; bug 1 was genuinely user-visible.
+**To finish it:** run the outstanding validation — the pre-upgrade baseline path,
+the early-return depth-leak provocation (worst blast radius: a leaked depth counter
+silently stops ALL future snapshot recording), and the Part 2 test-mutation audit —
+then a reviewer pass, then amend/commit. Already live-passed: past-day render after
+a multi-action retime, one-Save-one-snapshot, FR-18.1 ACs, FR-18.12 AC14 records,
+tombstone filter, console clean.
 
 ---
 
-## Committed & pushed (branch `stage-18-ux-hardening`)
+## Committed & pushed (branch `stage-18-ux-hardening`, HEAD `17e78b7`)
 
-| Commit    | FR          | What                                                                      |
+| Commit    | FR / kind   | What                                                                      |
 | --------- | ----------- | ------------------------------------------------------------------------- |
 | `ff25b2d` | 18.11       | Blood-level chart removed as a user-facing concept                        |
 | `5490f97` | 18.1 p1     | Effective-dated ScheduleSnapshot + `resolveScheduleAsOf` + migration 0008 |
@@ -65,6 +61,8 @@ but the fix is worth keeping; bug 1 was genuinely user-visible.
 | `54a94eb` | 18.4 + 18.3 | Lateness-aware adherence; skipped status + migration 0010                 |
 | `5f5554e` | 18.6        | Assumed vs logged doses made distinguishable                              |
 | `21fb651` | 18.12       | Merge the Meds and Schedule tabs                                          |
+| `8e2a6de` | docs        | This handoff + the orchestrator playbook                                  |
+| `17e78b7` | 18.1 fu     | **WIP** — snapshot collapse + tombstone filter (see §Unfinished work)     |
 
 The FR-18.1 structural fix (past days must render the regimen as it was _then_,
 not the current one) is the spine of the stage and is done. FR-18.12 (tab merge)
@@ -159,7 +157,41 @@ fresh session needs the subagents._
 
 ---
 
-## Queued after Stage 18 (user request, not started)
+## Queued next (user request, not started)
+
+### 1. UI rewrite onto React Aria Components — Stages 19–21 (specs written)
+
+Rebuild the UI on **React Aria Components** (`react-aria-components`) under a new
+**minimalistic, clean theme**, dropping the fully-custom components + Oura-style
+CSS. **Decision made and recorded** (spec 19 §2): React Aria Components over React
+Spectrum S2 — the requirement is a _bespoke_ theme, so we want unstyled primitives
+we fully own, not Adobe's Spectrum design language; it is also the lower-risk
+migration and ships the primitives this app needs (`Calendar`, `DateField`/
+`TimeField`/`NumberField`, `Dialog`, `Meter`). The `react-aria` skill is installed
+(`spectrum-audit`/`react-spectrum-s2` are not applicable — we did not adopt S2).
+
+Three stages, run in order through the Implement→Validate→Review pipeline:
+
+- **Stage 19 — `specs/stage-19-design-system-react-aria.md`.** Foundation:
+  design-token layer for the new theme (light+dark), themed primitives over React
+  Aria replacing `ui.tsx`/`Modal.tsx`/`ConfirmDialog.tsx`/`StatusBadge.tsx`, drop
+  every Oura-style directive, wire `@react-aria/test-utils`, a theme guide. No
+  screen rewrites. Has open questions in §5 (token home, icon set, Tailwind vs
+  React Aria styling) — settle with the user before/early in the stage.
+- **Stage 20 — `specs/stage-20-screen-migration.md`.** Migrate chrome, Today, the
+  merged Meds editor, Events, and the logging dialogs onto the new primitives.
+  **Behaviour parity is load-bearing**: every Stage 18 FR must survive (FR-20.2
+  lists them); the Stage 18 test suite is the oracle.
+- **Stage 21 — `specs/stage-21-dashboards-calendar.md`.** History dashboards +
+  Calendar onto the theme, with **legibility as the explicit acceptance bar** (the
+  "easily understood dashboards and calendars" ask). Guards that the FR-18.6/18.9
+  visual distinctions and their non-colour cues survive the re-skin, and that the
+  calendar drag/arrow-retime still works.
+
+_The Oura **data** feature (`OuraPanel`, `core/oura.ts`) is untouched — only the
+Oura visual *style* is dropped._
+
+### 2. P0 feature stages — from the research backlog
 
 Take `research/03-feature-list-prioritised-by-category.md`, find all **P0** items,
 and author new spec stages from them, grouped appropriately. Keep already-completed
@@ -173,8 +205,8 @@ _(That file has not been read yet — confirm it exists and scope the work first
 ## Quick health check for whoever picks this up
 
 ```
-git status                 # expect the 6 uncommitted files above, nothing else
-git log --oneline -8       # expect 21fb651 at HEAD, pushed
-pnpm typecheck && pnpm lint && pnpm test   # expect green (478 tests with the WIP)
+git status                 # expect clean (everything committed + pushed)
+git log --oneline -10      # expect 17e78b7 at HEAD, pushed
+pnpm typecheck && pnpm lint && pnpm test   # expect green (478 tests)
 pnpm db:test               # expect 79 pgTAP green (needs local stack up)
 ```
