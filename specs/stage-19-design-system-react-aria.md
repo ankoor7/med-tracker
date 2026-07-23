@@ -94,16 +94,22 @@ language wholesale rather than maintain a bespoke theme. That is not this stage.
 - **FR-19.8** A short **theme guide** (a doc or a rendered gallery) shows the
   primitives and tokens, so Stages 20–21 build against a settled reference.
 
-## 5. Open questions
-1. **Token home:** extend `tailwind.config.ts`, or move to CSS custom properties
-   (which React Aria's styling guide leans toward via `data-*` state attributes)?
-   The choice affects every later component — settle it here.
-2. **Icon set:** the current nav uses hand-drawn "Oura-style" SVGs. Keep them
-   restyled, or adopt a single minimal icon set? A patient-facing dashboard reads
-   best with one consistent, low-weight set.
-3. Retain Tailwind as the utility layer, or move component styling to the styling
-   approach React Aria's guide recommends (render-prop state + CSS)? Mixing both
-   invites drift.
+## 5. Decisions (settled 2026-07-23)
+1. **Token home → CSS custom properties.** Tokens are defined as CSS variables on
+   `:root`, theme-aware via `:root[data-theme="dark"]` (and `prefers-color-scheme`
+   as the initial signal), and referenced from `tailwind.config.ts` (`theme.extend`
+   reads the variables) so utilities like `bg-[--sd-bg]` resolve. Light/dark is a
+   single variable swap. This matches React Aria's `data-*` state styling model.
+2. **Icon set → one minimal set.** Replace the hand-drawn "Oura-style" nav SVGs with
+   a single consistent, low-weight icon set (Lucide — self-contained, tree-shakeable,
+   works under the offline CSP). Uniform stroke weight reads best on a minimalist
+   dashboard. Verify the bundle stays self-contained (no runtime CDN fetch).
+3. **Styling approach → Tailwind + React Aria `data-*` selectors.** Keep Tailwind as
+   the utility layer; drive interaction state from React Aria's `data-*` attributes
+   (`data-[hovered]`, `data-[focus-visible]`, `data-[selected]`, …). Lowest-risk
+   path — the app already uses Tailwind. Do **not** introduce a parallel CSS-module
+   styling paradigm; a single styling path avoids the drift the render-prop route
+   would invite.
 
 ## 6. Acceptance criteria
 - **AC19.1** App builds and runs on React Aria Components with the new theme; every
