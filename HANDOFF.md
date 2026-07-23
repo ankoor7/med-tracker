@@ -1,8 +1,10 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Written 2026-07-23. Branch: `stage-18-ux-hardening`. Everything is committed **and
-pushed** — tree clean, HEAD `17e78b7`. One committed unit is WIP (not review-signed-
-off): read §"Unfinished work" first._
+_Written 2026-07-23. Branch: `stage-18-ux-hardening`. Everything is committed; latest
+local HEAD `b11bedc` (spec-doc commits `1d162b5`/`b11bedc` are ahead of the last
+push at `17e78b7` — push before closing the session). The former WIP commit
+`17e78b7` is now **validated + reviewer-signed-off** (see §"Snapshot fix — signed
+off")._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
@@ -10,42 +12,28 @@ the authority for what "fixed" means; each FR maps to acceptance criteria (ACn).
 
 ---
 
-## ⚠️ Unfinished work — the first thing to deal with
+## Snapshot fix (`17e78b7`) — signed off
 
-Commit **`17e78b7`** (the FR-18.1 snapshot follow-up) is committed and pushed **but
-is WIP** — implemented and green, but validation was only PARTIAL and it had **no
-reviewer pass**. Its commit message says so; it is isolated in its own commit so it
-is easy to finish, amend, or revert. Close it out before building on this area.
+The FR-18.1 snapshot follow-up (reentrant `begin/endRegimenEdit` depth counter +
+`runRegimenEdit` collapsing one Save into one schedule snapshot; `slot.deleted`
+filtered at source in `resolveScheduleAsOf`) is now **fully validated and reviewer-
+signed-off** (closed out 2026-07-23). All three formerly-outstanding checks passed:
 
-Files in that commit:
+- **Test-mutation audit** — reverting the source (capture-on-every-close; drop the
+  `slot.deleted` filter) turns the new `store.test.ts` / `scheduleHistory.test.ts`
+  tests red; restored green. Tests are honest, not tautological.
+- **Early-return depth safety** — `inRegimenEdit`'s `try/finally` (`store.ts:298`)
+  balances the counter even when an inner action early-returns; a later edit still
+  records. Proven by `store.test.ts` "nests without losing the snapshot…".
+- **Pre-upgrade baseline path** — upgrading a pre-snapshot DB mints the
+  `effectiveFrom: 0` baseline and past days resolve correctly. (Known-benign
+  StrictMode double-hydrate mints two _content-identical_ baselines — carried-
+  forward item below, not a defect.)
 
-```
-src/core/scheduleHistory.ts          # tombstone filter in resolveScheduleAsOf
-src/core/scheduleHistory.test.ts
-src/store/store.ts                   # reentrant begin/endRegimenEdit + runRegimenEdit
-src/store/store.test.ts
-src/ui/screens/MedicationEditor.tsx  # Save wrapped in runRegimenEdit
-src/ui/screens/MedsScreen.test.tsx   # re-enabled Today-grouping test
-```
-
-**What it fixes (two bugs in earlier FR-18.1 code):**
-
-1. **Live bug** — every mutating store action appended a schedule snapshot stamped
-   `Date.now()`, and one Save in the merged editor fires 2–4 of them in the same
-   millisecond. `resolveScheduleAsOf` broke ties by random UUID, so a past day
-   could render a **mid-edit regimen that never existed**. Fix: collapse a
-   bracketed edit into **one snapshot per Save** (reentrant depth counter +
-   `runRegimenEdit` wrapping `MedicationEditor.save`). Also retires the deferred
-   "unbounded snapshot growth" item.
-2. **Latent bug** — `resolveScheduleAsOf` never filtered `slot.deleted`. Inert
-   today (downstream `plannedSlotsForDate` filters deleted slots), fixed anyway.
-
-**To finish it:** run the outstanding validation — the pre-upgrade baseline path,
-the early-return depth-leak provocation (worst blast radius: a leaked depth counter
-silently stops ALL future snapshot recording), and the Part 2 test-mutation audit —
-then a reviewer pass, then amend/commit. Already live-passed: past-day render after
-a multi-action retime, one-Save-one-snapshot, FR-18.1 ACs, FR-18.12 AC14 records,
-tombstone filter, console clean.
+Reviewer confirmed: one Save = one snapshot across the six wrapped store actions,
+no non-schedule action spuriously mints a snapshot, `src/core` boundary intact,
+fallow new-only introduced counts all 0. The commit message still reads "WIP" as a
+historical record of its authoring state — that is expected; the sign-off is here.
 
 ---
 
