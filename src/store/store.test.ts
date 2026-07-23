@@ -1,9 +1,9 @@
 import 'fake-indexeddb/auto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStore } from './store';
 import { LocalRepository, SteadyDoseDB } from './localRepository';
 import { setRepository, nullRepository } from './repository';
-import { resolveWallTimeToInstant } from '../core';
+import { isoDateInZone, resolveScheduleAsOf, resolveWallTimeToInstant } from '../core';
 import type { Guardrails } from '../core/types';
 
 let dbName: string;
@@ -815,5 +815,156 @@ describe('schedule snapshots (Stage 18 FR-18.1)', () => {
     s().addMedication({ ...MED_INPUT, name: 'A' });
     s().addMedication({ ...MED_INPUT, name: 'B' });
     expect(snapshots().filter((x) => x.effectiveFrom === 0)).toHaveLength(1);
+  });
+});
+
+// FR-18.1 follow-up. A single Save in the merged editor fires 2-4 mutating
+// actions synchronously. One snapshot per action meant several snapshots sharing
+// a millisecond, and `resolveScheduleAsOf` could only break that tie by random
+// UUID — so a past day could render an intermediate regimen the user never saved
+// (the reported repro: a mid-edit dose of 999 winning over the final 150 purely
+// because its id sorted later). The bracket now collapses the whole edit.
+
+describe('bracketed regimen edits collapse to one snapshot (FR-18.1 follow-up)', () => {
+  const s = () => useStore.getState();
+
+  /**
+   * Prescribe medication A with a single 08:00 dose of 100mg. This is itself one
+   * Save — the editor fires addMedication + addSlot — so it is bracketed too.
+   */
+  const prescribe = () =>
+    s().runRegimenEdit(() => {
+      const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+      const slotA = s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+      return { medA, slotA };
+    });
+
+  /**
+   * One Save that passes through an intermediate 999mg before settling on 150mg
+   * — the shape of the reported bug, where the intermediate could win the tie.
+   */
+  const saveDoseVia999 = ({ medA, slotA }: ReturnType<typeof prescribe>) =>
+    s().runRegimenEdit(() => {
+      s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 999 }] }); // intermediate
+      s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 150 }] }); // final
+    });
+
+  it('appends exactly one snapshot for an edit made of several actions', () => {
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+    const slotA = s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+    const before = snapshots().length;
+
+    // What one Save does: touch the medication, then re-plan its slots.
+    s().runRegimenEdit(() => {
+      s().updateMedication(medA.id, { name: 'A2' });
+      s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 999 }] }); // intermediate
+      s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 150 }] }); // final
+    });
+
+    expect(snapshots().length).toBe(before + 1);
+  });
+
+  it('captures the final state of the edit, never an intermediate one', () => {
+    saveDoseVia999(prescribe());
+
+    const latest = snapshots()[snapshots().length - 1]!;
+    expect(latest.slots[0]!.items[0]!.dose).toBe(150);
+    // The intermediate value must exist in NO snapshot at all.
+    expect(
+      snapshots().some((x) => x.slots.some((sl) => sl.items.some((i) => i.dose === 999))),
+    ).toBe(false);
+  });
+
+  it('resolves the edited day to the final regimen, deterministically, every run', () => {
+    // The reported failure was probabilistic — it depended on how two
+    // same-millisecond snapshots' random UUIDs happened to sort — so repeat it
+    // with fresh ids each time. Fake timers put the earlier setup at a distinct
+    // instant, as real use would: a user prescribes a medication, and Saves an
+    // edit to it later. The only actions still sharing a millisecond are the
+    // ones inside the Save, and those now yield a single snapshot.
+    vi.useFakeTimers();
+    try {
+      for (let run = 0; run < 25; run++) {
+        resetStore();
+        vi.setSystemTime(new Date('2026-07-20T09:00:00Z'));
+        const prescribed = prescribe();
+
+        vi.setSystemTime(new Date('2026-07-22T09:00:00Z'));
+        saveDoseVia999(prescribed);
+
+        const st = s();
+        const today = isoDateInZone(Date.now(), st.settings.zone);
+        const resolved = resolveScheduleAsOf(st, today, st.settings.zone);
+        expect(resolved.slots[0]!.items[0]!.dose).toBe(150);
+
+        // ...and the day before the edit still shows the original 100 (AC1).
+        const before = resolveScheduleAsOf(st, '2026-07-21', st.settings.zone);
+        expect(before.slots[0]!.items[0]!.dose).toBe(100);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still captures the pre-edit baseline when the snapshot log is empty', () => {
+    // A pre-upgrade dataset: no snapshots yet, and the first thing the user does
+    // is a multi-action Save. The baseline must still protect prior history.
+    expect(snapshots()).toHaveLength(0);
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+
+    resetStore();
+    useStore.setState({ medications: [medA], slots: [], scheduleSnapshots: [] });
+
+    s().runRegimenEdit(() => {
+      s().updateMedication(medA.id, { name: 'A2' });
+      s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+    });
+
+    // Exactly two: the epoch baseline holding the pre-edit regimen, and one
+    // snapshot for the edit itself.
+    expect(snapshots()).toHaveLength(2);
+    expect(snapshots()[0]!.effectiveFrom).toBe(0);
+    expect(snapshots()[0]!.medications.map((m) => m.name)).toEqual(['A']);
+    expect(snapshots()[0]!.slots).toEqual([]);
+    expect(snapshots()[1]!.medications.map((m) => m.name)).toEqual(['A2']);
+    expect(snapshots()[1]!.slots[0]!.items[0]!.dose).toBe(100);
+  });
+
+  it('nests without losing the snapshot when an inner action returns early', () => {
+    // `updateSlot`/`updateMedication` bail out when the id is unknown. If that
+    // path skipped its close, the bracket depth would leak and every later edit
+    // would silently stop being recorded.
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+    const before = snapshots().length;
+
+    s().runRegimenEdit(() => {
+      s().updateSlot('does-not-exist', { time: '09:00' });
+      s().updateMedication('also-missing', { name: 'X' });
+    });
+    expect(snapshots().length).toBe(before + 1);
+
+    // The bracket is closed, so an ordinary later edit still records.
+    s().updateMedication(medA.id, { name: 'A2' });
+    expect(snapshots().length).toBe(before + 2);
+    expect(snapshots()[snapshots().length - 1]!.medications.map((m) => m.name)).toEqual(['A2']);
+  });
+
+  it('leaves the Stage 16 change records untouched in kind and count (AC14)', () => {
+    // Collapsing snapshots must not touch the separate `RegimenChange` mechanism:
+    // one marker per action, exactly as before.
+    const medA = s().addMedication({ ...MED_INPUT, name: 'A' });
+    const slotA = s().addSlot({ time: '08:00', items: [{ medId: medA.id, dose: 100 }] });
+
+    s().runRegimenEdit(() => {
+      s().updateMedication(medA.id, { name: 'A2' });
+      s().updateSlot(slotA.id, { items: [{ medId: medA.id, dose: 150 }] });
+    });
+
+    expect(liveChanges().map((c) => c.kind)).toEqual([
+      'medication-added',
+      'slot-added',
+      'medication-updated',
+      'slot-updated',
+    ]);
   });
 });

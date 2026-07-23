@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MedsScreen } from './MedsScreen';
 import { TodayScreen } from './TodayScreen';
@@ -337,13 +337,39 @@ describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
     ]);
   });
 
-  // NOTE: the user-visible counterpart of this — "Today shows one group at the
-  // new time" — cannot be asserted yet. Two pre-existing `core/scheduleHistory`
-  // behaviours intercept it, both documented in the FR-18.12 report:
-  // `resolveScheduleAsOf` breaks same-instant snapshot ties by random id, and it
-  // does not filter tombstoned slots out of a snapshot. A single Save now fires
-  // several store actions in the same millisecond, so both are reachable here.
-  // The slot state and change records asserted above are what this layer owns.
+  // The user-visible counterpart of the two tests above. It was blocked on the
+  // two `core/scheduleHistory` defects fixed in the FR-18.1 follow-up: the Save
+  // fired several store actions in one millisecond, so resolution picked between
+  // their snapshots by random UUID, and a tombstoned slot came back from the
+  // chosen snapshot. Both are fixed, so Today can now be asserted directly.
+  it('shows the moved dose in ONE group at the new time on the following day', () => {
+    useStore.setState({
+      medications: [
+        med({ id: 'a', name: 'Lamotrigine', unit: 'mg', active: true }),
+        med({ id: 'b', name: 'Levetiracetam', unit: 'mg', active: true }),
+      ],
+      doseLog: [],
+    });
+    seedTwoIndependentSlots();
+    retimeLamotrigineTo('20:00');
+
+    // The day after the edit: the snapshot taken at the Save governs it.
+    // Unmount the editor first so the only times on screen are Today's.
+    cleanup();
+    vi.setSystemTime(NOW + 24 * 3600_000);
+    render(<TodayScreen />);
+
+    // Exactly one dose group on the day, at the new time — not two at 20:00,
+    // and nothing left behind at the old 08:00.
+    const headings = screen.getAllByText(/^\d{2}:\d{2} [A-Z]{3}$/);
+    expect(headings.map((h) => h.textContent)).toEqual(['20:00 BST']);
+
+    // ...and it holds both medications, as one group the user takes together.
+    const group = headings[0]!.closest<HTMLElement>('[class*="rounded-2xl"]')!;
+    expect(within(group).getByText('Lamotrigine')).toBeInTheDocument();
+    expect(within(group).getByText('Levetiracetam')).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: /Take group \(\s*2\s*\)/ })).toBeEnabled();
+  });
 
   it('says nothing about sharing when the medication is alone at that time', () => {
     render(<MedsScreen />);

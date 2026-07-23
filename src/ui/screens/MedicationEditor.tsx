@@ -140,23 +140,30 @@ export function MedicationEditor({
       startedAt: startDateStr === '' ? undefined : startOfDayInstant(startDateStr, zone),
     };
     const store = useStore.getState();
-    // The medication first: a new one has to exist before its slots can name it.
-    let medId: string;
-    if (initial) {
-      store.updateMedication(initial.id, payload);
-      medId = initial.id;
-    } else {
-      medId = store.addMedication(payload).id;
-    }
+    // One Save is one regimen edit, however many store actions it takes: the
+    // bracket collapses them into a single `ScheduleSnapshot` of the final
+    // state (FR-18.1 follow-up). Without it the actions below each snapshot
+    // themselves in the same millisecond, and a past day could resolve to an
+    // intermediate regimen that was never saved.
+    store.runRegimenEdit(() => {
+      // The medication first: a new one has to exist before its slots can name it.
+      let medId: string;
+      if (initial) {
+        store.updateMedication(initial.id, payload);
+        medId = initial.id;
+      } else {
+        medId = store.addMedication(payload).id;
+      }
 
-    // Re-read slots rather than using the render-time snapshot — the medication
-    // write above may have cascaded (it does on deactivation).
-    const plan = planSlotOps(medId, rows, useStore.getState().slots);
-    for (const op of plan) {
-      if (op.kind === 'add-slot') store.addSlot({ time: op.time, items: [op.item] });
-      else if (op.kind === 'update-slot') store.updateSlot(op.slotId, op.patch);
-      else store.deleteSlot(op.slotId);
-    }
+      // Re-read slots rather than using the render-time snapshot — the medication
+      // write above may have cascaded (it does on deactivation).
+      const plan = planSlotOps(medId, rows, useStore.getState().slots);
+      for (const op of plan) {
+        if (op.kind === 'add-slot') store.addSlot({ time: op.time, items: [op.item] });
+        else if (op.kind === 'update-slot') store.updateSlot(op.slotId, op.patch);
+        else store.deleteSlot(op.slotId);
+      }
+    });
     onClose();
   };
 

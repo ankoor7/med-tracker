@@ -676,6 +676,74 @@ describe('computeAdherence — AC3: a window wider than a start date', () => {
   });
 });
 
+// FR-18.1 follow-up, bug 2. `resolveScheduleAsOf` filtered slot items and
+// dropped empty slots but never checked `slot.deleted`, so a slot tombstoned
+// before the snapshot was taken came back as a live occurrence. Every current
+// caller pipes the result through `plannedSlotsForDate`, which filters
+// tombstones again — so nothing double-rendered, and that is exactly why this
+// asserts on `resolveScheduleAsOf` directly rather than through the enumerator.
+
+describe('resolveScheduleAsOf — tombstoned slots are not part of the regimen', () => {
+  const source = {
+    medications: [lam],
+    slots: [slot({ id: 'morning', time: '08:00', items: [{ medId: 'lam', dose: 150 }] })],
+    scheduleSnapshots: [
+      scheduleSnapshot({
+        id: 'snap-1',
+        effectiveFrom: at('2026-07-10', '09:00'),
+        medications: [lam],
+        slots: [
+          slot({ id: 'morning', time: '08:00', items: [{ medId: 'lam', dose: 150 }] }),
+          // Retired before this snapshot was taken, but still carried in it.
+          slot({
+            id: 'evening',
+            time: '20:00',
+            items: [{ medId: 'lam', dose: 150 }],
+            deleted: true,
+          }),
+        ],
+      }),
+    ],
+  };
+
+  it('excludes a tombstoned slot from the resolved schedule', () => {
+    const resolved = resolveScheduleAsOf(source, '2026-07-15', LONDON);
+    expect(resolved.slots.map((s) => s.id)).toEqual(['morning']);
+  });
+
+  it('excludes it without relying on the downstream enumerator to re-filter', () => {
+    // The bug was masked by `plannedSlotsForDate`; assert on the raw result.
+    const resolved = resolveScheduleAsOf(source, '2026-07-15', LONDON);
+    expect(resolved.slots.some((s) => s.deleted)).toBe(false);
+    // ...and the enumerator agrees, so the two layers cannot disagree.
+    expect(
+      plannedSlotsAsOf(source, '2026-07-15', [], LONDON, at('2026-07-15', '23:00')),
+    ).toHaveLength(1);
+  });
+
+  it('still resolves to an empty schedule when every slot is tombstoned', () => {
+    const allGone = {
+      ...source,
+      scheduleSnapshots: [
+        scheduleSnapshot({
+          id: 'snap-empty',
+          effectiveFrom: at('2026-07-10', '09:00'),
+          medications: [lam],
+          slots: [
+            slot({
+              id: 'morning',
+              time: '08:00',
+              items: [{ medId: 'lam', dose: 150 }],
+              deleted: true,
+            }),
+          ],
+        }),
+      ],
+    };
+    expect(resolveScheduleAsOf(allGone, '2026-07-15', LONDON).slots).toEqual([]);
+  });
+});
+
 describe('buildScheduleSnapshot', () => {
   it('deep-copies so later mutation of the live records cannot alter history', () => {
     const liveMed = med({ id: 'lam' });

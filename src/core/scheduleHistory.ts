@@ -63,6 +63,21 @@ function endOfDayExclusive(date: ISODate, zone: IanaZone): Instant {
  * Deterministic ordering for snapshots taken at the same instant: `effectiveFrom`
  * ascending, then `updatedAt`, then `id`. Sync merges do not preserve array
  * order, so resolution must not depend on it.
+ *
+ * The `id` tiebreak is kept deliberately. It used to be load-bearing and wrong:
+ * one snapshot per store action meant a single Save produced several snapshots
+ * in the same millisecond, and this comparator picked between them by UUID — so
+ * a past day could render an intermediate regimen the user never saved. That is
+ * fixed at the source (the store now collapses a bracketed edit into one
+ * snapshot, so a single edit cannot tie with itself), not here.
+ *
+ * What remains is the genuinely ambiguous case: two *different* devices editing
+ * within the same millisecond and later syncing. There is no shared array order
+ * and no happens-before relation to recover, so any choice is arbitrary — but it
+ * must be the SAME arbitrary choice on every device, or two phones would render
+ * different histories from identical data. Ordering by id gives exactly that.
+ * Dropping it would make `sort` fall back to input order, i.e. sync arrival
+ * order, which differs per device. Keep.
  */
 function byEffectiveFrom(a: ScheduleSnapshot, b: ScheduleSnapshot): number {
   if (a.effectiveFrom !== b.effectiveFrom) return a.effectiveFrom - b.effectiveFrom;
@@ -131,6 +146,12 @@ export function resolveScheduleAsOf(
   const resolvedMeds = medications.map(startedAtFor).filter((m) => startedByDate(m, dayEnd));
   const availableIds = new Set(resolvedMeds.map((m) => m.id));
   const resolvedSlots = slots
+    // A slot tombstoned before this snapshot was taken is still carried in the
+    // snapshot's `slots` array; it must not come back as a live occurrence.
+    // Every current caller pipes this into `plannedSlotsForDate`, which filters
+    // tombstones again, so nothing double-rendered — but the contract of this
+    // function is "the regimen in effect", and a deleted slot was not in it.
+    .filter((slot) => !slot.deleted)
     .map((slot) => {
       const items = slot.items.filter((i) => availableIds.has(i.medId));
       return items.length === slot.items.length ? slot : { ...slot, items };
