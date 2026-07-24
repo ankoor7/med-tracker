@@ -1,10 +1,12 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stage 18 is complete** and
-committed **and pushed** — tree clean, HEAD `f67d9e1`, 546 unit tests green,
-typecheck + lint clean. The next work is the **UI rewrite (Stage 19)** — see
-§"Queued next". The former WIP `17e78b7` was validated + reviewer-signed-off this
-session (see §"Snapshot fix — signed off")._
+_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stage 18 AND Stage 19 are
+complete.** Stage 19 (design system on React Aria) landed in 3 units — Unit 1
+tokens+providers+drop-Oura-style, Unit 2 primitives on React Aria, Unit 3 the
+dev-only theme guide — all validated + reviewer-signed-off, 570 unit tests green,
+build succeeds. **The next work is Stage 20 (screen migration)** —
+`specs/stage-20-screen-migration.md`; see §"Queued next". The former WIP `17e78b7`
+was validated + signed off earlier this session (§"Snapshot fix — signed off")._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
@@ -164,13 +166,17 @@ migration and ships the primitives this app needs (`Calendar`, `DateField`/
 
 Three stages, run in order through the Implement→Validate→Review pipeline:
 
-- **Stage 19 — `specs/stage-19-design-system-react-aria.md`.** Foundation:
-  design-token layer for the new theme (light+dark), themed primitives over React
-  Aria replacing `ui.tsx`/`Modal.tsx`/`ConfirmDialog.tsx`/`StatusBadge.tsx`, drop
-  every Oura-style directive, wire `@react-aria/test-utils`, a theme guide. No
-  screen rewrites. Has open questions in §5 (token home, icon set, Tailwind vs
-  React Aria styling) — settle with the user before/early in the stage.
-- **Stage 20 — `specs/stage-20-screen-migration.md`.** Migrate chrome, Today, the
+- **Stage 19 — `specs/stage-19-design-system-react-aria.md`. ✅ DONE.** CSS-custom-
+  property token layer (light+dark, AA), `Button`/`Modal`/`ConfirmDialog` over React
+  Aria (source-compatible exports; `Field`/`Card`/`ColorDot`/`Ring`/`Stat`/
+  `StatusBadge` kept presentational), Oura _style_ directive dropped (data feature
+  intact), Lucide icons, `@react-aria/test-utils` wired, dev-only theme guide at
+  `?themeguide`. §5 decisions settled (CSS-var tokens, Lucide, Tailwind+`data-*`).
+  Two committed transients cleared: the test-utils dep is now consumed; the
+  tokens.css dark-palette duplication remains documented (dual-signal theming; a
+  DRY `var()` indirection can't be verified under jsdom — revisit if a build-level
+  token test is added).
+- **Stage 20 — `specs/stage-20-screen-migration.md`. ← NEXT.** Migrate chrome, Today, the
   merged Meds editor, Events, and the logging dialogs onto the new primitives.
   **Behaviour parity is load-bearing**: every Stage 18 FR must survive (FR-20.2
   lists them); the Stage 18 test suite is the oracle.
@@ -198,7 +204,7 @@ _(That file has not been read yet — confirm it exists and scope the work first
 
 ```
 git status                 # expect clean (everything committed + pushed)
-git log --oneline -10      # expect 17e78b7 at HEAD, pushed
-pnpm typecheck && pnpm lint && pnpm test   # expect green (478 tests)
+git log --oneline -10      # Stage 19 Unit 3 at HEAD, pushed
+pnpm typecheck && pnpm lint && pnpm test   # expect green (570 tests)
 pnpm db:test               # expect 79 pgTAP green (needs local stack up)
 ```
