@@ -3,6 +3,7 @@ dev-dist/
 .claude/
 coverage/
 node_modules/
+.claude/
 pnpm-lock.yaml
 specs/
 files/
