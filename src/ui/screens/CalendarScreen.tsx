@@ -10,6 +10,7 @@ import {
   HOURS_IN_DAY,
   TIME_STEP_MS,
   addDaysToIsoDate,
+  classifyGuardrailBreach,
   clampInstant,
   dayEndInstant,
   dayStartInstant,
@@ -20,6 +21,7 @@ import {
   resolveDraggedInstant,
   roundInstantToStep,
   wallTimeInZone,
+  type GuardrailBreachKind,
   type Instant,
   type Medication,
   type OccurrenceStatus,
@@ -55,6 +57,9 @@ interface GroupMember {
   // or `upcoming`, which is what made all three render as the same dashed
   // block (the FR-18.6 defect this closes).
   assumed: boolean;
+  // Stage 18 FR-18.9(a): guardrail warnings recorded on this member's real log
+  // entry (empty for anything without one, or without a breach).
+  warnings: string[];
 }
 
 // A scheduled slot rendered as a single draggable group. Dragging moves every
@@ -69,6 +74,9 @@ interface CalendarGroup {
   members: GroupMember[];
   hasLogged: boolean; // at least one member has a real log entry
   hasAssumed: boolean; // at least one member is "taken" only by assumption (Stage 18 FR-18.6)
+  hasMissed: boolean; // at least one member is missed (Stage 18 FR-18.9c)
+  hasBreach: boolean; // at least one logged member carries guardrail warnings (Stage 18 FR-18.9a)
+  breachKind: GuardrailBreachKind | null; // classified across all breaching members; null if mixed/unrecognised
   lane: number;
   laneCount: number;
 }
@@ -153,9 +161,13 @@ export function CalendarScreen() {
     for (const slot of planned) {
       const members: GroupMember[] = slot.occurrences.map((occ) => {
         let anchor = occ.scheduledInstant;
+        let warnings: string[] = [];
         if (occ.status === 'taken' && occ.logEntryId) {
           const entry = doseLog.find((e) => e.id === occ.logEntryId);
-          if (entry) anchor = entry.actualInstant;
+          if (entry) {
+            anchor = entry.actualInstant;
+            warnings = entry.warnings;
+          }
         }
         return {
           medId: occ.medId,
@@ -167,9 +179,11 @@ export function CalendarScreen() {
           logEntryId: occ.logEntryId,
           overridden: occ.overridden ?? false,
           assumed: occ.assumed ?? false,
+          warnings,
         };
       });
       if (members.length === 0) continue;
+      const allWarnings = members.flatMap((m) => m.warnings);
       raw.push({
         key: `${slot.slotId}:${slot.scheduledInstant}`,
         slotId: slot.slotId,
@@ -179,6 +193,9 @@ export function CalendarScreen() {
         members,
         hasLogged: members.some((m) => m.logEntryId),
         hasAssumed: members.some((m) => m.status === 'taken' && m.assumed),
+        hasMissed: members.some((m) => m.status === 'missed'),
+        hasBreach: allWarnings.length > 0,
+        breachKind: classifyGuardrailBreach(allWarnings),
       });
     }
     return assignLanes(raw);
@@ -355,6 +372,12 @@ function DoseGroup({
   onLogGroup: (group: CalendarGroup, instant?: Instant) => void;
 }) {
   const [preview, setPreview] = useState<Instant | null>(null); // previewed group anchor
+  // Stage 18 FR-18.9(b): a logged group's drag ceiling is "now" — the drag is
+  // *prevented* from going further, but that alone isn't an explanation. When
+  // the raw pointer position would go past that ceiling, flag it so the block
+  // can say why it stopped, instead of just silently refusing to follow the
+  // pointer.
+  const [futureBlocked, setFutureBlocked] = useState(false);
   const dragRef = useRef<{ startY: number; origin: Instant; moved: boolean } | null>(null);
 
   // The drag range for the group anchor: it can move to the day start, and down
@@ -373,18 +396,30 @@ function DoseGroup({
   const top = instantToDayY(displayAnchor, dayStart, PX_PER_HOUR);
   const wall = wallTimeInZone(displayAnchor, zone);
   const moved = delta !== 0 && preview != null;
-  const anyMissed = group.members.some((m) => m.status === 'missed');
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
     dragRef.current = { startY: e.clientY, origin: group.anchorInstant, moved: false };
     setPreview(group.anchorInstant);
+    setFutureBlocked(false);
   };
   const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
     const d = dragRef.current;
     if (!d) return;
     const deltaY = e.clientY - d.startY;
     if (Math.abs(deltaY) > MOVE_THRESHOLD) d.moved = true;
+    // Where the pointer would put the group ignoring the "can't log in the
+    // future" ceiling, vs. where it's actually allowed to land — the gap
+    // between the two is what makes `futureBlocked` an explanation rather
+    // than a silent stop.
+    const rawTarget = resolveDraggedInstant({
+      originalInstant: d.origin,
+      deltaY,
+      pxPerHour: PX_PER_HOUR,
+      min: dayStart,
+      max: dayEnd,
+    });
+    setFutureBlocked(group.hasLogged && rawTarget > groupMax);
     setPreview(
       resolveDraggedInstant({
         originalInstant: d.origin,
@@ -402,6 +437,7 @@ function DoseGroup({
     const committedAnchor = preview ?? group.anchorInstant;
     const committedDelta = committedAnchor - group.anchorInstant;
     setPreview(null);
+    setFutureBlocked(false);
     if (!d) return;
     if (d.moved) {
       if (group.hasLogged) onRetimeGroup(group, committedDelta);
@@ -431,7 +467,7 @@ function DoseGroup({
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${group.label ?? wall} group at ${wall}: ${summary}. Drag or use arrow keys to re-time the group.`}
+      aria-label={`${group.label ?? wall} group at ${wall}: ${summary}. ${groupAriaStatus(group)}Drag or use arrow keys to re-time the group.`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -454,7 +490,17 @@ function DoseGroup({
           <span className="text-[10px] text-slate-500">· {group.members.length} meds</span>
         )}
         {moved && <span className="text-[10px] text-accent-muted">· moving</span>}
-        <GroupStatusChip group={group} anyMissed={anyMissed} moved={moved} />
+        {futureBlocked && (
+          <span
+            role="status"
+            className="text-[10px] font-semibold text-amber-400"
+            title="Can't log a dose in the future — the drag stops at now"
+          >
+            · can't go past now
+          </span>
+        )}
+        <GroupBreachChip group={group} />
+        <GroupStatusChip group={group} moved={moved} />
       </span>
       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 overflow-hidden">
         {group.members.map((m) => (
@@ -465,33 +511,89 @@ function DoseGroup({
   );
 }
 
-// Stage 18 FR-18.6: three visually distinct border treatments, not one dashed
-// style shared by assumed/missed/upcoming. A real log entry gets a solid
-// border; an assumed-taken group keeps a dashed border but tinted with the
-// "taken" colour (plus the "· assumed" label and the per-member glyph below —
-// never colour alone); anything still unresolved (missed/upcoming) keeps the
-// original neutral dashed style. Extracted so `DoseGroup`'s own branching
-// stays flat.
-function groupBorderClass(group: CalendarGroup): string {
-  if (group.hasLogged) return 'border-slate-700';
-  if (group.hasAssumed) return 'border-dashed border-status-taken/50';
-  return 'border-dashed border-slate-600';
+// Stage 18 FR-18.9(c): accessible-name status word, kept in sync with the
+// visual chips below — read by screen readers even though the chips
+// themselves are non-text glyphs/short labels. Order mirrors `GroupStatusChip`.
+function groupAriaStatus(group: CalendarGroup): string {
+  if (group.hasBreach) {
+    const kindLabel =
+      group.breachKind === 'over-cap'
+        ? 'over-cap'
+        : group.breachKind === 'too-soon'
+          ? 'too-soon'
+          : 'guardrail';
+    return `Logged with a ${kindLabel} guardrail warning. `;
+  }
+  if (group.hasLogged) return 'Logged. ';
+  if (group.hasMissed) return 'Missed, not logged. ';
+  if (group.hasAssumed) return 'Assumed taken on time, not a real log entry. ';
+  return 'Upcoming, not yet logged. ';
 }
 
-// The "· missed"/"· assumed" chip next to a group's time — mutually
-// exclusive, and both suppressed once the group is genuinely logged or being
-// dragged. Extracted from `DoseGroup` to keep its own branching flat.
-function GroupStatusChip({
-  group,
-  anyMissed,
-  moved,
-}: {
-  group: CalendarGroup;
-  anyMissed: boolean;
-  moved: boolean;
-}) {
+// Stage 18 FR-18.9(a): a real log entry that tripped a guardrail (min-interval
+// or over-cap) was previously only visible in History → Dose log — the one
+// screen where a calendar drag can create the conflict is the one screen that
+// hid it. This chip surfaces it directly on the block: a glyph plus a
+// breach-kind label (never colour alone), reusing `classifyGuardrailBreach` so
+// the copy matches the rest of the app (Stage 18 FR-18.10).
+function GroupBreachChip({ group }: { group: CalendarGroup }) {
+  if (!group.hasBreach) return null;
+  const label =
+    group.breachKind === 'over-cap'
+      ? 'over-cap'
+      : group.breachKind === 'too-soon'
+        ? 'too-soon'
+        : 'guardrail';
+  return (
+    <span
+      role="status"
+      className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-400"
+      title={`Guardrail breach: ${label}`}
+      aria-label={`Guardrail breach: ${label}`}
+    >
+      ⚠ {label}
+    </span>
+  );
+}
+
+// Stage 18 FR-18.6/FR-18.9(c): four visually distinct border treatments — a
+// logged breach is the most severe and takes precedence over the plain
+// "logged" style; a real (non-breaching) log entry gets a solid border; an
+// assumed-taken group keeps a dashed border but tinted with the "taken"
+// colour (plus the "· assumed" label and the per-member glyph below — never
+// colour alone); missed gets a thicker dashed, distinctly-coloured border;
+// upcoming — still unresolved, nothing to flag — keeps a plain dotted style
+// so it doesn't read as "missed" from border shape alone. Extracted so
+// `DoseGroup`'s own branching stays flat.
+function groupBorderClass(group: CalendarGroup): string {
+  if (group.hasBreach)
+    return group.hasLogged ? 'border-2 border-red-600' : 'border-dashed border-2 border-red-600';
+  if (group.hasLogged) return 'border-slate-700';
+  if (group.hasAssumed) return 'border-dashed border-status-taken/50';
+  if (group.hasMissed) return 'border-dashed border-2 border-status-missed/70';
+  return 'border-dotted border-slate-600';
+}
+
+// The "· missed"/"· assumed"/"· upcoming" chip next to a group's time —
+// mutually exclusive, and all suppressed once the group is genuinely logged
+// or being dragged. Stage 18 FR-18.9(c): missed and upcoming now carry their
+// own glyph + label (previously upcoming rendered nothing here, so it and
+// missed differed only by the 10px "· missed" text). Extracted from
+// `DoseGroup` to keep its own branching flat.
+function GroupStatusChip({ group, moved }: { group: CalendarGroup; moved: boolean }) {
   if (group.hasLogged || moved) return null;
-  if (anyMissed) return <span className="text-[10px] text-status-missed">· missed</span>;
+  if (group.hasMissed) {
+    return (
+      <span
+        role="status"
+        className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-status-missed"
+        title="Missed — not logged"
+        aria-label="Missed, not logged"
+      >
+        ⚠ missed
+      </span>
+    );
+  }
   if (group.hasAssumed) {
     return (
       <span
@@ -502,7 +604,15 @@ function GroupStatusChip({
       </span>
     );
   }
-  return null;
+  return (
+    <span
+      className="text-[10px] font-normal text-slate-500"
+      title="Upcoming — not yet due or logged"
+      aria-label="Upcoming, not yet logged"
+    >
+      ○ upcoming
+    </span>
+  );
 }
 
 // One medication within a group block: colour dot, name, dose, and a
@@ -527,10 +637,27 @@ function GroupMemberChip({ m }: { m: GroupMember }) {
 
 // Stage 18 FR-18.6: a real log entry gets "✓"; "taken" that is only the
 // assume-on-time policy's fill-in gets a distinct glyph, "◇" — never the same
-// mark, never colour alone. Extracted from `GroupMemberChip` to keep both
+// mark, never colour alone. Stage 18 FR-18.9(a): a logged member that tripped
+// a guardrail gets "⚠" instead, labelled with the breach kind via
+// `classifyGuardrailBreach` so it stays consistent with the group-level chip
+// and the logger dialogs' copy. Extracted from `GroupMemberChip` to keep both
 // functions' branching flat.
 function MemberStatusGlyph({ m }: { m: GroupMember }) {
   if (m.logEntryId) {
+    if (m.warnings.length > 0) {
+      const kind = classifyGuardrailBreach(m.warnings);
+      const label =
+        kind === 'over-cap' ? 'over-cap' : kind === 'too-soon' ? 'too-soon' : 'guardrail';
+      return (
+        <span
+          className="text-[10px] font-semibold text-red-400"
+          title={`Logged — ${label} guardrail breach`}
+          aria-label={`Logged with a ${label} guardrail breach`}
+        >
+          ⚠
+        </span>
+      );
+    }
     return (
       <span
         className="text-[10px] text-status-taken"

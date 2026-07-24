@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import {
   activeStrategy,
   checkGuardrails,
@@ -17,6 +17,7 @@ import { useStore } from '../../store/store';
 import { useScheduleData } from '../lib/useScheduleData';
 import { Button, Field, inputClass } from './ui';
 import { Modal } from './Modal';
+import { TimeTakenField } from './TimeTakenField';
 
 export interface LoggerTarget {
   slotId: string;
@@ -73,12 +74,18 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   );
   // Seed "time taken" from the entry being edited, else a dragged calendar
   // time when given (clamped to ≤ now), else the rounded "now" default.
+  const requestedInstant = target.actualInstant ?? now;
   const [whenStr, setWhenStr] = useState(() =>
     instantToDatetimeLocal(
-      editingEntry ? editingEntry.actualInstant : Math.min(target.actualInstant ?? now, now),
+      editingEntry ? editingEntry.actualInstant : Math.min(requestedInstant, now),
       zone,
     ),
   );
+  // Stage 18 FR-18.9(b)/AC9: a dragged or typed future time is never silently
+  // swapped for "now" — clamp AND explain. An edit of an already-logged entry
+  // never starts future (its stored time is, by construction, in the past),
+  // so this only seeds true for a fresh log with a future dragged instant.
+  const [futureClamped, setFutureClamped] = useState(!editingEntry && requestedInstant > now);
   const [confirmed, setConfirmed] = useState(false);
   const [adjustNext, setAdjustNext] = useState(false);
   const [nextDoseStr, setNextDoseStr] = useState('');
@@ -100,6 +107,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   // Quick presets for the "time taken" control (Stage 11 FR-11.2). Relative
   // nudges count back from the current value and never produce a future time.
   const setWhen = (instant: Instant) => {
+    setFutureClamped(instant > now);
     setWhenStr(instantToDatetimeLocal(Math.min(instant, now), zone));
     setConfirmed(false);
   };
@@ -241,33 +249,16 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           />
         </Field>
 
-        <Field label="Time taken">
-          <input
-            type="datetime-local"
-            step={300}
-            className={inputClass}
-            value={whenStr}
-            onChange={(e) => {
-              setWhenStr(e.target.value);
-              setConfirmed(false);
-            }}
-            aria-label="Time taken"
-          />
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <PresetButton onClick={() => setWhen(now)}>Now</PresetButton>
-            <PresetButton onClick={() => setWhen(target.scheduledInstant)}>Scheduled</PresetButton>
-            <PresetButton onClick={() => nudge(-15)}>−15m</PresetButton>
-            <PresetButton onClick={() => nudge(-30)}>−30m</PresetButton>
-            <PresetButton onClick={() => nudge(-60)}>−1h</PresetButton>
-            <span
-              className={`ml-auto text-xs ${
-                offsetLabel === 'on time' ? 'text-slate-400' : 'text-amber-400'
-              }`}
-            >
-              {offsetLabel}
-            </span>
-          </div>
-        </Field>
+        <TimeTakenField
+          whenStr={whenStr}
+          zone={zone}
+          now={now}
+          scheduledInstant={target.scheduledInstant}
+          offsetLabel={offsetLabel}
+          futureClamped={futureClamped}
+          onSetWhen={setWhen}
+          onNudge={nudge}
+        />
 
         {suggestion && (
           <button
@@ -405,17 +396,5 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
         </div>
       </div>
     </Modal>
-  );
-}
-
-function PresetButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-accent-muted hover:text-slate-100"
-    >
-      {children}
-    </button>
   );
 }

@@ -8,7 +8,7 @@
 // amount is pre-filled from the scheduled/overridden dose and re-validated
 // against the shared `checkGuardrails` before it can be logged.
 
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import {
   MINUTE_MS,
   checkGuardrails,
@@ -23,6 +23,7 @@ import {
 import { useStore } from '../../store/store';
 import { Button, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from './ui';
 import { Modal } from './Modal';
+import { TimeTakenField } from './TimeTakenField';
 
 export interface GroupLoggerMember {
   medId: string;
@@ -60,9 +61,14 @@ export function GroupLogger({
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
   const now = useMemo(() => roundInstantToStep(Date.now()), []);
 
+  const requestedInstant = target.actualInstant ?? now;
   const [whenStr, setWhenStr] = useState(() =>
-    instantToDatetimeLocal(Math.min(target.actualInstant ?? now, now), zone),
+    instantToDatetimeLocal(Math.min(requestedInstant, now), zone),
   );
+  // Stage 18 FR-18.9(b)/AC9: a dragged or typed time in the future is never
+  // silently swapped for "now" — it's clamped AND explained. Seeded true when
+  // the incoming (e.g. dragged-on-the-calendar) time was already future.
+  const [futureClamped, setFutureClamped] = useState(requestedInstant > now);
   const [rows, setRows] = useState<Record<string, Row>>(() =>
     Object.fromEntries(
       target.members.map((m) => [
@@ -76,6 +82,7 @@ export function GroupLogger({
   const offsetLabel = describeOffset(actualInstant, target.scheduledInstant);
 
   const setWhen = (instant: Instant) => {
+    setFutureClamped(instant > now);
     setWhenStr(instantToDatetimeLocal(Math.min(instant, now), zone));
     // A changed time can flip a guardrail (per-day caps), so re-confirm.
     setRows((prev) =>
@@ -132,28 +139,16 @@ export function GroupLogger({
           whole group and adjust each amount below.
         </p>
 
-        <Field label="Time taken">
-          <input
-            type="datetime-local"
-            step={300}
-            className={inputClass}
-            value={whenStr}
-            onChange={(e) => setWhen(datetimeLocalToInstant(e.target.value, zone))}
-            aria-label="Time taken"
-          />
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <PresetButton onClick={() => setWhen(now)}>Now</PresetButton>
-            <PresetButton onClick={() => setWhen(target.scheduledInstant)}>Scheduled</PresetButton>
-            <PresetButton onClick={() => nudge(-15)}>−15m</PresetButton>
-            <PresetButton onClick={() => nudge(-30)}>−30m</PresetButton>
-            <PresetButton onClick={() => nudge(-60)}>−1h</PresetButton>
-            <span
-              className={`ml-auto text-xs ${offsetLabel === 'on time' ? 'text-slate-400' : 'text-amber-400'}`}
-            >
-              {offsetLabel}
-            </span>
-          </div>
-        </Field>
+        <TimeTakenField
+          whenStr={whenStr}
+          zone={zone}
+          now={now}
+          scheduledInstant={target.scheduledInstant}
+          offsetLabel={offsetLabel}
+          futureClamped={futureClamped}
+          onSetWhen={setWhen}
+          onNudge={nudge}
+        />
 
         <div className="flex flex-col divide-y divide-slate-800 rounded-md border border-slate-800">
           {evaluated.map(({ member, med, row, dose, overCap, warnings }) => (
@@ -236,17 +231,5 @@ export function GroupLogger({
         </div>
       </div>
     </Modal>
-  );
-}
-
-function PresetButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-accent-muted hover:text-slate-100"
-    >
-      {children}
-    </button>
   );
 }

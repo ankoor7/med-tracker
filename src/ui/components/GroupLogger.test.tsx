@@ -6,6 +6,7 @@ import { GroupLogger, type GroupLoggerTarget } from './GroupLogger';
 import { useStore } from '../../store/store';
 import { med, settings, logEntry } from '../../test/fixtures';
 import { withFixedClock } from '../../test/fixedClock';
+import { describeFutureClampContract } from '../../test/futureClampHelpers';
 
 const ZONE = 'Europe/London';
 const NOW = Date.UTC(2026, 5, 15, 9, 0); // 10:00 London (BST)
@@ -124,3 +125,21 @@ describe('GroupLogger — breach-kind-aware acknowledgement copy (FR-18.10)', ()
     expect(screen.getByRole('button', { name: /log over-cap group/i })).toBeInTheDocument();
   });
 });
+
+// Stage 18 FR-18.9(b)/AC9: a future dragged time must never be silently
+// swapped for "now" — it's clamped to now AND the swap is explained. Before
+// this fix, `Math.min(target.actualInstant ?? now, now)` at mount (and the
+// same clamp inside `setWhen`) discarded a future dragged time with no trace.
+// The four cases live once, in `describeFutureClampContract`, shared with
+// DoseLogger.test.tsx.
+describeFutureClampContract(
+  'GroupLogger',
+  (actualInstant) => {
+    const target: GroupLoggerTarget = {
+      ...baseTarget(),
+      ...(actualInstant != null ? { actualInstant } : {}),
+    };
+    render(<GroupLogger target={target} onClose={() => {}} />);
+  },
+  NOW,
+);
