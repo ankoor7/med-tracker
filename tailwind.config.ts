@@ -1,50 +1,78 @@
 import type { Config } from 'tailwindcss';
 
-// Design tokens — Oura-inspired calm dark theme (Stage 16 redesign).
+// Design tokens — Stage 19 minimalistic, clean theme.
 //
-// The whole app is built on Tailwind's `slate-*` utilities, so the cheapest way
-// to re-skin every screen cohesively is to remap the slate ramp itself to a
-// deep, cool, near-black palette (Oura's signature surface) with soft mid-tones.
-// Components then layer rounded cards, pill buttons, big readouts, and a circular
-// ring gauge on top.
+// Colour, radius and shadow values are NOT hardcoded here: they read CSS
+// custom properties defined in `src/ui/tokens.css` (the token layer), which
+// is theme-aware (`:root` = light, `:root[data-theme="dark"]` = dark, with
+// `prefers-color-scheme` as the initial signal). That keeps light/dark to a
+// single variable swap while every existing `slate-*`/`accent-*`/`status-*`
+// utility class across the app keeps resolving unchanged — see tokens.css's
+// documentation header for the full rationale and the WCAG-AA contrast pairs
+// each token was chosen to satisfy.
+//
+// Each token is wired via `withOpacityValue`, not a bare `var(--x)`: the
+// existing screens use Tailwind's opacity-modifier syntax extensively
+// (`bg-accent/15`, `bg-slate-900/80`, `text-status-taken/90`, …). Tailwind
+// can only apply an opacity modifier to a colour value in a format it
+// controls (`rgb(var(--x) / <alpha-value>)`); a bare hex-string variable
+// makes it silently drop the whole utility. tokens.css therefore stores
+// each colour as an `R G B` channel triple for this helper to consume.
+function withOpacityValue(variable: string): string {
+  // The tailwindcss type definitions don't model Tailwind's documented
+  // "opacity-aware color function" pattern (a function is valid at runtime;
+  // the shipped types only allow strings) — cast at the boundary rather than
+  // widen `Config`'s type and lose real type-checking everywhere else.
+  const fn = ({ opacityValue }: { opacityValue?: string }) => {
+    if (opacityValue === undefined) {
+      return `rgb(var(${variable}))`;
+    }
+    return `rgb(var(${variable}) / ${opacityValue})`;
+  };
+  return fn as unknown as string;
+}
+
 const config: Config = {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        // Deep, cool greyscale — remapped so existing `slate-*` classes adopt
-        // the new look automatically. 950 = app base, 900 = cards, 800 = borders.
+        // Neutral ramp — remapped so existing `slate-*` classes adopt the
+        // theme automatically. By convention within this ramp: 950/900 are
+        // surfaces (app background / cards), 800 is the border tone, and
+        // 50-500 run from primary text down to muted text. Each theme's
+        // tokens.css block inverts the concrete hex values so this ordering
+        // holds in both light and dark.
         slate: {
-          50: '#f3f6f9',
-          100: '#e6ecf2',
-          200: '#cbd5e0',
-          300: '#a7b4c4',
-          400: '#7f8da0', // secondary text
-          500: '#5c6979', // muted text
-          600: '#3c4658',
-          700: '#28313f',
-          800: '#1b2330',
-          900: '#111722',
-          950: '#0a0e16',
+          50: withOpacityValue('--sd-slate-50-rgb'),
+          100: withOpacityValue('--sd-slate-100-rgb'),
+          200: withOpacityValue('--sd-slate-200-rgb'),
+          300: withOpacityValue('--sd-slate-300-rgb'),
+          400: withOpacityValue('--sd-slate-400-rgb'),
+          500: withOpacityValue('--sd-slate-500-rgb'),
+          600: withOpacityValue('--sd-slate-600-rgb'),
+          700: withOpacityValue('--sd-slate-700-rgb'),
+          800: withOpacityValue('--sd-slate-800-rgb'),
+          900: withOpacityValue('--sd-slate-900-rgb'),
+          950: withOpacityValue('--sd-slate-950-rgb'),
         },
-        // Soft teal/cyan accent — calm, Oura-like.
+        // Single calm accent — used for primary actions and emphasis.
         accent: {
-          DEFAULT: '#2cb1a6',
-          fg: '#04120f',
-          muted: '#7fe7dc',
+          DEFAULT: withOpacityValue('--sd-accent-rgb'),
+          fg: withOpacityValue('--sd-accent-fg-rgb'),
+          muted: withOpacityValue('--sd-accent-muted-rgb'),
         },
-        // Status colours, softened toward pastels for the calmer palette.
+        // Status colours — kept legible (AA) against both themes' surfaces.
         status: {
-          taken: '#4ade80', // green-400
-          due: '#fbbf24', // amber-400
-          missed: '#fb7185', // rose-400
-          upcoming: '#7f8da0',
+          taken: withOpacityValue('--sd-status-taken-rgb'),
+          due: withOpacityValue('--sd-status-due-rgb'),
+          missed: withOpacityValue('--sd-status-missed-rgb'),
+          upcoming: withOpacityValue('--sd-status-upcoming-rgb'),
         },
       },
       fontFamily: {
+        // Clean system sans — no bespoke rounded-font emulation.
         sans: [
-          'ui-rounded',
-          '"SF Pro Rounded"',
           '-apple-system',
           'BlinkMacSystemFont',
           '"Segoe UI"',
@@ -54,11 +82,11 @@ const config: Config = {
         ],
       },
       borderRadius: {
-        '2xl': '1.1rem',
-        '3xl': '1.5rem',
+        '2xl': 'var(--sd-radius-lg)',
+        '3xl': 'var(--sd-radius-xl)',
       },
       boxShadow: {
-        soft: '0 1px 0 0 rgba(255,255,255,0.04) inset, 0 12px 30px -18px rgba(0,0,0,0.7)',
+        soft: 'var(--sd-shadow-soft)',
       },
     },
   },

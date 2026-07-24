@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
+import { Clock, Calendar as CalendarIcon, Pill, Activity, BarChart3 } from 'lucide-react';
 import { useStore } from '../store/store';
 import { parseTakeParam } from '../reminders/push';
 import { RemindersProvider } from '../reminders/context';
@@ -16,50 +17,20 @@ import { HistoryScreen } from './screens/HistoryScreen';
 const TABS = ['Today', 'Calendar', 'Meds', 'Events', 'History'] as const;
 type Tab = (typeof TABS)[number];
 
-// Minimal line icons (Oura-style) so the bottom nav reads at a glance.
+// Stage 19 FR-19.5/decision 2: a single, low-weight Lucide icon set (not
+// hand-drawn SVGs) so the bottom nav reads at a glance with one consistent
+// stroke weight — self-contained, tree-shakeable, no runtime CDN fetch.
+const TAB_ICONS: Record<Tab, typeof Clock> = {
+  Today: Clock,
+  Calendar: CalendarIcon,
+  Meds: Pill,
+  Events: Activity,
+  History: BarChart3,
+};
+
 function TabIcon({ tab }: { tab: Tab }) {
-  const common = {
-    width: 22,
-    height: 22,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.8,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    'aria-hidden': true,
-  };
-  const paths: Record<Tab, ReactNode> = {
-    Today: (
-      <>
-        <circle cx="12" cy="12" r="9" />
-        <path d="M12 7.5V12l3 2" />
-      </>
-    ),
-    Calendar: (
-      <>
-        <rect x="3.5" y="4.5" width="17" height="16" rx="2.5" />
-        <path d="M3.5 9h17M8 3v3M16 3v3" />
-      </>
-    ),
-    // The pill now carries a clock hand: this tab owns both the medication and
-    // the times it is taken at.
-    Meds: (
-      <>
-        <rect x="2.5" y="8" width="13" height="8" rx="4" />
-        <path d="M9 8v8" />
-        <circle cx="18" cy="16" r="4.5" />
-        <path d="M18 13.8V16l1.5 1" />
-      </>
-    ),
-    Events: <path d="M3 13h4l2.5 6 5-15L17 13h4" />,
-    History: (
-      <>
-        <path d="M5 20V10M12 20V4M19 20v-7" />
-      </>
-    ),
-  };
-  return <svg {...common}>{paths[tab]}</svg>;
+  const Icon = TAB_ICONS[tab];
+  return <Icon width={22} height={22} strokeWidth={1.8} aria-hidden />;
 }
 
 export default function App() {

@@ -2,7 +2,7 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
-// Oura-style: pill buttons, soft surfaces, calm accents.
+// Stage 19 minimalistic theme: pill buttons, soft surfaces, calm accents.
 const VARIANTS: Record<Variant, string> = {
   primary: 'bg-accent text-accent-fg hover:brightness-110 disabled:opacity-50',
   secondary: 'bg-slate-800/80 text-slate-100 hover:bg-slate-700 disabled:opacity-50',
@@ -74,7 +74,7 @@ export function ColorDot({ color }: { color: string }) {
 }
 
 /**
- * Circular progress ring — the signature Oura readout. Pure SVG; `value` is
+ * Circular progress ring — a calm, glanceable readout. Pure SVG; `value` is
  * 0..1. Renders a faint track plus a colored arc, with optional centered
  * content (a big number + label).
  */
@@ -136,7 +136,7 @@ export function Ring({
   );
 }
 
-/** Big calm numeric readout with a small label underneath (Oura stat style). */
+/** Big calm numeric readout with a small label underneath. */
 export function Stat({
   value,
   label,

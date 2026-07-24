@@ -1,12 +1,10 @@
+@import './tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
-  :root {
-    color-scheme: dark;
-  }
-
   html,
   body,
   #root {
@@ -14,18 +12,16 @@
   }
 
   body {
-    @apply text-slate-100 antialiased;
-    /* Calm Oura-style depth: a soft cool gradient over near-black, fixed so it
-       doesn't scroll with content. */
-    background-color: #0a0e16;
-    background-image:
-      radial-gradient(120% 80% at 50% -10%, rgba(44, 177, 166, 0.12), transparent 60%),
-      radial-gradient(100% 60% at 100% 0%, rgba(99, 102, 241, 0.08), transparent 55%),
-      linear-gradient(180deg, #0c111b 0%, #0a0e16 42%);
-    background-attachment: fixed;
+    /* Flat, minimalistic surface — token-driven so it flips with the theme. */
+    @apply bg-slate-950 text-slate-100 antialiased;
   }
 
-  /* Accessibility: visible focus + reduced motion (NFR-Accessibility). */
+  /* Accessibility: visible focus (NFR-Accessibility), driven by the
+     --sd-accent-muted / --sd-slate-950 tokens via the `accent-muted` and
+     `slate-950` Tailwind colors, so it stays theme-correct automatically.
+     Reduced motion is handled by tokens.css zeroing the --sd-duration-*
+     tokens, plus the blanket rule below for raw transition/animation
+     durations that don't yet read those tokens. */
   :focus-visible {
     @apply outline-none ring-2 ring-accent-muted ring-offset-2 ring-offset-slate-950;
   }
