@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { isBackendConfigured } from '../config';
 import {
   currentAccount,
   onAuthStateChange,
@@ -22,8 +23,14 @@ export function useAuth(): UseAuth {
   const [ready, setReady] = useState(false);
 
   // Resolve the initial session, then let GoTrue drive subsequent changes
-  // (sign-in/out and automatic token refresh) via onAuthStateChange.
+  // (sign-in/out and automatic token refresh) via onAuthStateChange. Skipped
+  // entirely when no backend is configured, since getSupabase() throws in
+  // that case (AccountPanel already renders its own "sync is off" copy).
   useEffect(() => {
+    if (!isBackendConfigured()) {
+      setReady(true);
+      return;
+    }
     let live = true;
     void (async () => {
       const acct = await currentAccount().catch(() => null);
