@@ -1,10 +1,10 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Written 2026-07-23. Branch: `stage-18-ux-hardening`. Everything is committed; latest
-local HEAD `b11bedc` (spec-doc commits `1d162b5`/`b11bedc` are ahead of the last
-push at `17e78b7` — push before closing the session). The former WIP commit
-`17e78b7` is now **validated + reviewer-signed-off** (see §"Snapshot fix — signed
-off")._
+_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stage 18 is complete** and
+committed **and pushed** — tree clean, HEAD `f67d9e1`, 546 unit tests green,
+typecheck + lint clean. The next work is the **UI rewrite (Stage 19)** — see
+§"Queued next". The former WIP `17e78b7` was validated + reviewer-signed-off this
+session (see §"Snapshot fix — signed off")._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
@@ -37,7 +37,7 @@ historical record of its authoring state — that is expected; the sign-off is h
 
 ---
 
-## Committed & pushed (branch `stage-18-ux-hardening`, HEAD `17e78b7`)
+## Committed (branch `stage-18-ux-hardening`, HEAD `f67d9e1`) — Stage 18 COMPLETE
 
 | Commit    | FR / kind   | What                                                                      |
 | --------- | ----------- | ------------------------------------------------------------------------- |
@@ -50,39 +50,43 @@ historical record of its authoring state — that is expected; the sign-off is h
 | `5f5554e` | 18.6        | Assumed vs logged doses made distinguishable                              |
 | `21fb651` | 18.12       | Merge the Meds and Schedule tabs                                          |
 | `8e2a6de` | docs        | This handoff + the orchestrator playbook                                  |
-| `17e78b7` | 18.1 fu     | **WIP** — snapshot collapse + tombstone filter (see §Unfinished work)     |
+| `17e78b7` | 18.1 fu     | Snapshot collapse + tombstone filter — **validated + signed off**         |
+| `90bf4a1` | 18.7 + 18.8 | Medication save validation (no-empty-schedule, dup names, numerics, cap)  |
+| `b82cc61` | 18.10       | Stop raw-id leaks; breach-accurate copy; jargon hints                     |
+| `f67d9e1` | 18.9        | Calendar: on-surface breaches, future-drag explained, state legibility    |
 
-The FR-18.1 structural fix (past days must render the regimen as it was _then_,
-not the current one) is the spine of the stage and is done. FR-18.12 (tab merge)
-is a new FR added mid-stage per a product decision — see spec §11.
+**Stage 18 is complete — every FR (18.1–18.12) is implemented, validated
+(Playwright + per-rule mutation audit), reviewer-signed-off, and fallow-clean.**
+The FR-18.1 structural fix (past days render the regimen as it was _then_) is the
+spine; FR-18.12 (tab merge) was added mid-stage per a product decision (spec §11).
+The last three FRs went through the full pipeline this session on 2026-07-24.
+(Note: local HEAD is ahead of the last push — push before closing; the user's own
+`2f04937 react-aria skills` commit sits in the history too.)
 
 ---
 
-## Remaining FRs (spec §10 order)
+## Remaining FRs — none
 
-The merged editor (FR-18.12) is now the home for the next three, so they land there:
+All Stage 18 FRs are done. The last four (FR-18.7, FR-18.8, FR-18.10, FR-18.9)
+were completed this session through the full Implement→Validate→Review pipeline:
 
-1. **FR-18.7 — a medication must not be silently left unscheduled/invisible.**
-   Largely handled by the merge (adding + scheduling are one flow), BUT a real gap
-   remains: `MedicationEditor.tsx` `canSave` uses `rows.some(...)`, vacuously false
-   at `rows.length === 0`, so a medication CAN still be saved with no times —
-   mitigated only by a passive warning. Decide: is the warning enough, or block it?
-2. **FR-18.8 — form validation.** Duplicate medication names, negative/zero
-   numerics, and daily-total vs `maxDailyDose`. The daily-total check is now trivial
-   because one component holds every slot dose _and_ the cap (was impossible across
-   the old split).
-3. **FR-18.10 — raw-id leak** carried into `SlotEditor.tsx` (a reviewer already
-   fixed one occurrence there; check for others), guardrail-button copy ("Log
-   over-cap dose" fires for min-interval breaches too), and inline explanations for
-   jargon (half-life, min interval) following the "timing-sensitive" pattern.
-4. **FR-18.9 — calendar** (independent of the merge): surface guardrail breaches
-   on the calendar surface itself; fix the silent future-drag clamp in
-   `GroupLogger.tsx` (dragging a future dose silently substitutes "now"); make
-   missed / upcoming / assumed visually distinct.
+- **FR-18.7 + FR-18.8** (`90bf4a1`): decided to **block** (not just warn) a
+  save with zero scheduled times — no PRN/as-needed concept exists in the model,
+  so an unscheduled med would be invisible; validation lives in a pure core
+  `validateMedication()` (duplicate names, non-positive numerics, daily-total vs
+  cap), the editor only renders the messages.
+- **FR-18.10** (`b82cc61`): fixed **9** raw-id fallback sites (not just the two in
+  the spec), added additive core `classifyGuardrailBreach`/`guardrailAckLabel` so
+  breach copy is accurate (also fixed the same hardcoded "over-cap" tag in the
+  History dose-log row), and added jargon hints via a `Field hint` prop.
+- **FR-18.9** (`f67d9e1`): calendar breach chips, future-retime now explained
+  (clamp-to-now kept for clinical safety, but surfaced in both loggers on every
+  future-producing path), and missed/upcoming/assumed made distinct by border
+  style + glyph + accessible name (extends FR-18.6). Extracted `TimeTakenField`.
 
-Spec §7 open questions are all settled and marked in the spec (assume-taken stays
-on with distinct rendering; on-time window is global default 60 min; snapshots
-approach = (b); tabs merge = yes → FR-18.12).
+Spec §7 open questions were all settled earlier (assume-taken on with distinct
+rendering; on-time window global default; snapshots approach (b); tabs merged →
+FR-18.12).
 
 ---
 
