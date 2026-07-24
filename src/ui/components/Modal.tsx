@@ -1,51 +1,59 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import {
+  ModalOverlay,
+  Modal as RACModal,
+  Dialog,
+  Heading,
+  Button as RACButton,
+} from 'react-aria-components';
 
 interface ModalProps {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  /**
+   * ARIA role for the underlying dialog. Defaults to 'dialog'; ConfirmDialog
+   * passes 'alertdialog' for the safety-critical confirmation pattern
+   * (Stage 18 FR-18.5). Additive — the {title, onClose, children} call
+   * contract is unchanged.
+   */
+  role?: 'dialog' | 'alertdialog';
 }
 
-/** Lightweight accessible modal: focus-traps loosely, closes on Esc / backdrop. */
-export function Modal({ title, onClose, children }: ModalProps) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    ref.current?.focus();
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
+/**
+ * Accessible modal built on React Aria Components (Stage 19 FR-19.3). React
+ * Aria supplies the focus trap, scroll-lock, Escape-to-dismiss and
+ * outside-click behaviour the hand-rolled version used to carry; `onClose`
+ * is wired to both explicit dismissal (the ✕) and `onOpenChange`
+ * (Escape / backdrop), preserving the previous behaviour.
+ */
+export function Modal({ title, onClose, children, role = 'dialog' }: ModalProps) {
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 sm:items-center sm:p-4"
-      onClick={onClose}
+    <ModalOverlay
+      isOpen
+      isDismissable
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-0 data-[entering]:animate-none sm:items-center sm:p-4"
     >
-      <div
-        ref={ref}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-900/95 p-5 shadow-soft outline-none backdrop-blur-md sm:rounded-3xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            className="rounded-full px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
-          >
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
+      <RACModal className="max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-white/10 bg-slate-900/95 p-5 shadow-soft outline-none backdrop-blur-md sm:rounded-3xl">
+        <Dialog role={role} className="outline-none">
+          <div className="mb-4 flex items-center justify-between">
+            <Heading slot="title" className="text-lg font-semibold">
+              {title}
+            </Heading>
+            <RACButton
+              onPress={onClose}
+              aria-label="Close"
+              className="rounded-full px-2 py-1 text-slate-400 outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent-muted data-[hovered]:bg-slate-800 data-[hovered]:text-slate-100"
+            >
+              ✕
+            </RACButton>
+          </div>
+          {children}
+        </Dialog>
+      </RACModal>
+    </ModalOverlay>
   );
 }

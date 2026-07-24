@@ -99,7 +99,7 @@ describe('HistoryScreen — dose correction (Stage 18 FR-18.2)', () => {
     const dialog = openDeleteConfirm(doseLogRow());
     expect(dialog).toHaveTextContent(/delete this logged dose/i);
     cancelDialog(dialog);
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(useStore.getState().doseLog.filter((e) => !e.deleted)).toHaveLength(1);
 
     confirmDeleteDose(openDeleteConfirm(doseLogRow()));

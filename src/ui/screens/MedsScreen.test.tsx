@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MedsScreen } from './MedsScreen';
 import { TodayScreen } from './TodayScreen';
@@ -134,6 +134,15 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Unmount, then flush React Aria's deferred overlay-teardown timers before
+  // dropping the fake clock. React Aria keeps a module-level focus-scope stack;
+  // if a modal's teardown timers never run, a stale scope leaks into the next
+  // test and suppresses the new dialog's auto-focus. Flushing here keeps each
+  // test's focus behaviour isolated.
+  cleanup();
+  act(() => {
+    vi.runOnlyPendingTimers();
+  });
   vi.useRealTimers();
 });
 
@@ -154,7 +163,7 @@ describe('Meds tab — destructive actions (FR-18.5)', () => {
     openDeleteConfirm(medRow('Lamotrigine'));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(useStore.getState().medications.find((m) => m.id === 'a')?.deleted).toBeFalsy();
   });
 
@@ -186,7 +195,7 @@ describe('Meds tab — destructive actions (FR-18.5)', () => {
 
     // No confirmation needed for the safe, reversible path — takes effect
     // immediately as a soft `active: false`, not a tombstone.
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     const updated = useStore.getState().medications.find((m) => m.id === 'a')!;
     expect(updated.active).toBe(false);
     expect(updated.deleted).toBeFalsy();
@@ -626,7 +635,7 @@ describe('Meds tab — Stage 16 change records are unchanged by the merge (AC14)
 });
 
 describe('Meds tab — keyboard and accessibility', () => {
-  it('the whole surface is reachable by keyboard: view switch, add, edit, save', () => {
+  it('the whole surface is reachable by keyboard: view switch, add, edit, save', async () => {
     render(<MedsScreen />);
 
     const byTime = screen.getByRole('button', { name: 'By time' });
@@ -642,11 +651,17 @@ describe('Meds tab — keyboard and accessibility', () => {
     expect(byTime).toHaveAttribute('aria-pressed', 'false');
 
     // The editor opens focused, so a keyboard user lands inside it, and Escape
-    // closes it again without a mouse.
+    // closes it again without a mouse. React Aria moves focus onto the dialog
+    // container across a couple of async ticks after the overlay mounts;
+    // `advanceTimersByTimeAsync` flushes those chained timers/microtasks.
     const dialog = openMedEditor('Lamotrigine');
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50);
+    });
     expect(dialog).toHaveFocus();
     expect(within(dialog).getByLabelText('Time for dose 1')).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: 'Escape' });
+    // Escape is handled by the dialog's keydown listener (focus is inside it).
+    fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 

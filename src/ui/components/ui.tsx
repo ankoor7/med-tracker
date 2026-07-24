@@ -1,26 +1,58 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { Button as RACButton, type ButtonProps as RACButtonProps } from 'react-aria-components';
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
 // Stage 19 minimalistic theme: pill buttons, soft surfaces, calm accents.
+// Interaction states are driven by React Aria's `data-*` attributes
+// (`data-[hovered]`, `data-[pressed]`, `data-[focus-visible]`) rather than
+// CSS pseudo-classes, so hover/press/focus stay consistent across mouse,
+// touch and keyboard (FR-19.4). `disabled:` still resolves because React
+// Aria renders the native `disabled` attribute when `isDisabled` is set.
 const VARIANTS: Record<Variant, string> = {
-  primary: 'bg-accent text-accent-fg hover:brightness-110 disabled:opacity-50',
-  secondary: 'bg-slate-800/80 text-slate-100 hover:bg-slate-700 disabled:opacity-50',
-  ghost: 'text-slate-300 hover:bg-slate-800/70',
-  danger: 'bg-status-missed/90 text-slate-950 hover:bg-status-missed disabled:opacity-50',
+  primary: 'bg-accent text-accent-fg data-[hovered]:brightness-110 disabled:opacity-50',
+  secondary: 'bg-slate-800/80 text-slate-100 data-[hovered]:bg-slate-700 disabled:opacity-50',
+  ghost: 'text-slate-300 data-[hovered]:bg-slate-800/70',
+  danger: 'bg-status-missed/90 text-slate-950 data-[hovered]:bg-status-missed disabled:opacity-50',
 };
 
+// Visible keyboard focus via the focus-ring token (accent-muted) plus an
+// offset against the surface, shown only for keyboard focus (`data-[focus-visible]`).
+const FOCUS_RING =
+  'outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent-muted data-[focus-visible]:ring-offset-2 data-[focus-visible]:ring-offset-slate-950';
+
+// A handful of props React Aria re-types with its own (broader) event
+// signatures. Take those from React Aria's `ButtonProps` and everything else
+// from the DOM attributes, so the merged type spreads onto `RACButton`
+// without casts while staying source-compatible with every call site (none
+// of which read these handlers' event objects).
+type RACOverridden = 'onClick' | 'onFocus' | 'onBlur' | 'onKeyDown' | 'onKeyUp' | 'value';
+type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, RACOverridden> &
+  Pick<RACButtonProps, RACOverridden> & { variant?: Variant };
+
+/**
+ * Shared button, reimplemented over React Aria's `Button` (Stage 19 FR-19.3)
+ * while keeping the previous `ButtonHTMLAttributes` call surface source-compatible:
+ * screens pass `onClick`, `disabled`, `className`, `type`, `aria-*` etc. unchanged.
+ * `disabled` is mapped to React Aria's `isDisabled`.
+ */
 export function Button({
   variant = 'primary',
   className = '',
+  disabled,
+  type = 'button',
+  children,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant }) {
+}: ButtonProps) {
   return (
-    <button
-      type="button"
-      className={`rounded-full px-4 py-2 text-sm font-semibold transition-[background-color,filter,opacity] disabled:cursor-not-allowed ${VARIANTS[variant]} ${className}`}
+    <RACButton
+      type={type}
+      isDisabled={disabled}
+      className={`rounded-full px-4 py-2 text-sm font-semibold transition-[background-color,filter,opacity] disabled:cursor-not-allowed data-[pressed]:scale-[0.98] ${FOCUS_RING} ${VARIANTS[variant]} ${className}`}
       {...props}
-    />
+    >
+      {children}
+    </RACButton>
   );
 }
 

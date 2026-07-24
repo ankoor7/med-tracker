@@ -19,10 +19,15 @@ export function setDoseValue(dialog: HTMLElement, value: string): void {
   fireEvent.change(within(dialog).getByLabelText('Dose'), { target: { value } });
 }
 
-/** Click a row's "Delete" action and return the confirmation dialog. */
+/**
+ * Click a row's "Delete" action and return the confirmation dialog. The
+ * ConfirmDialog renders as role="alertdialog" (Stage 19 FR-19.3), the WAI-ARIA
+ * pattern for a consequential-action confirmation, distinct from the plain
+ * role="dialog" of the DoseLogger/editor modals.
+ */
 export function openDeleteConfirm(row: HTMLElement): HTMLElement {
   fireEvent.click(within(row).getByRole('button', { name: 'Delete' }));
-  return screen.getByRole('dialog');
+  return screen.getByRole('alertdialog');
 }
 
 /** Dismiss an open confirmation dialog without confirming. */

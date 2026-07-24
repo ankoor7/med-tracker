@@ -352,7 +352,7 @@ describe('TodayScreen', () => {
 
       // Cancelling performs no mutation.
       cancelDialog(dialog);
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
       expect(activeLog()).toHaveLength(1);
 
       // Confirming tombstones the entry — it stops counting toward adherence,
