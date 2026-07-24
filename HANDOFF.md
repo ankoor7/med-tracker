@@ -1,12 +1,13 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stage 18 AND Stage 19 are
-complete.** Stage 19 (design system on React Aria) landed in 3 units — Unit 1
-tokens+providers+drop-Oura-style, Unit 2 primitives on React Aria, Unit 3 the
-dev-only theme guide — all validated + reviewer-signed-off, 570 unit tests green,
-build succeeds. **The next work is Stage 20 (screen migration)** —
-`specs/stage-20-screen-migration.md`; see §"Queued next". The former WIP `17e78b7`
-was validated + signed off earlier this session (§"Snapshot fix — signed off")._
+_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stages 18, 19 AND 20 are
+complete.** Stage 20 (screen migration) landed in 5 units — U1 chrome+nav (React
+Aria Tabs), U2 Today, U3 the merged Meds editor, U4 Events, U5 logging dialogs +
+panels — all validated + reviewer-signed-off, 585 unit tests green, build succeeds,
+fallow-clean. **The next work is Stage 21 (dashboards + calendar)** —
+`specs/stage-21-dashboards-calendar.md`, the highest-visual-risk stage with
+legibility as the explicit acceptance bar. The former WIP `17e78b7` was validated +
+signed off earlier this session (§"Snapshot fix — signed off")._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
@@ -176,11 +177,18 @@ Three stages, run in order through the Implement→Validate→Review pipeline:
   tokens.css dark-palette duplication remains documented (dual-signal theming; a
   DRY `var()` indirection can't be verified under jsdom — revisit if a build-level
   token test is added).
-- **Stage 20 — `specs/stage-20-screen-migration.md`. ← NEXT.** Migrate chrome, Today, the
-  merged Meds editor, Events, and the logging dialogs onto the new primitives.
-  **Behaviour parity is load-bearing**: every Stage 18 FR must survive (FR-20.2
-  lists them); the Stage 18 test suite is the oracle.
-- **Stage 21 — `specs/stage-21-dashboards-calendar.md`.** History dashboards +
+- **Stage 20 — `specs/stage-20-screen-migration.md`. ✅ DONE.** 5 units: U1 chrome +
+  bottom nav → React Aria `Tabs` (root-caused a recurring "no tab id" console.error
+  to JSX order — `TabList` before `TabPanels`); U2 Today (token cleanup — already on
+  the primitives); U3 the merged Meds editor onto `Form`/`NumberField`/`TimeField`/
+  `Select` with FR-18.8 validation as accessible `FieldError`s (FR-20.4), AC14
+  change-records mutation-proven; U4 Events (added its first test file + shared
+  `ModalFormFooter`); U5 logging dialogs + panels (new `DateField`/`dateValue`,
+  `NumberField` doses; caught a `RemindersPanel` NaN-leak). New shared primitives:
+  `fields.tsx`, `timeValue.ts`, `dateValue.ts`, `ModalFormFooter.tsx`. A hard
+  `.claude/hooks/fallow-gate.sh` PreToolUse hook blocks git ops while any fallow
+  `*_introduced` > 0 — keep reviewers clearing it (extract, don't suppress).
+- **Stage 21 — `specs/stage-21-dashboards-calendar.md`. ← NEXT.** History dashboards +
   Calendar onto the theme, with **legibility as the explicit acceptance bar** (the
   "easily understood dashboards and calendars" ask). Guards that the FR-18.6/18.9
   visual distinctions and their non-colour cues survive the re-skin, and that the
