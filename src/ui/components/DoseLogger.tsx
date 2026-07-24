@@ -15,8 +15,9 @@ import {
 } from '../../core';
 import { useStore } from '../../store/store';
 import { useScheduleData } from '../lib/useScheduleData';
-import { Button, Field, inputClass } from './ui';
+import { Button } from './ui';
 import { Modal } from './Modal';
+import { NumberField, TextField } from './fields';
 import { TimeTakenField } from './TimeTakenField';
 
 export interface LoggerTarget {
@@ -69,8 +70,8 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   const [skipMode, setSkipMode] = useState(canSkip && (target.startInSkipMode ?? false));
   const [skipReason, setSkipReason] = useState('');
 
-  const [doseStr, setDoseStr] = useState(
-    String(editingEntry ? editingEntry.dose : target.normalDose),
+  const [doseVal, setDoseVal] = useState<number | undefined>(
+    editingEntry ? editingEntry.dose : target.normalDose,
   );
   // Seed "time taken" from the entry being edited, else a dragged calendar
   // time when given (clamped to ≤ now), else the rounded "now" default.
@@ -88,10 +89,10 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   const [futureClamped, setFutureClamped] = useState(!editingEntry && requestedInstant > now);
   const [confirmed, setConfirmed] = useState(false);
   const [adjustNext, setAdjustNext] = useState(false);
-  const [nextDoseStr, setNextDoseStr] = useState('');
+  const [nextDoseVal, setNextDoseVal] = useState<number | undefined>(undefined);
   const [nextConfirmed, setNextConfirmed] = useState(false);
 
-  const dose = Number(doseStr);
+  const dose = doseVal ?? Number.NaN;
   const actualInstant = datetimeLocalToInstant(whenStr, zone);
   // Excludes the entry being edited from its own guardrail history — matches
   // `editLogEntry`'s server-side recheck so the preview shown here agrees with
@@ -141,7 +142,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   // correction of what already happened, not a cue to plan the next dose.
   const offerAdjustNext = !target.entryId && (isAdjusted || isLate) && nextOcc != null;
 
-  const nextDose = Number(nextDoseStr);
+  const nextDose = nextDoseVal ?? Number.NaN;
   const validNextDose = Number.isFinite(nextDose) && nextDose > 0;
   const nextWarnings =
     adjustNext && validNextDose && nextOcc
@@ -155,7 +156,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   // Default the next-dose field to the amount just entered for this dose.
   const toggleAdjustNext = (on: boolean) => {
     setAdjustNext(on);
-    if (on && nextDoseStr === '') setNextDoseStr(doseStr);
+    if (on && nextDoseVal === undefined) setNextDoseVal(doseVal);
     setNextConfirmed(false);
   };
 
@@ -202,15 +203,13 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
             Scheduled for {formatTimeWithZone(target.scheduledInstant, zone)}. Recorded distinctly
             from a missed dose — it won't count against adherence.
           </p>
-          <Field label="Reason (optional)">
-            <input
-              className={inputClass}
-              value={skipReason}
-              onChange={(e) => setSkipReason(e.target.value)}
-              placeholder="e.g. clinician advised skipping"
-              aria-label="Skip reason"
-            />
-          </Field>
+          <TextField
+            label="Reason (optional)"
+            aria-label="Skip reason"
+            value={skipReason}
+            onChange={setSkipReason}
+            placeholder="e.g. clinician advised skipping"
+          />
           <div className="mt-1 flex justify-end gap-2">
             <Button variant="ghost" onClick={() => setSkipMode(false)}>
               Back
@@ -233,21 +232,15 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           {med.unit}.
         </p>
 
-        <Field label={`Dose (${med.unit})`}>
-          <input
-            type="number"
-            inputMode="decimal"
-            min="0"
-            step="any"
-            className={inputClass}
-            value={doseStr}
-            onChange={(e) => {
-              setDoseStr(e.target.value);
-              setConfirmed(false);
-            }}
-            aria-label="Dose"
-          />
-        </Field>
+        <NumberField
+          label={`Dose (${med.unit})`}
+          aria-label="Dose"
+          value={doseVal}
+          onChange={(v) => {
+            setDoseVal(v);
+            setConfirmed(false);
+          }}
+        />
 
         <TimeTakenField
           whenStr={whenStr}
@@ -264,7 +257,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           <button
             type="button"
             onClick={() => {
-              setDoseStr(String(suggestion.suggestedDose));
+              setDoseVal(suggestion.suggestedDose);
               setConfirmed(false);
             }}
             className="rounded-md border border-accent/60 bg-accent/10 px-3 py-2 text-left text-sm text-accent-muted hover:bg-accent/20"
@@ -321,21 +314,15 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
 
             {adjustNext && (
               <div className="mt-3 flex flex-col gap-2">
-                <Field label={`Next dose (${med.unit})`}>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min="0"
-                    step="any"
-                    className={inputClass}
-                    value={nextDoseStr}
-                    onChange={(e) => {
-                      setNextDoseStr(e.target.value);
-                      setNextConfirmed(false);
-                    }}
-                    aria-label="Next dose"
-                  />
-                </Field>
+                <NumberField
+                  label={`Next dose (${med.unit})`}
+                  aria-label="Next dose"
+                  value={nextDoseVal}
+                  onChange={(v) => {
+                    setNextDoseVal(v);
+                    setNextConfirmed(false);
+                  }}
+                />
                 {nextOverCap && (
                   <div className="rounded-md border border-red-700 bg-red-950/50 p-2 text-xs">
                     <ul className="list-disc pl-5 text-red-200">

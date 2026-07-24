@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { StartDatePrompt } from './StartDatePrompt';
@@ -44,6 +44,37 @@ function setMedications(
 async function expectSaveStillWorks(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole('button', { name: 'Save' }));
   expect(useStore.getState().medications.find((m) => m.id === 'a')?.startedAt).toBeDefined();
+}
+
+const nativeDateValueSetter = Object.getOwnPropertyDescriptor(
+  window.HTMLInputElement.prototype,
+  'value',
+)!.set!;
+
+/**
+ * Sets a `'YYYY-MM-DD'` date on the `DateField` (Stage 20 Unit 5) labelled
+ * `label`. `DateField` (built on React Aria's `DateField`/`DateSegment`) also
+ * renders a visually-hidden native `<input type="date">` alongside its
+ * segmented spinbuttons — for mobile platforms that show a native date
+ * picker — kept in sync with the same field state. Driving that hidden input
+ * is the simplest reliable way to set a full date value in jsdom (typing
+ * digit-by-digit into the individual segments requires simulating React
+ * Aria's internal focus-driven segment-advance behaviour, which jsdom's
+ * `beforeinput`/focus emulation doesn't reproduce faithfully).
+ */
+function typeStartDate(label: string, isoDate: string) {
+  const group = screen.getAllByLabelText(label).find((el) => el.getAttribute('role') === 'group')!;
+  // The hidden native date input is a sibling of the DateField's own root
+  // (`group`'s parent), not a descendant of it.
+  const native = group.parentElement!.nextElementSibling!.querySelector(
+    'input[type="date"]',
+  ) as HTMLInputElement;
+  act(() => {
+    native.focus();
+    nativeDateValueSetter.call(native, isoDate);
+    native.dispatchEvent(new Event('input', { bubbles: true }));
+    native.dispatchEvent(new Event('change', { bubbles: true }));
+  });
 }
 
 beforeEach(() => {
@@ -105,7 +136,7 @@ describe('StartDatePrompt (FR-18.1 piece 3)', () => {
     await screen.findByRole('dialog');
 
     // Fill in a date for Lamotrigine only; leave Levetiracetam blank.
-    await user.type(screen.getByLabelText('Lamotrigine start date'), '2026-06-01');
+    typeStartDate('Lamotrigine start date', '2026-06-01');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
@@ -121,7 +152,7 @@ describe('StartDatePrompt (FR-18.1 piece 3)', () => {
     render(<StartDatePrompt />);
     await screen.findByRole('dialog');
 
-    await user.type(screen.getByLabelText('Lamotrigine start date'), '2999-01-01');
+    typeStartDate('Lamotrigine start date', '2999-01-01');
     expect(screen.getByText('This date is in the future.')).toBeInTheDocument();
     await expectSaveStillWorks(user);
   });
@@ -136,7 +167,7 @@ describe('StartDatePrompt (FR-18.1 piece 3)', () => {
     await screen.findByRole('dialog');
 
     // A dose was logged on 2026-06-01 — choosing a later start date contradicts it.
-    await user.type(screen.getByLabelText('Lamotrigine start date'), '2026-06-10');
+    typeStartDate('Lamotrigine start date', '2026-06-10');
     expect(screen.getByText('A dose is already logged before this date.')).toBeInTheDocument();
     await expectSaveStillWorks(user);
   });

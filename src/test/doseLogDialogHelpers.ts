@@ -14,9 +14,17 @@ export function openEditDialog(row: HTMLElement): HTMLElement {
   return screen.getByRole('dialog');
 }
 
-/** Set the "Dose" field's value in an open DoseLogger dialog. */
-export function setDoseValue(dialog: HTMLElement, value: string): void {
-  fireEvent.change(within(dialog).getByLabelText('Dose'), { target: { value } });
+/**
+ * Set a `NumberField`'s value (default label "Dose", e.g. DoseLogger's dose
+ * or "Next dose" field) in an open dialog. React Aria's `NumberField` (Stage
+ * 20 Unit 5) only commits `onChange` when the input is blurred (matches
+ * `MedsScreen.test.tsx`'s `setValue` pattern), so a bare `fireEvent.change`
+ * isn't enough.
+ */
+export function setDoseValue(dialog: HTMLElement, value: string, label = 'Dose'): void {
+  const input = within(dialog).getByLabelText(label);
+  fireEvent.change(input, { target: { value } });
+  fireEvent.blur(input);
 }
 
 /**

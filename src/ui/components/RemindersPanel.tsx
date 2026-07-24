@@ -1,6 +1,7 @@
 import { useStore } from '../../store/store';
 import { useRemindersContext } from '../../reminders/reminderContext';
-import { Button, Card, Field, inputClass } from './ui';
+import { Button, Card } from './ui';
+import { NumberField } from './fields';
 
 // Reminder settings (Stage 6): permission UX, global enable + lead time,
 // per-slot mute toggles, and an honest note on platform limits (FR-6.5).
@@ -51,16 +52,12 @@ export function RemindersPanel() {
           </label>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Notify ahead (minutes)">
-              <input
-                type="number"
-                min="0"
-                className={inputClass}
-                value={prefs.leadMinutes}
-                onChange={(e) => setPrefs({ leadMinutes: Math.max(0, Number(e.target.value)) })}
-                aria-label="Notify ahead minutes"
-              />
-            </Field>
+            <NumberField
+              label="Notify ahead (minutes)"
+              aria-label="Notify ahead minutes"
+              value={prefs.leadMinutes}
+              onChange={(v) => setPrefs({ leadMinutes: Number.isFinite(v) ? Math.max(0, v) : 0 })}
+            />
             <label className="flex items-center gap-2 self-end text-sm">
               <input
                 type="checkbox"

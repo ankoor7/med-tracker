@@ -10,6 +10,7 @@
 // tech without blocking submission (the editor keeps its own `canSave` gate).
 
 import {
+  DateField as RACDateField,
   DateInput,
   DateSegment,
   FieldError,
@@ -19,16 +20,44 @@ import {
   Text,
   TextField as RACTextField,
   TimeField as RACTimeField,
+  type DateValue,
   type TimeValue,
 } from 'react-aria-components';
 import { inputClass } from './ui';
 
-// `toTimeValue` / `fromTimeValue` live in ./timeValue so this module exports
-// components only (react-refresh/only-export-components).
+// `toTimeValue`/`fromTimeValue` (./timeValue) and `toDateValue`/`fromDateValue`
+// (./dateValue) live in their own modules so this module exports components
+// only (react-refresh/only-export-components).
 
 const labelClass = 'text-xs font-medium uppercase tracking-wide text-slate-400';
 const hintClass = 'text-xs font-normal normal-case text-slate-500';
 const errorClass = 'text-xs text-status-missed';
+// Shared by TimeField and DateField — both render a `DateInput` of
+// individually-focusable segments.
+const dateSegmentClass =
+  'rounded px-0.5 tabular-nums outline-none data-[focused]:bg-accent/20 data-[placeholder]:text-slate-500';
+
+/**
+ * The label + segmented `DateInput` + hint body shared by `TimeField` and
+ * `DateField` — both are React Aria `*Field` components that differ only in
+ * which segments they show (time vs. date), so the JSX around the
+ * `DateInput` itself would otherwise be duplicated verbatim between them.
+ */
+function SegmentedFieldBody({ label, hint }: { label?: string; hint?: string }) {
+  return (
+    <>
+      {label && <Label className={labelClass}>{label}</Label>}
+      <DateInput className={`${inputClass} flex w-fit gap-0.5`}>
+        {(segment) => <DateSegment segment={segment} className={dateSegmentClass} />}
+      </DateInput>
+      {hint && (
+        <Text slot="description" className={hintClass}>
+          {hint}
+        </Text>
+      )}
+    </>
+  );
+}
 
 export function NumberField({
   label,
@@ -82,6 +111,7 @@ export function TextField({
   onChange,
   placeholder,
   errorMessage,
+  type = 'text',
   className = '',
 }: {
   label?: string;
@@ -91,6 +121,8 @@ export function TextField({
   onChange: (value: string) => void;
   placeholder?: string;
   errorMessage?: string;
+  /** Native input type — e.g. `'email'`/`'password'`. Defaults to `'text'`. */
+  type?: string;
   className?: string;
 }) {
   return (
@@ -103,7 +135,7 @@ export function TextField({
       className={`flex flex-col gap-1.5 text-sm ${className}`}
     >
       {label && <Label className={labelClass}>{label}</Label>}
-      <Input className={inputClass} placeholder={placeholder} />
+      <Input className={inputClass} placeholder={placeholder} type={type} />
       {hint && (
         <Text slot="description" className={hintClass}>
           {hint}
@@ -139,20 +171,35 @@ export function TimeField({
       shouldForceLeadingZeros
       className={`flex flex-col gap-1.5 text-sm ${className}`}
     >
-      {label && <Label className={labelClass}>{label}</Label>}
-      <DateInput className={`${inputClass} flex w-fit gap-0.5`}>
-        {(segment) => (
-          <DateSegment
-            segment={segment}
-            className="rounded px-0.5 tabular-nums outline-none data-[focused]:bg-accent/20 data-[placeholder]:text-slate-500"
-          />
-        )}
-      </DateInput>
-      {hint && (
-        <Text slot="description" className={hintClass}>
-          {hint}
-        </Text>
-      )}
+      <SegmentedFieldBody label={label} hint={hint} />
     </RACTimeField>
+  );
+}
+
+export function DateField({
+  label,
+  'aria-label': ariaLabel,
+  hint,
+  value,
+  onChange,
+  className = '',
+}: {
+  label?: string;
+  'aria-label'?: string;
+  hint?: string;
+  value: DateValue | null;
+  onChange: (value: DateValue | null) => void;
+  className?: string;
+}) {
+  return (
+    <RACDateField
+      aria-label={ariaLabel}
+      value={value}
+      onChange={onChange}
+      shouldForceLeadingZeros
+      className={`flex flex-col gap-1.5 text-sm ${className}`}
+    >
+      <SegmentedFieldBody label={label} hint={hint} />
+    </RACDateField>
   );
 }

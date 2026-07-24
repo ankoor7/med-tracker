@@ -7,7 +7,8 @@
 import { Fragment } from 'react';
 import { hasDoseLoggedBefore, isFutureStartDate, startOfDayInstant } from '../../core';
 import type { DoseLogEntry, IanaZone, ISODate } from '../../core';
-import { Field, inputClass } from './ui';
+import { DateField } from './fields';
+import { fromDateValue, toDateValue } from './dateValue';
 
 export interface StartDateFieldProps {
   label: string;
@@ -37,15 +38,12 @@ export function StartDateField({
 
   return (
     <Fragment>
-      <Field label={label}>
-        <input
-          type="date"
-          className={inputClass}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          aria-label={ariaLabel ?? label}
-        />
-      </Field>
+      <DateField
+        label={label}
+        aria-label={ariaLabel ?? label}
+        value={toDateValue(value)}
+        onChange={(v) => onChange(fromDateValue(v))}
+      />
       {future && <p className="-mt-2 text-xs text-amber-400">This date is in the future.</p>}
       {beforeLoggedDose && (
         <p className="-mt-2 text-xs text-amber-400">A dose is already logged before this date.</p>

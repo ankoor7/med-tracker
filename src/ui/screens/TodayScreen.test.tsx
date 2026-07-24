@@ -56,7 +56,7 @@ describe('TodayScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Log' }));
 
     const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Dose'), { target: { value: '150' } });
+    setDoseValue(dialog, '150');
     fireEvent.click(within(dialog).getByRole('button', { name: /log dose/i }));
 
     const log = activeLog();
@@ -79,7 +79,7 @@ describe('TodayScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Log' }));
 
     const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Dose'), { target: { value: '150' } });
+    setDoseValue(dialog, '150');
 
     const logBtn = within(dialog).getByRole('button', { name: /log over-cap dose/i });
     expect(logBtn).toBeDisabled();
@@ -159,13 +159,13 @@ describe('TodayScreen', () => {
     // The 08:00 slot is first (sorted by time); log it late at an adjusted amount.
     fireEvent.click(screen.getAllByRole('button', { name: 'Log' })[0]!);
     const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Dose'), { target: { value: '60' } });
+    setDoseValue(dialog, '60');
 
     // The adjust-next-dose section appears; enable it and set the next amount.
     fireEvent.click(
       within(dialog).getByRole('checkbox', { name: /adjust next lamotrigine dose/i }),
     );
-    fireEvent.change(within(dialog).getByLabelText('Next dose'), { target: { value: '80' } });
+    setDoseValue(dialog, '80', 'Next dose');
     fireEvent.click(within(dialog).getByRole('button', { name: /log dose/i }));
 
     const overrides = useStore.getState().doseOverrides.filter((o) => !o.deleted);

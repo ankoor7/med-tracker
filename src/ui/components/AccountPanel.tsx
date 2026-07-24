@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { isBackendConfigured } from '../../config';
 import { useAuth } from '../../auth/useAuth';
 import { useSync } from '../../sync/useSync';
-import { Button, Card, Field, inputClass } from './ui';
+import { Button, Card } from './ui';
+import { TextField } from './fields';
 import { SyncIndicator } from './SyncIndicator';
 
 // Account & sync panel. The app is local-first, so this is optional: with no
@@ -91,24 +92,20 @@ export function AccountPanel() {
         </div>
       ) : (
         <div className="flex flex-col gap-3">
-          <Field label="Email">
-            <input
-              className={inputClass}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-label="Email"
-            />
-          </Field>
-          <Field label="Password">
-            <input
-              className={inputClass}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              aria-label="Password"
-            />
-          </Field>
+          <TextField
+            label="Email"
+            aria-label="Email"
+            type="email"
+            value={email}
+            onChange={setEmail}
+          />
+          <TextField
+            label="Password"
+            aria-label="Password"
+            type="password"
+            value={password}
+            onChange={setPassword}
+          />
           <div className="flex items-center gap-2">
             <Button onClick={submit} disabled={busy || !email || !password}>
               {mode === 'in' ? 'Sign in' : 'Sign up'}
