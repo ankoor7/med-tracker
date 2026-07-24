@@ -9,14 +9,14 @@ export function CatchUpBanner() {
   return (
     <div
       role="status"
-      className="mx-4 mt-3 rounded-md border border-yellow-800 bg-yellow-950/50 p-3 text-sm text-yellow-100"
+      className="mx-4 mt-3 rounded-md border border-status-due/30 bg-status-due/10 p-3 text-sm text-slate-100"
     >
       <div className="mb-1 flex items-center justify-between">
         <strong>While you were away</strong>
         <button
           type="button"
           onClick={dismissCatchUp}
-          className="text-xs text-yellow-300 hover:text-yellow-100"
+          className="text-xs text-status-due hover:text-status-due/80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-status-due"
         >
           Dismiss
         </button>

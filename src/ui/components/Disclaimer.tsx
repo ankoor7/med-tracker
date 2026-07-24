@@ -15,7 +15,7 @@ export function Disclaimer() {
   if (state !== 'shown') return null;
 
   return (
-    <div className="flex items-start gap-2 border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-xs text-amber-300/90">
+    <div className="flex items-start gap-2 border-b border-status-due/30 bg-status-due/10 px-4 py-2 text-xs text-status-due">
       <p className="flex-1">
         SteadyDose records and checks doses against limits you set — it does not calculate doses or
         give medical advice. Confirm your regimen with a clinician.
@@ -24,7 +24,7 @@ export function Disclaimer() {
         type="button"
         onClick={dismiss}
         aria-label="Dismiss disclaimer"
-        className="-mr-1 shrink-0 rounded p-0.5 text-amber-300/70 hover:bg-amber-900/40 hover:text-amber-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400/60"
+        className="-mr-1 shrink-0 rounded p-0.5 text-status-due/80 hover:bg-status-due/15 hover:text-status-due focus-visible:outline focus-visible:outline-2 focus-visible:outline-status-due"
       >
         <svg
           viewBox="0 0 20 20"
