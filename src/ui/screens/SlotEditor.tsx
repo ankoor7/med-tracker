@@ -2,11 +2,26 @@
 // verbatim out of the old ScheduleScreen by Stage 18 FR-18.12 — the Meds tab
 // now hosts it as the "By time" projection of the same slots the medication
 // editor writes.
+//
+// Stage 20 Unit 3: migrated onto React Aria form primitives. The medication
+// picker is now a `Select` (FR-20.1), and time / dose entry use `TimeField` /
+// `NumberField`. Store actions (`addSlot` / `updateSlot`) are unchanged.
 
 import { useState } from 'react';
+import {
+  Button as RACButton,
+  Form,
+  ListBox,
+  ListBoxItem,
+  Popover,
+  Select,
+  SelectValue,
+} from 'react-aria-components';
 import type { Medication, ScheduleItem, Slot } from '../../core';
 import { useStore, type SlotInput } from '../../store/store';
-import { Button, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from '../components/ui';
+import { Button, ColorDot, UNKNOWN_MED_NAME } from '../components/ui';
+import { NumberField, TextField, TimeField } from '../components/fields';
+import { fromTimeValue, toTimeValue } from '../components/timeValue';
 import { Modal } from '../components/Modal';
 
 export function SlotEditor({ initial, onClose }: { initial: Slot | null; onClose: () => void }) {
@@ -52,26 +67,29 @@ export function SlotEditor({ initial, onClose }: { initial: Slot | null; onClose
 
   return (
     <Modal title={initial ? 'Edit time-slot' : 'Add time-slot'} onClose={onClose}>
-      <div className="flex flex-col gap-3">
+      <Form
+        validationBehavior="aria"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+        className="flex flex-col gap-3"
+      >
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Time (wall-clock)">
-            <input
-              type="time"
-              className={inputClass}
-              value={time}
-              onChange={(e) => setTime(e.target.value)}
-              aria-label="Time"
-            />
-          </Field>
-          <Field label="Label (optional)">
-            <input
-              className={inputClass}
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Morning"
-              aria-label="Label"
-            />
-          </Field>
+          <TimeField
+            label="Time"
+            aria-label="Time"
+            hint="Wall-clock."
+            value={toTimeValue(time)}
+            onChange={(t) => setTime(fromTimeValue(t))}
+          />
+          <TextField
+            label="Label (optional)"
+            aria-label="Label"
+            value={label}
+            onChange={setLabel}
+            placeholder="Morning"
+          />
         </div>
 
         <div className="rounded-md border border-slate-800 p-3">
@@ -90,24 +108,41 @@ export function SlotEditor({ initial, onClose }: { initial: Slot | null; onClose
           </ul>
 
           {available.length > 0 && (
-            <select
-              className={`${inputClass} mt-3 w-full`}
-              value=""
-              onChange={(e) => addItem(e.target.value)}
+            <Select
               aria-label="Add medication to slot"
+              data-testid="add-med-select"
+              selectedKey={null}
+              onSelectionChange={(key) => addItem(String(key))}
+              className="mt-3 w-full"
             >
-              <option value="">+ Add medication…</option>
-              {available.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
+              <RACButton className={`${SELECT_TRIGGER} w-full`}>
+                <SelectValue>{() => '+ Add medication…'}</SelectValue>
+                <span aria-hidden className="text-slate-400">
+                  ▾
+                </span>
+              </RACButton>
+              <Popover className="w-[--trigger-width] overflow-auto rounded-xl border border-white/10 bg-slate-900/95 p-1 shadow-soft backdrop-blur-md">
+                <ListBox items={available}>
+                  {(m) => (
+                    <ListBoxItem
+                      id={m.id}
+                      textValue={m.name}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none data-[focused]:bg-accent/15 data-[selected]:bg-accent/10"
+                    >
+                      <ColorDot color={m.color} />
+                      {m.name}
+                    </ListBoxItem>
+                  )}
+                </ListBox>
+              </Popover>
+            </Select>
           )}
         </div>
 
         {!valid && items.length > 0 && (
-          <p className="text-xs text-amber-400">Every medication needs a dose greater than 0.</p>
+          <p role="alert" className="text-xs text-status-due">
+            Every medication needs a dose greater than 0.
+          </p>
         )}
 
         <div className="mt-1 flex justify-end gap-2">
@@ -118,10 +153,13 @@ export function SlotEditor({ initial, onClose }: { initial: Slot | null; onClose
             Save
           </Button>
         </div>
-      </div>
+      </Form>
     </Modal>
   );
 }
+
+const SELECT_TRIGGER =
+  'flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-left text-sm text-slate-100 outline-none data-[focus-visible]:border-accent-muted data-[hovered]:border-white/20';
 
 /** One medication line inside a time-slot: its dose here, and a way out. */
 function SlotItemRow({
@@ -140,14 +178,11 @@ function SlotItemRow({
     <li className="flex items-center gap-2">
       <ColorDot color={med?.color ?? '#64748b'} />
       <span className="flex-1 truncate text-sm">{name}</span>
-      <input
-        type="number"
-        min="0"
-        step="any"
-        className={`${inputClass} w-24`}
-        value={item.dose}
-        onChange={(e) => onDose(Number(e.target.value))}
+      <NumberField
         aria-label={`Dose for ${name}`}
+        value={item.dose}
+        onChange={onDose}
+        inputClassName="w-24"
       />
       <span className="w-8 text-xs text-slate-400">{med?.unit}</span>
       <button

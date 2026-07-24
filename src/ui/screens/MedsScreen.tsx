@@ -158,7 +158,7 @@ function MedicationView() {
                     the merge. A medication with no times says so rather than
                     silently doing nothing (the seam FR-18.7 builds on). */}
                 {medSlots.length === 0 ? (
-                  <p className="mt-2 text-xs text-amber-400">
+                  <p className="mt-2 text-xs text-status-due">
                     Not scheduled — it will not appear on Today until you add a time.
                   </p>
                 ) : (

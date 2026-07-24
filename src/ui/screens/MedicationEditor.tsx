@@ -9,8 +9,16 @@
 // `updateMedication` for the medication, and `addSlot` / `updateSlot` /
 // `deleteSlot` for each slot the plan touches — so the Stage 16 change records
 // are identical to those the old two-tab flow emitted.
+//
+// Stage 20 Unit 3: migrated onto React Aria form primitives (`Form`,
+// `NumberField`, `TimeField`, `TextField`). The FR-18.7/18.8 validations still
+// come from the pure core (`validateMedication`); their messages are now piped
+// into each field's accessible `FieldError` (FR-20.4) rather than ad-hoc
+// paragraphs, while the save path (`runRegimenEdit` + `planSlotOps`) is
+// untouched.
 
 import { useState } from 'react';
+import { Form } from 'react-aria-components';
 import {
   coScheduledAtTime,
   duplicateTimes,
@@ -27,6 +35,8 @@ import {
 } from '../../core';
 import { useStore, type MedicationInput } from '../../store/store';
 import { Button, Field, inputClass } from '../components/ui';
+import { NumberField, TextField, TimeField } from '../components/fields';
+import { fromTimeValue, toTimeValue } from '../components/timeValue';
 import { Modal } from '../components/Modal';
 import { StartDateField } from '../components/StartDateField';
 
@@ -99,10 +109,10 @@ export function MedicationEditor({
       : [{ key: newRowKey(), time: '08:00', dose: 0 }],
   );
 
-  const setG = (key: keyof MedicationInput['guardrails'], value: string) =>
+  const setGuardrail = (key: keyof MedicationInput['guardrails'], value: number) =>
     setForm((f) => ({
       ...f,
-      guardrails: { ...f.guardrails, [key]: value === '' ? null : Number(value) },
+      guardrails: { ...f.guardrails, [key]: Number.isNaN(value) ? null : value },
     }));
 
   const patchRow = (key: string, patch: Partial<MedTimeRow>) =>
@@ -188,7 +198,14 @@ export function MedicationEditor({
 
   return (
     <Modal title={initial ? `Edit ${initial.name}` : 'Add medication'} onClose={onClose}>
-      <div className="flex flex-col gap-3">
+      <Form
+        validationBehavior="aria"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+        className="flex flex-col gap-3"
+      >
         <IdentityFields
           form={form}
           nameError={issueFor('name')?.message}
@@ -212,7 +229,6 @@ export function MedicationEditor({
           badTime={badTime}
           badDose={badDose}
           scheduleError={issueFor('schedule')?.message}
-          dailyTotalError={issueFor('dailyTotal')?.message}
           sharedWith={sharedWith}
           onPatchRow={patchRow}
           onRemoveRow={removeRow}
@@ -223,10 +239,13 @@ export function MedicationEditor({
           guardrails={form.guardrails}
           errors={{
             maxSingleDose: issueFor('maxSingleDose')?.message,
-            maxDailyDose: issueFor('maxDailyDose')?.message,
+            // The daily-total-vs-cap breach reads most naturally on the cap it
+            // exceeds, so it surfaces on the Max daily field when that field is
+            // otherwise valid (FR-20.4 — an accessible field error).
+            maxDailyDose: issueFor('maxDailyDose')?.message ?? issueFor('dailyTotal')?.message,
             minIntervalHours: issueFor('minIntervalHours')?.message,
           }}
-          onChange={setG}
+          onChange={setGuardrail}
         />
 
         <label className="flex items-center gap-2 text-sm">
@@ -264,7 +283,7 @@ export function MedicationEditor({
             Save
           </Button>
         </div>
-      </div>
+      </Form>
     </Modal>
   );
 }
@@ -281,41 +300,30 @@ function IdentityFields({
 }) {
   return (
     <>
-      <Field label="Name">
-        <input
-          className={inputClass}
-          value={form.name}
-          onChange={(e) => onChange({ name: e.target.value })}
-          aria-label="Name"
-          aria-invalid={nameError != null}
-        />
-      </Field>
-      {/* FR-18.8: a specific, actionable message — empty or duplicate name. */}
-      {nameError && <p className="-mt-2 text-xs text-red-300">{nameError}</p>}
+      {/* FR-18.8: a specific, actionable message — empty or duplicate name —
+          now on the field itself (accessible via FieldError / aria-invalid). */}
+      <TextField
+        label="Name"
+        aria-label="Name"
+        value={form.name}
+        onChange={(name) => onChange({ name })}
+        errorMessage={nameError}
+      />
 
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Unit">
-          <input
-            className={inputClass}
-            value={form.unit}
-            onChange={(e) => onChange({ unit: e.target.value })}
-            aria-label="Unit"
-          />
-        </Field>
-        <Field
+        <TextField
+          label="Unit"
+          aria-label="Unit"
+          value={form.unit}
+          onChange={(u) => onChange({ unit: u })}
+        />
+        <NumberField
           label="Half-life (hours)"
+          aria-label="Half-life hours"
           hint="Time for half the dose to clear your system — used to judge lateness."
-        >
-          <input
-            type="number"
-            min="0"
-            step="any"
-            className={inputClass}
-            value={form.halfLifeHours}
-            onChange={(e) => onChange({ halfLifeHours: Number(e.target.value) })}
-            aria-label="Half-life hours"
-          />
-        </Field>
+          value={form.halfLifeHours}
+          onChange={(halfLifeHours) => onChange({ halfLifeHours })}
+        />
       </div>
 
       <Field label="Colour">
@@ -339,17 +347,12 @@ function GuardrailsFieldset({
 }: {
   guardrails: MedicationInput['guardrails'];
   errors: Partial<Record<keyof MedicationInput['guardrails'], string>>;
-  onChange: (key: keyof MedicationInput['guardrails'], value: string) => void;
+  onChange: (key: keyof MedicationInput['guardrails'], value: number) => void;
 }) {
-  const fields: Array<[keyof MedicationInput['guardrails'], string, string, string?]> = [
-    ['maxSingleDose', 'Max single', 'Max single dose'],
-    ['maxDailyDose', 'Max daily', 'Max daily dose'],
-    [
-      'minIntervalHours',
-      'Min interval (h)',
-      'Min interval hours',
-      'Minimum time required between doses.',
-    ],
+  const fields: Array<[keyof MedicationInput['guardrails'], string, string?]> = [
+    ['maxSingleDose', 'Max single dose'],
+    ['maxDailyDose', 'Max daily dose'],
+    ['minIntervalHours', 'Min interval (h)', 'Minimum time required between doses.'],
   ];
   return (
     <fieldset className="rounded-md border border-slate-800 p-3">
@@ -358,30 +361,17 @@ function GuardrailsFieldset({
         Safety caps the app checks every logged dose against — it never sets a dose for you.
       </p>
       <div className="grid grid-cols-3 gap-3">
-        {fields.map(([key, label, ariaLabel, hint]) => (
-          <Field key={key} label={label} hint={hint}>
-            <input
-              type="number"
-              min="0"
-              step="any"
-              className={inputClass}
-              value={guardrails[key] ?? ''}
-              onChange={(e) => onChange(key, e.target.value)}
-              aria-label={ariaLabel}
-              aria-invalid={errors[key] != null}
-            />
-          </Field>
+        {fields.map(([key, label, hint]) => (
+          <NumberField
+            key={key}
+            label={label}
+            hint={hint}
+            value={guardrails[key] ?? undefined}
+            onChange={(v) => onChange(key, v)}
+            errorMessage={errors[key]}
+          />
         ))}
       </div>
-      {/* FR-18.8: a negative or zero cap, and the daily total vs maxDailyDose. */}
-      {fields.map(
-        ([key]) =>
-          errors[key] && (
-            <p key={key} className="mt-2 text-xs text-red-300">
-              {errors[key]}
-            </p>
-          ),
-      )}
     </fieldset>
   );
 }
@@ -397,7 +387,6 @@ function TimesFieldset({
   badTime,
   badDose,
   scheduleError,
-  dailyTotalError,
   sharedWith,
   onPatchRow,
   onRemoveRow,
@@ -409,7 +398,6 @@ function TimesFieldset({
   badTime: boolean;
   badDose: boolean;
   scheduleError?: string;
-  dailyTotalError?: string;
   sharedWith: (row: MedTimeRow) => SharedTime & { names: string[] };
   onPatchRow: (key: string, patch: Partial<MedTimeRow>) => void;
   onRemoveRow: (key: string) => void;
@@ -425,7 +413,7 @@ function TimesFieldset({
           exists in the domain (see core/types.ts Medication), so a medication
           with nothing scheduled would otherwise be silently invisible. */}
       {rows.length === 0 && (
-        <p className="text-sm text-red-300">
+        <p role="alert" className="text-sm text-status-missed">
           {scheduleError ??
             'Add at least one time — without one this medication will not appear on Today.'}
         </p>
@@ -433,29 +421,24 @@ function TimesFieldset({
       <ul className="flex flex-col gap-2">
         {rows.map((row, i) => (
           <li key={row.key} className="flex flex-col gap-1">
-            <div className="flex items-center gap-2">
-              <input
-                type="time"
-                className={`${inputClass} w-28`}
-                value={row.time}
-                onChange={(e) => onPatchRow(row.key, { time: e.target.value })}
+            <div className="flex items-end gap-2">
+              <TimeField
                 aria-label={`Time for dose ${i + 1}`}
+                value={toTimeValue(row.time)}
+                onChange={(t) => onPatchRow(row.key, { time: fromTimeValue(t) })}
               />
-              <input
-                type="number"
-                min="0"
-                step="any"
-                className={`${inputClass} w-24`}
-                value={row.dose}
-                onChange={(e) => onPatchRow(row.key, { dose: Number(e.target.value) })}
+              <NumberField
                 aria-label={`Amount for dose ${i + 1}`}
+                value={row.dose}
+                onChange={(dose) => onPatchRow(row.key, { dose })}
+                inputClassName="w-24"
               />
-              <span className="w-8 shrink-0 text-xs text-slate-400">{unit}</span>
+              <span className="mb-2.5 w-8 shrink-0 text-xs text-slate-400">{unit}</span>
               <button
                 type="button"
                 onClick={() => onRemoveRow(row.key)}
                 aria-label={`Remove dose ${i + 1}`}
-                className="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 focus-visible:bg-slate-800"
+                className="mb-1.5 rounded px-2 py-1 text-slate-400 hover:bg-slate-800 focus-visible:bg-slate-800"
               >
                 ✕
               </button>
@@ -470,16 +453,20 @@ function TimesFieldset({
         </Button>
       </div>
       {dupes.length > 0 && (
-        <p className="text-xs text-amber-400">
+        <p role="alert" className="text-xs text-status-due">
           {dupes.join(', ')} is listed twice — combine it into one dose.
         </p>
       )}
-      {badTime && <p className="text-xs text-amber-400">Every time needs to be set.</p>}
-      {!badTime && badDose && (
-        <p className="text-xs text-amber-400">Every time needs an amount greater than 0.</p>
+      {badTime && (
+        <p role="alert" className="text-xs text-status-due">
+          Every time needs to be set.
+        </p>
       )}
-      {/* FR-18.8: the daily total across every slot vs the medication's own cap. */}
-      {dailyTotalError && <p className="text-xs text-red-300">{dailyTotalError}</p>}
+      {!badTime && badDose && (
+        <p role="alert" className="text-xs text-status-due">
+          Every time needs an amount greater than 0.
+        </p>
+      )}
     </fieldset>
   );
 }

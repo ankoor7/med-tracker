@@ -33,6 +33,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@internationalized/date": "^3.12.2",
     "@supabase/supabase-js": "^2.47.10",
     "dexie": "^4.0.10",
     "lucide-react": "^1.26.0",
