@@ -58,7 +58,10 @@ export function TodayScreen() {
   // for the user to act on, and not folded into "taken" either.
   const remaining = total - taken - skipped;
   const pct = total > 0 ? taken / total : 0;
-  const ringColor = total > 0 && taken === total ? '#4ade80' : '#2cb1a6';
+  // Stage 20: theme tokens (status-taken / accent), not hardcoded hex — so the
+  // ring stays correct in both light and dark instead of a fixed swatch.
+  const ringColor =
+    total > 0 && taken === total ? 'rgb(var(--sd-status-taken-rgb))' : 'rgb(var(--sd-accent-rgb))';
 
   const dateLabel = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',
@@ -262,7 +265,7 @@ function OccurrenceRow({
         </span>
         {occ.overridden && (
           <span
-            className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-400"
+            className="rounded bg-status-due/15 px-1.5 py-0.5 text-[10px] font-medium text-status-due"
             title="One-time adjusted dose"
           >
             adjusted
@@ -319,14 +322,18 @@ function OccurrenceActions({
         </Button>
       )}
       {unresolved && (
-        <Button variant="ghost" className="text-slate-400 hover:bg-slate-700/40" onClick={onSkip}>
+        <Button
+          variant="ghost"
+          className="text-slate-400 data-[hovered]:bg-slate-700/40"
+          onClick={onSkip}
+        >
           Skip
         </Button>
       )}
       {genuinelyLogged && (
         <Button
           variant="ghost"
-          className="text-status-missed hover:bg-status-missed/10"
+          className="text-status-missed data-[hovered]:bg-status-missed/10"
           onClick={onDelete}
         >
           Delete
