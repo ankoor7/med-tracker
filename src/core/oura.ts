@@ -157,8 +157,11 @@ export function normalizeOuraData(
 
 /**
  * One aligned point joining an Oura day to that day's adherence. `adherenceRatio`
- * is taken/expected for timing-sensitive meds (null when nothing was expected,
- * so it never reads as 0% on a no-dose day).
+ * is onTime/expected for timing-sensitive meds (null when nothing was expected,
+ * so it never reads as 0% on a no-dose day) — the same definition as the
+ * headline History figure (Stage 18 FR-18.4): a late dose is still `taken`,
+ * but must not read as fully adherent here either, or this chart and the
+ * History screen would silently disagree about the same days.
  */
 export interface OuraOverlayPoint {
   date: ISODate;
@@ -187,7 +190,7 @@ export function buildOuraOverlay(
       date: d.date,
       readinessScore: oura?.readinessScore ?? null,
       stressHighMinutes: secondsToMinutes(oura?.stressHighSeconds ?? null),
-      adherenceRatio: d.expected > 0 ? d.taken / d.expected : null,
+      adherenceRatio: d.expected > 0 ? d.onTime / d.expected : null,
       expected: d.expected,
       taken: d.taken,
     };

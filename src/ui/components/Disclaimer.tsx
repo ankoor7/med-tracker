@@ -5,39 +5,14 @@
 // per-device UI preference, so it persists in the repository `meta` table (not
 // synced) — same channel as reminder prefs (`reminders/prefs.ts`).
 
-import { useEffect, useState } from 'react';
-import { getRepository } from '../../store/repository';
+import { useDismissibleMetaFlag } from '../lib/useDismissibleMetaFlag';
 
 const DISMISS_KEY = 'disclaimerDismissed';
 
 export function Disclaimer() {
-  // 'loading' renders nothing so the banner never flashes in then out once we
-  // learn it was previously dismissed.
-  const [state, setState] = useState<'loading' | 'shown' | 'hidden'>('loading');
-
-  useEffect(() => {
-    let live = true;
-    void getRepository()
-      .getMeta(DISMISS_KEY)
-      .then((v) => {
-        if (live) setState(v === 'true' ? 'hidden' : 'shown');
-      })
-      .catch(() => {
-        if (live) setState('shown');
-      });
-    return () => {
-      live = false;
-    };
-  }, []);
+  const { state, dismiss } = useDismissibleMetaFlag(DISMISS_KEY);
 
   if (state !== 'shown') return null;
-
-  const dismiss = () => {
-    setState('hidden');
-    void getRepository()
-      .setMeta(DISMISS_KEY, 'true')
-      .catch((e) => console.error('persist disclaimer dismissal failed', e));
-  };
 
   return (
     <div className="flex items-start gap-2 border-b border-amber-900/50 bg-amber-950/40 px-4 py-2 text-xs text-amber-300/90">

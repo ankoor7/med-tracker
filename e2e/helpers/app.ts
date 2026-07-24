@@ -25,7 +25,7 @@ export interface SlotSpec {
 /** Switch the bottom-nav tab. */
 export async function goToTab(
   page: Page,
-  tab: 'Today' | 'Calendar' | 'Schedule' | 'Meds' | 'Events' | 'History',
+  tab: 'Today' | 'Calendar' | 'Meds' | 'Events' | 'History',
 ) {
   await page.getByRole('button', { name: tab, exact: true }).click();
 }
@@ -44,11 +44,16 @@ export async function signIn(page: Page) {
 /** Create one medication via the Meds editor. */
 export async function addMedication(page: Page, med: MedSpec) {
   await goToTab(page, 'Meds');
+  await page.getByRole('button', { name: 'By medication' }).click();
   await page.getByRole('button', { name: 'Add medication' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Name').fill(med.name);
   await dialog.getByLabel('Unit').fill(med.unit);
   await dialog.getByLabel('Half-life hours').fill(String(med.halfLifeHours));
+  // Times live on the medication now (FR-18.12). This helper creates the
+  // medication only; `addSlot` below schedules it from the by-time view, so
+  // drop the blank starter row to keep the two helpers independent.
+  await dialog.getByRole('button', { name: 'Remove dose 1' }).click();
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toBeHidden();
   // The new card shows up in the list.
@@ -57,7 +62,8 @@ export async function addMedication(page: Page, med: MedSpec) {
 
 /** Create one time-slot grouping one or more medications. */
 export async function addSlot(page: Page, slot: SlotSpec) {
-  await goToTab(page, 'Schedule');
+  await goToTab(page, 'Meds');
+  await page.getByRole('button', { name: 'By time' }).click();
   await page.getByRole('button', { name: 'Add time-slot' }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();

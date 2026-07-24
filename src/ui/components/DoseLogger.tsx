@@ -1,10 +1,12 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState } from 'react';
 import {
   activeStrategy,
   checkGuardrails,
+  classifyGuardrailBreach,
   datetimeLocalToInstant,
   describeOffset,
   formatTimeWithZone,
+  guardrailAckLabel,
   instantToDatetimeLocal,
   MINUTE_MS,
   nextOccurrenceForMed,
@@ -15,6 +17,7 @@ import { useStore } from '../../store/store';
 import { useScheduleData } from '../lib/useScheduleData';
 import { Button, Field, inputClass } from './ui';
 import { Modal } from './Modal';
+import { TimeTakenField } from './TimeTakenField';
 
 export interface LoggerTarget {
   slotId: string;
@@ -26,23 +29,63 @@ export interface LoggerTarget {
    * 13). Clamped to ≤ now. Defaults to now-rounded-to-5-min when absent.
    */
   actualInstant?: Instant;
+  /**
+   * When set, this modal edits the already-logged entry with this id (Stage 18
+   * FR-18.2 — Today/History correction paths) instead of creating a new one.
+   * Its stored dose/time seed the form; guardrails are re-run excluding this
+   * entry so an edit never counts against itself.
+   */
+  entryId?: string;
+  /**
+   * Open directly in "mark as skipped" mode (Stage 18 FR-18.3) — the Today
+   * screen's quick "Skip" action. Only meaningful for a fresh log (no
+   * `entryId`); ignored otherwise.
+   */
+  startInSkipMode?: boolean;
 }
 
 export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose: () => void }) {
   const { medications, slots, doseLog, zone } = useScheduleData();
   const logDose = useStore((s) => s.logDose);
+  const editLogEntry = useStore((s) => s.editLogEntry);
   const setDoseOverride = useStore((s) => s.setDoseOverride);
+  const skipDose = useStore((s) => s.skipDose);
 
   const med = medications.find((m) => m.id === target.medId);
+  const editingEntry = target.entryId
+    ? doseLog.find((e) => e.id === target.entryId && !e.deleted)
+    : undefined;
   // "Now", rounded to the 5-minute step so the common path needs no adjustment.
   const now = useMemo(() => roundInstantToStep(Date.now()), []);
 
-  const [doseStr, setDoseStr] = useState(String(target.normalDose));
-  // Seed "time taken" from a dragged calendar time when given (clamped to ≤ now),
-  // otherwise the rounded "now" default.
-  const [whenStr, setWhenStr] = useState(() =>
-    instantToDatetimeLocal(Math.min(target.actualInstant ?? now, now), zone),
+  // A dose can be marked skipped instead of taken (Stage 18 FR-18.3) — but only
+  // when creating a fresh entry. An existing logged entry (taken or skipped) is
+  // corrected through `editLogEntry`/delete, not converted between the two: a
+  // skip has no meaningful dose amount, so letting the dose editor above also
+  // rewrite `status` would let an edit silently turn a skip into a partial,
+  // dose-bearing "taken" record (or vice versa) without the guardrail/adherence
+  // paths ever re-deriving from a clean state.
+  const canSkip = !target.entryId;
+  const [skipMode, setSkipMode] = useState(canSkip && (target.startInSkipMode ?? false));
+  const [skipReason, setSkipReason] = useState('');
+
+  const [doseStr, setDoseStr] = useState(
+    String(editingEntry ? editingEntry.dose : target.normalDose),
   );
+  // Seed "time taken" from the entry being edited, else a dragged calendar
+  // time when given (clamped to ≤ now), else the rounded "now" default.
+  const requestedInstant = target.actualInstant ?? now;
+  const [whenStr, setWhenStr] = useState(() =>
+    instantToDatetimeLocal(
+      editingEntry ? editingEntry.actualInstant : Math.min(requestedInstant, now),
+      zone,
+    ),
+  );
+  // Stage 18 FR-18.9(b)/AC9: a dragged or typed future time is never silently
+  // swapped for "now" — clamp AND explain. An edit of an already-logged entry
+  // never starts future (its stored time is, by construction, in the past),
+  // so this only seeds true for a fresh log with a future dragged instant.
+  const [futureClamped, setFutureClamped] = useState(!editingEntry && requestedInstant > now);
   const [confirmed, setConfirmed] = useState(false);
   const [adjustNext, setAdjustNext] = useState(false);
   const [nextDoseStr, setNextDoseStr] = useState('');
@@ -50,6 +93,10 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
 
   const dose = Number(doseStr);
   const actualInstant = datetimeLocalToInstant(whenStr, zone);
+  // Excludes the entry being edited from its own guardrail history — matches
+  // `editLogEntry`'s server-side recheck so the preview shown here agrees with
+  // what actually gets saved.
+  const guardrailLog = target.entryId ? doseLog.filter((e) => e.id !== target.entryId) : doseLog;
 
   // The next scheduled occurrence of this med (Stage 12 — adjust next dose).
   const nextOcc = useMemo(
@@ -60,6 +107,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   // Quick presets for the "time taken" control (Stage 11 FR-11.2). Relative
   // nudges count back from the current value and never produce a future time.
   const setWhen = (instant: Instant) => {
+    setFutureClamped(instant > now);
     setWhenStr(instantToDatetimeLocal(Math.min(instant, now), zone));
     setConfirmed(false);
   };
@@ -69,7 +117,7 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
   // Optional pharmacology extension suggestion (no-op default → null).
   const suggestion = useMemo(() => {
     if (!med) return null;
-    const recentDoses = doseLog.filter(
+    const recentDoses = guardrailLog.filter(
       (e) => !e.deleted && e.status === 'taken' && e.medId === med.id,
     );
     return activeStrategy.computeAdjustment({
@@ -78,24 +126,26 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
       actualInstant,
       recentDoses,
     });
-  }, [med, target.scheduledInstant, actualInstant, doseLog]);
+  }, [med, target.scheduledInstant, actualInstant, guardrailLog]);
 
   if (!med) return null;
 
   const validDose = Number.isFinite(dose) && dose > 0;
-  const warnings = validDose ? checkGuardrails(med, dose, actualInstant, doseLog, zone) : [];
+  const warnings = validDose ? checkGuardrails(med, dose, actualInstant, guardrailLog, zone) : [];
   const overCap = warnings.length > 0;
   const isAdjusted = dose !== target.normalDose;
   const isLate = actualInstant > target.scheduledInstant + MINUTE_MS;
   // Offer the next-dose adjustment when this dose was changed or taken late
-  // (Stage 12 FR-12.1) and there's an upcoming occurrence to adjust.
-  const offerAdjustNext = (isAdjusted || isLate) && nextOcc != null;
+  // (Stage 12 FR-12.1) and there's an upcoming occurrence to adjust. Not
+  // offered while editing a past entry (Stage 18 FR-18.2) — that's a
+  // correction of what already happened, not a cue to plan the next dose.
+  const offerAdjustNext = !target.entryId && (isAdjusted || isLate) && nextOcc != null;
 
   const nextDose = Number(nextDoseStr);
   const validNextDose = Number.isFinite(nextDose) && nextDose > 0;
   const nextWarnings =
     adjustNext && validNextDose && nextOcc
-      ? checkGuardrails(med, nextDose, nextOcc.scheduledInstant, doseLog, zone)
+      ? checkGuardrails(med, nextDose, nextOcc.scheduledInstant, guardrailLog, zone)
       : [];
   const nextOverCap = nextWarnings.length > 0;
   const canSetNext = !adjustNext || (validNextDose && (!nextOverCap || nextConfirmed));
@@ -111,13 +161,17 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
 
   const submit = () => {
     if (!canLog) return;
-    logDose({
-      slotId: target.slotId,
-      medId: target.medId,
-      scheduledInstant: target.scheduledInstant,
-      dose,
-      actualInstant,
-    });
+    if (target.entryId) {
+      editLogEntry(target.entryId, { dose, actualInstant });
+    } else {
+      logDose({
+        slotId: target.slotId,
+        medId: target.medId,
+        scheduledInstant: target.scheduledInstant,
+        dose,
+        actualInstant,
+      });
+    }
     if (adjustNext && nextOcc && validNextDose) {
       setDoseOverride({
         slotId: nextOcc.slotId,
@@ -129,8 +183,49 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
     onClose();
   };
 
+  const submitSkip = () => {
+    skipDose({
+      slotId: target.slotId,
+      medId: target.medId,
+      scheduledInstant: target.scheduledInstant,
+      actualInstant: Date.now(),
+      reason: skipReason.trim() || undefined,
+    });
+    onClose();
+  };
+
+  if (skipMode) {
+    return (
+      <Modal title={`Skip ${med.name}?`} onClose={onClose}>
+        <div className="flex flex-col gap-3">
+          <p className="text-xs text-slate-400">
+            Scheduled for {formatTimeWithZone(target.scheduledInstant, zone)}. Recorded distinctly
+            from a missed dose — it won't count against adherence.
+          </p>
+          <Field label="Reason (optional)">
+            <input
+              className={inputClass}
+              value={skipReason}
+              onChange={(e) => setSkipReason(e.target.value)}
+              placeholder="e.g. clinician advised skipping"
+              aria-label="Skip reason"
+            />
+          </Field>
+          <div className="mt-1 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setSkipMode(false)}>
+              Back
+            </Button>
+            <Button variant="secondary" onClick={submitSkip}>
+              Mark skipped
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal title={`Log ${med.name}`} onClose={onClose}>
+    <Modal title={target.entryId ? `Edit ${med.name} dose` : `Log ${med.name}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
         <p className="text-xs text-slate-400">
           Scheduled for {formatTimeWithZone(target.scheduledInstant, zone)}. Normal dose{' '}
@@ -154,33 +249,16 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           />
         </Field>
 
-        <Field label="Time taken">
-          <input
-            type="datetime-local"
-            step={300}
-            className={inputClass}
-            value={whenStr}
-            onChange={(e) => {
-              setWhenStr(e.target.value);
-              setConfirmed(false);
-            }}
-            aria-label="Time taken"
-          />
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <PresetButton onClick={() => setWhen(now)}>Now</PresetButton>
-            <PresetButton onClick={() => setWhen(target.scheduledInstant)}>Scheduled</PresetButton>
-            <PresetButton onClick={() => nudge(-15)}>−15m</PresetButton>
-            <PresetButton onClick={() => nudge(-30)}>−30m</PresetButton>
-            <PresetButton onClick={() => nudge(-60)}>−1h</PresetButton>
-            <span
-              className={`ml-auto text-xs ${
-                offsetLabel === 'on time' ? 'text-slate-400' : 'text-amber-400'
-              }`}
-            >
-              {offsetLabel}
-            </span>
-          </div>
-        </Field>
+        <TimeTakenField
+          whenStr={whenStr}
+          zone={zone}
+          now={now}
+          scheduledInstant={target.scheduledInstant}
+          offsetLabel={offsetLabel}
+          futureClamped={futureClamped}
+          onSetWhen={setWhen}
+          onNudge={nudge}
+        />
 
         {suggestion && (
           <button
@@ -271,7 +349,16 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
                         checked={nextConfirmed}
                         onChange={(e) => setNextConfirmed(e.target.checked)}
                       />
-                      Set this over-cap next dose anyway.
+                      {(() => {
+                        const kind = classifyGuardrailBreach(nextWarnings);
+                        const adj =
+                          kind === 'over-cap'
+                            ? 'over-cap '
+                            : kind === 'too-soon'
+                              ? 'too-soon '
+                              : '';
+                        return `Set this ${adj}next dose anyway.`;
+                      })()}
                     </label>
                   </div>
                 )}
@@ -280,27 +367,34 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
           </div>
         )}
 
-        <div className="mt-1 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant={overCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
-            {overCap ? 'Log over-cap dose' : 'Log dose'}
-          </Button>
+        <div className="mt-1 flex items-center justify-between gap-2">
+          {canSkip ? (
+            <button
+              type="button"
+              onClick={() => setSkipMode(true)}
+              className="text-xs text-slate-500 hover:text-slate-300 focus:outline-none focus:text-slate-200"
+            >
+              Mark as skipped instead
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="flex gap-2">
+            <Button variant="ghost" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button variant={overCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
+              {target.entryId
+                ? overCap
+                  ? guardrailAckLabel(warnings, 'Save')
+                  : 'Save changes'
+                : overCap
+                  ? guardrailAckLabel(warnings, 'Log')
+                  : 'Log dose'}
+            </Button>
+          </div>
         </div>
       </div>
     </Modal>
-  );
-}
-
-function PresetButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="rounded-md border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:border-accent-muted hover:text-slate-100"
-    >
-      {children}
-    </button>
   );
 }

@@ -17,14 +17,29 @@ import {
 // from RegimenChange records — it never authors a change.
 
 // Coarse styling + a human label per kind, used by the marker dot and detail.
-const KIND_META: Record<RegimenChangeKind, { label: string; className: string }> = {
+interface KindMeta {
+  label: string;
+  className: string;
+}
+
+const KIND_META: Record<RegimenChangeKind, KindMeta> = {
   'medication-added': { label: 'Medication added', className: 'bg-accent' },
+  'medication-reactivated': { label: 'Medication resumed', className: 'bg-accent' },
   'medication-updated': { label: 'Prescription changed', className: 'bg-amber-500' },
   'medication-retired': { label: 'Medication retired', className: 'bg-slate-500' },
   'slot-added': { label: 'Slot added', className: 'bg-accent' },
   'slot-updated': { label: 'Schedule changed', className: 'bg-amber-500' },
   'slot-removed': { label: 'Slot removed', className: 'bg-slate-500' },
 };
+
+/**
+ * Records can arrive from a newer build (sync) carrying a kind this one does not
+ * know. Fall back rather than dereferencing undefined — an unlabelled marker is
+ * recoverable, a blank History screen is not.
+ */
+function metaFor(kind: RegimenChangeKind): KindMeta {
+  return KIND_META[kind] ?? { label: 'Regimen changed', className: 'bg-amber-500' };
+}
 
 /**
  * The field-level `from → to` diff rows for one change, in display-ready form
@@ -82,7 +97,7 @@ export function ChangeMarkers({ changes, zone, xForDate }: ChangeMarkersProps) {
   return (
     <div className="pointer-events-none absolute inset-0">
       {positioned.map(({ group, left }) => {
-        const meta = KIND_META[groupKind(group)];
+        const meta = metaFor(groupKind(group));
         const open = openDate === group.date;
         return (
           <div
@@ -164,9 +179,9 @@ export function ChangeDetail({
         {group.changes.map((c) => (
           <li key={c.id} className="border-t border-slate-800 pt-2 first:border-t-0 first:pt-0">
             <div className="flex items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${KIND_META[c.kind].className}`} />
+              <span className={`h-2 w-2 rounded-full ${metaFor(c.kind).className}`} />
               <span className="text-[11px] uppercase tracking-wide text-slate-500">
-                {KIND_META[c.kind].label}
+                {metaFor(c.kind).label}
               </span>
             </div>
             <p className="mt-0.5 text-sm font-medium text-slate-100">{c.summary}</p>

@@ -1,13 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
-  activeStrategy,
   adherenceTimeline,
+  classifyGuardrailBreach,
   computeAdherence,
+  DEFAULT_ON_TIME_WINDOW_MINUTES,
   filterLog,
   formatDateTimeWithZone,
   formatTimeWithZone,
   groupChangesByDay,
-  levelSeriesFor,
   type DoseLogEntry,
   type HistoryFilter,
   type IanaZone,
@@ -15,14 +15,15 @@ import {
   type RegimenChange,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
+import { Button, Card, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
-import { BloodLevelChart } from '../components/BloodLevelChart';
 import { FieldDiffList } from '../components/ChangeMarkers';
 import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
+import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useNow } from '../lib/useNow';
 
 const COMMON_ZONES = [
@@ -41,14 +42,21 @@ export function HistoryScreen() {
   const medications = useStore((s) => s.medications);
   const doseLog = useStore((s) => s.doseLog);
   const regimenChanges = useStore((s) => s.regimenChanges);
+  const scheduleSnapshots = useStore((s) => s.scheduleSnapshots);
   const settings = useStore((s) => s.settings);
   const updateSettings = useStore((s) => s.updateSettings);
 
   const medById = useMemo(() => new Map(medications.map((m) => [m.id, m])), [medications]);
 
   const [filter, setFilter] = useState<HistoryFilter>({});
+  // Correction paths for an already-logged dose (Stage 18 FR-18.2): edit its
+  // time/amount (re-runs guardrails) or delete it (confirmed — see LogRow).
+  const [editTarget, setEditTarget] = useState<LoggerTarget | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DoseLogEntry | null>(null);
+  const deleteLogEntry = useStore((s) => s.deleteLogEntry);
 
   const assumeTakenOnTime = settings.assumeTakenOnTime ?? true;
+  const onTimeWindowMinutes = settings.onTimeWindowMinutes ?? DEFAULT_ON_TIME_WINDOW_MINUTES;
 
   const adherence = useMemo(
     () =>
@@ -61,8 +69,19 @@ export function HistoryScreen() {
         settings.missedDayThreshold,
         now,
         assumeTakenOnTime,
+        scheduleSnapshots,
+        onTimeWindowMinutes,
       ),
-    [slots, medications, doseLog, settings, now, assumeTakenOnTime],
+    [
+      slots,
+      medications,
+      doseLog,
+      settings,
+      now,
+      assumeTakenOnTime,
+      scheduleSnapshots,
+      onTimeWindowMinutes,
+    ],
   );
 
   const timeline = useMemo(
@@ -75,6 +94,8 @@ export function HistoryScreen() {
         settings.adherenceWindowDays,
         now,
         assumeTakenOnTime,
+        scheduleSnapshots,
+        onTimeWindowMinutes,
       ),
     [
       slots,
@@ -84,6 +105,8 @@ export function HistoryScreen() {
       settings.adherenceWindowDays,
       now,
       assumeTakenOnTime,
+      scheduleSnapshots,
+      onTimeWindowMinutes,
     ],
   );
 
@@ -91,28 +114,6 @@ export function HistoryScreen() {
     () => filterLog(doseLog, filter, settings.zone),
     [doseLog, filter, settings.zone],
   );
-
-  // Blood-level chart: the app renders only what the extension provides. Pick the
-  // filtered med (or the first one) and ask the extension for a series.
-  const levelMed = filter.medId ? medById.get(filter.medId) : medications.find((m) => !m.deleted);
-  const levelDoses = useMemo(
-    () =>
-      levelMed
-        ? doseLog
-            .filter((e) => !e.deleted && e.status === 'taken' && e.medId === levelMed.id)
-            .sort((a, b) => a.actualInstant - b.actualInstant)
-        : [],
-    [doseLog, levelMed],
-  );
-  const levelSeries =
-    levelMed && levelDoses.length > 0
-      ? levelSeriesFor(activeStrategy, {
-          med: levelMed,
-          doses: levelDoses,
-          from: levelDoses[0]!.actualInstant,
-          to: now,
-        })
-      : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -135,32 +136,37 @@ export function HistoryScreen() {
           <span className="text-3xl font-semibold text-accent-muted">
             {Math.round(adherence.ratio * 100)}%
           </span>
-          <span className="text-xs text-slate-400">
-            {adherence.taken} taken · {adherence.missed} missed · {adherence.expected} expected
+          <span className="text-xs text-slate-400" data-testid="adherence-counts">
+            {adherence.onTime} on time
+            {adherence.assumedOnTime > 0 && (
+              <span className="text-slate-500"> ({adherence.assumedOnTime} assumed)</span>
+            )}
+            {' · '}
+            {adherence.late} late · {adherence.missed} missed · {adherence.expected} expected
+            {adherence.skipped > 0 && ` · ${adherence.skipped} skipped (not counted)`}
           </span>
         </div>
+        <p className="mt-1 text-xs text-slate-500">
+          "On time" means within {adherence.onTimeWindowMinutes} minutes of the scheduled time — see
+          the on-time window setting below. A skipped dose doesn't count toward this figure either
+          way.
+        </p>
+        {adherence.assumedOnTime > 0 && (
+          // Stage 18 FR-18.6: this figure is partly the assume-on-time policy's
+          // fill-in, not a full record of what actually happened — disclosed here
+          // next to the number, not only in Settings below. Calm and factual,
+          // matching the on-time-window copy's precedent: state the mechanism,
+          // not an alarm.
+          <p className="mt-1 text-xs text-slate-500" data-testid="assumed-basis-note">
+            <strong className="font-medium text-slate-400">Basis:</strong> {adherence.assumedOnTime}{' '}
+            of the {adherence.onTime} on-time doses above are assumed from your schedule because
+            they were never logged or edited — not confirmed by you. Turn off "Assume doses taken on
+            time" below to see them as missed instead.
+          </p>
+        )}
         <div className="mt-3">
           <AdherenceChart days={timeline} changes={regimenChanges} zone={settings.zone} />
         </div>
-      </Card>
-
-      <Card>
-        <h3 className="mb-2 text-sm font-medium">
-          Predicted blood level{levelMed ? ` — ${levelMed.name}` : ''}
-        </h3>
-        {levelSeries ? (
-          <BloodLevelChart
-            series={levelSeries}
-            doseMarkers={levelDoses.map((d) => d.actualInstant)}
-            changes={regimenChanges}
-            zone={settings.zone}
-          />
-        ) : (
-          <p className="text-sm text-slate-400">
-            No predicted curve. SteadyDose computes no pharmacology itself — provide a pharmacology
-            extension with a <code>levelSeries</code> function to chart predicted levels here.
-          </p>
-        )}
       </Card>
 
       <RegimenChangesCard changes={regimenChanges} zone={settings.zone} />
@@ -209,6 +215,26 @@ export function HistoryScreen() {
             />
           </Field>
         </div>
+        <div className="mt-4">
+          <Field label="On-time window (minutes)">
+            <input
+              type="number"
+              min="1"
+              className={inputClass}
+              value={onTimeWindowMinutes}
+              onChange={(e) =>
+                updateSettings({ onTimeWindowMinutes: Math.max(1, Number(e.target.value)) })
+              }
+              aria-label="On-time window minutes"
+            />
+          </Field>
+          <p className="mt-1 text-xs text-slate-500">
+            How close to the scheduled time a timing-sensitive dose has to be logged to count as "on
+            time" rather than "late" — one setting, applied to every medication. It doesn't change
+            what was logged, only how the same history is summarised: changing it recalculates the
+            figures above from your existing dose log, nothing is added or removed.
+          </p>
+        </div>
         <label className="mt-4 flex items-start gap-3">
           <input
             type="checkbox"
@@ -220,8 +246,12 @@ export function HistoryScreen() {
           <span className="text-sm">
             Assume doses taken on time
             <span className="mt-0.5 block text-xs text-slate-500">
-              Past scheduled doses count as taken on time unless you log or edit them. Turn off to
-              mark untaken doses as missed/due and track real gaps.
+              Past scheduled doses count as taken on time unless you log or edit them, so a fresh
+              install or a quiet week doesn't read as a wall of missed doses. Assumed doses are
+              always shown distinctly from ones you actually logged (Today, Calendar and the figures
+              above). Turning this off recalculates the figures above from your existing dose log —
+              nothing is added or removed — but every unlogged past dose will now show as missed
+              instead of assumed; turning it back on restores the same assumption again.
             </span>
           </span>
         </label>
@@ -278,26 +308,82 @@ export function HistoryScreen() {
         )}
         <ul className="flex flex-col divide-y divide-slate-800">
           {entries.map((entry) => (
-            <LogRow key={entry.id} entry={entry} med={medById.get(entry.medId)} />
+            <LogRow
+              key={entry.id}
+              entry={entry}
+              med={medById.get(entry.medId)}
+              onEdit={() =>
+                setEditTarget({
+                  slotId: entry.slotId,
+                  medId: entry.medId,
+                  scheduledInstant: entry.scheduledInstant,
+                  // Current slot dose, if the slot/item still exists — used only
+                  // to flag "adjusted" against; the entry's own dose seeds the form.
+                  normalDose:
+                    slots
+                      .find((s) => s.id === entry.slotId)
+                      ?.items.find((i) => i.medId === entry.medId)?.dose ?? entry.dose,
+                  entryId: entry.id,
+                })
+              }
+              onDelete={() => setDeleteTarget(entry)}
+            />
           ))}
         </ul>
       </Card>
+
+      {editTarget && <DoseLogger target={editTarget} onClose={() => setEditTarget(null)} />}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this logged dose?"
+          confirmLabel="Delete dose"
+          body={
+            <p>
+              This removes the {medById.get(deleteTarget.medId)?.name ?? UNKNOWN_MED_NAME} dose
+              logged at {formatDateTimeWithZone(deleteTarget.actualInstant, deleteTarget.zone)}. It
+              will stop counting toward adherence.
+            </p>
+          }
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            deleteLogEntry(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
-function LogRow({ entry, med: m }: { entry: DoseLogEntry; med: Medication | undefined }) {
-  const late = entry.actualInstant > entry.scheduledInstant + 60_000;
+// Branches on taken/skipped/late/adjusted/over-cap to render one dose-log row
+// (Stage 18 FR-18.2/18.3); each branch is exercised by HistoryScreen.test.tsx,
+// splitting further would just move the same conditions into more, smaller,
+// harder-to-follow functions.
+function LogRow({
+  entry,
+  med: m,
+  onEdit,
+  onDelete,
+}: {
+  entry: DoseLogEntry;
+  med: Medication | undefined;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const skipped = entry.status === 'skipped';
+  // "Late" is a lateness-of-taking concept — doesn't apply to a dose that was
+  // never taken (Stage 18 FR-18.3).
+  const late = !skipped && entry.actualInstant > entry.scheduledInstant + 60_000;
   const overCap = entry.warnings.length > 0;
   return (
     <li className="flex items-start justify-between gap-2 py-2">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <ColorDot color={m?.color ?? '#64748b'} />
-          <span className="text-sm font-medium">{m?.name ?? entry.medId}</span>
+          <span className="text-sm font-medium">{m?.name ?? UNKNOWN_MED_NAME}</span>
           <span className="text-xs text-slate-400">
-            {entry.dose}
-            {entry.unit}
+            {skipped ? 'Skipped' : `${entry.dose}${entry.unit}`}
           </span>
         </div>
         <p className="mt-0.5 text-xs text-slate-400">
@@ -305,14 +391,87 @@ function LogRow({ entry, med: m }: { entry: DoseLogEntry; med: Medication | unde
           {' · scheduled '}
           {formatTimeWithZone(entry.scheduledInstant, entry.zone)}
         </p>
-        {overCap && <p className="text-xs text-red-300">⚠ {entry.warnings.join(' ')}</p>}
+        <LogRowNote entry={entry} skipped={skipped} overCap={overCap} />
       </div>
-      <div className="flex shrink-0 flex-wrap justify-end gap-1">
-        {entry.adjusted && <Tag className="border-amber-700 text-amber-300">adjusted</Tag>}
-        {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
-        {overCap && <Tag className="border-red-700 text-red-300">over-cap</Tag>}
+      <div className="flex shrink-0 flex-col items-end gap-1">
+        <LogRowTags entry={entry} skipped={skipped} late={late} overCap={overCap} />
+        <div className="flex gap-1">
+          {/* A skip has no dose amount to correct — delete and re-log instead
+              of offering a dose editor that doesn't apply to it. */}
+          {!skipped && (
+            <Button variant="secondary" onClick={onEdit}>
+              Edit
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            className="text-status-missed hover:bg-status-missed/10"
+            onClick={onDelete}
+          >
+            Delete
+          </Button>
+        </div>
       </div>
     </li>
+  );
+}
+
+// Extracted from `LogRow` to keep its own branching flat — pure tag rendering,
+// no behaviour.
+// Extracted from `LogRow` to keep its own branching flat — a skip's optional
+// reason and a taken dose's over-cap warning are mutually exclusive, one-line
+// notes, never both.
+function LogRowNote({
+  entry,
+  skipped,
+  overCap,
+}: {
+  entry: DoseLogEntry;
+  skipped: boolean;
+  overCap: boolean;
+}) {
+  if (skipped && entry.skipReason) {
+    return <p className="mt-0.5 text-xs italic text-slate-400">“{entry.skipReason}”</p>;
+  }
+  if (!skipped && overCap) {
+    return <p className="text-xs text-red-300">⚠ {entry.warnings.join(' ')}</p>;
+  }
+  return null;
+}
+
+// Stage 18 FR-18.10: this tag used to hardcode "over-cap" for any warning,
+// which misnamed a min-interval ("too soon") breach — the same leak the
+// acknowledgement button copy had, just at a different site.
+function breachTagLabel(kind: ReturnType<typeof classifyGuardrailBreach>): string {
+  if (kind === 'over-cap') return 'over-cap';
+  if (kind === 'too-soon') return 'too-soon';
+  return 'guardrail';
+}
+
+function LogRowTags({
+  entry,
+  skipped,
+  late,
+  overCap,
+}: {
+  entry: DoseLogEntry;
+  skipped: boolean;
+  late: boolean;
+  overCap: boolean;
+}) {
+  return (
+    <div className="flex flex-wrap justify-end gap-1">
+      {skipped && <Tag className="border-slate-500 text-slate-300">skipped</Tag>}
+      {!skipped && entry.adjusted && (
+        <Tag className="border-amber-700 text-amber-300">adjusted</Tag>
+      )}
+      {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
+      {!skipped && overCap && (
+        <Tag className="border-red-700 text-red-300">
+          {breachTagLabel(classifyGuardrailBreach(entry.warnings))}
+        </Tag>
+      )}
+    </div>
   );
 }
 

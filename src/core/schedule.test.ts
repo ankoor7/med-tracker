@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { nextOccurrenceForMed, plannedSlotsForDate } from './schedule';
 import { resolveWallTimeToInstant } from './time';
 import { logEntry, med, override, slot } from '../test/fixtures';
+import type { DoseLogEntry } from './types';
 
 const ZONE = 'Europe/London';
 const DATE = '2026-06-15';
@@ -178,13 +179,115 @@ describe('plannedSlotsForDate — dose overrides (Stage 12)', () => {
     expect(occ.overridden).toBeUndefined();
   });
 
-  it('does not override an already-taken occurrence', () => {
+  /**
+   * The occurrence for a slot with a pending one-time override AND a real log
+   * entry — shared by the "already resolved" tests below, which only differ
+   * in what that entry says happened (taken or skipped).
+   */
+  function occWithOverrideAndEntry(entryOverrides: Partial<DoseLogEntry> = {}) {
     const o = override({ slotId: 's1', medId: 'a', scheduledInstant: at('08:00'), dose: 60 });
-    const entry = logEntry({ slotId: 's1', medId: 'a', scheduledInstant: at('08:00'), zone: ZONE });
-    const occ = plannedSlotsForDate(DATE, [s], [a], [entry], ZONE, at('09:00'), [o])[0]!
-      .occurrences[0]!;
+    const entry = logEntry({
+      slotId: 's1',
+      medId: 'a',
+      scheduledInstant: at('08:00'),
+      zone: ZONE,
+      ...entryOverrides,
+    });
+    return plannedSlotsForDate(DATE, [s], [a], [entry], ZONE, at('09:00'), [o])[0]!.occurrences[0]!;
+  }
+
+  it('does not override an already-taken occurrence', () => {
+    const occ = occWithOverrideAndEntry();
     expect(occ.status).toBe('taken');
     expect(occ.dose).toBe(100); // the log entry, not the override, governs a taken dose
+  });
+
+  it('does not override an already-skipped occurrence (Stage 18 FR-18.3)', () => {
+    const occ = occWithOverrideAndEntry({ status: 'skipped', dose: 0 });
+    expect(occ.status).toBe('skipped');
+    expect(occ.overridden).toBeUndefined();
+  });
+});
+
+// Stage 18 FR-18.3 — a real log entry can resolve an occurrence as either
+// 'taken' or 'skipped'; a skip is a distinct, first-class outcome, not a
+// variant of "missed" or "due".
+describe('plannedSlotsForDate — skipped doses (Stage 18 FR-18.3)', () => {
+  const sensitive = med({ id: 'sens', adjustWhenLate: true });
+  const flexible = med({ id: 'flex', adjustWhenLate: false });
+  const s = slot({
+    id: 's1',
+    time: '08:00',
+    items: [
+      { medId: 'sens', dose: 100 },
+      { medId: 'flex', dose: 50 },
+    ],
+  });
+
+  it('a skip entry resolves the occurrence to "skipped", not "taken" or "missed"', () => {
+    const entry = logEntry({
+      slotId: 's1',
+      medId: 'sens',
+      scheduledInstant: at('08:00'),
+      actualInstant: at('08:10'),
+      status: 'skipped',
+      dose: 0,
+    });
+    const planned = plannedSlotsForDate(
+      DATE,
+      [s],
+      [sensitive, flexible],
+      [entry],
+      ZONE,
+      at('09:00'),
+    );
+    const occ = planned[0]!.occurrences.find((o) => o.medId === 'sens')!;
+    expect(occ.status).toBe('skipped');
+    expect(occ.logEntryId).toBe(entry.id);
+    expect(occ.assumed).toBeUndefined();
+  });
+
+  it('a skip has no dose amount taken — the planned occurrence still carries the normal schedule dose, never the skip entry (which is 0)', () => {
+    const entry = logEntry({
+      slotId: 's1',
+      medId: 'sens',
+      scheduledInstant: at('08:00'),
+      actualInstant: at('08:00'),
+      status: 'skipped',
+      dose: 0,
+    });
+    const occ = plannedSlotsForDate(
+      DATE,
+      [s],
+      [sensitive, flexible],
+      [entry],
+      ZONE,
+      at('09:00'),
+    )[0]!.occurrences.find((o) => o.medId === 'sens')!;
+    // The 0 lives on the log entry, not projected onto the planned occurrence —
+    // the planned dose still reflects the schedule (what was skipped).
+    expect(occ.dose).toBe(100);
+  });
+
+  it('a skip on one medication in a group leaves the other member unaffected', () => {
+    const entry = logEntry({
+      slotId: 's1',
+      medId: 'sens',
+      scheduledInstant: at('08:00'),
+      actualInstant: at('08:00'),
+      status: 'skipped',
+      dose: 0,
+    });
+    const planned = plannedSlotsForDate(
+      DATE,
+      [s],
+      [sensitive, flexible],
+      [entry],
+      ZONE,
+      at('07:00'),
+    );
+    const flex = planned[0]!.occurrences.find((o) => o.medId === 'flex')!;
+    expect(flex.status).toBe('upcoming'); // untouched by the sibling's skip
   });
 });
 

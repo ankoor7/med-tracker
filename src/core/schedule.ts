@@ -35,11 +35,11 @@ function findLogEntry(
 ): DoseLogEntry | undefined {
   // Match on the occurrence key (slotId, medId, localDate) so a dose stays mapped
   // to its slot across a mid-day zone change (FR-5.6), not bare instant equality.
+  // Matches either a taken or a skipped entry (Stage 18 FR-18.3) — both are real,
+  // resolved outcomes for the occurrence; which one it was is carried in
+  // `entry.status` and surfaced as-is below.
   return log.find(
-    (e) =>
-      !e.deleted &&
-      e.status === 'taken' &&
-      entryMatchesOccurrence(e, slotId, medId, scheduledInstant, date),
+    (e) => !e.deleted && entryMatchesOccurrence(e, slotId, medId, scheduledInstant, date),
   );
 }
 
@@ -50,7 +50,8 @@ function occurrenceStatus(
   med: Medication,
   assumeTakenOnTime: boolean,
 ): { status: PlannedOccurrence['status']; assumed: boolean } {
-  if (entry) return { status: 'taken', assumed: false };
+  // A real entry always wins, whatever it says happened — 'taken' or 'skipped'.
+  if (entry) return { status: entry.status, assumed: false };
   if (scheduledInstant > now) return { status: 'upcoming', assumed: false };
   // Past and untaken. With the assume-taken-on-time policy on, treat it as taken
   // on time — the user records only exceptions (late/missed) by logging/editing
@@ -116,13 +117,14 @@ export function plannedSlotsForDate(
         med,
         assumeTakenOnTime,
       );
-      // Apply a one-time override unless a real log entry already recorded the
-      // dose actually taken. An assumed-taken occurrence still reflects a pending
-      // override (the planned amount the user intended for that day).
-      const override =
-        status === 'taken' && !assumed
-          ? undefined
-          : findOverride(overrides, slot.id, item.medId, scheduledInstant, date);
+      // Apply a one-time override unless the occurrence is already resolved by a
+      // real log entry — taken or skipped (Stage 18 FR-18.3). An assumed-taken
+      // occurrence still reflects a pending override (the planned amount the
+      // user intended for that day).
+      const resolvedByRealEntry = (status === 'taken' && !assumed) || status === 'skipped';
+      const override = resolvedByRealEntry
+        ? undefined
+        : findOverride(overrides, slot.id, item.medId, scheduledInstant, date);
       occurrences.push({
         slotId: slot.id,
         medId: item.medId,

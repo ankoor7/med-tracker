@@ -5,6 +5,9 @@ const STYLES: Record<OccurrenceStatus, string> = {
   due: 'bg-status-due/15 text-status-due border-status-due/30',
   missed: 'bg-status-missed/15 text-status-missed border-status-missed/30',
   upcoming: 'bg-slate-700/40 text-slate-300 border-white/10',
+  // Deliberately withheld (Stage 18 FR-18.3) — visually distinct from both
+  // "taken" and "missed" so it never reads as a lapse.
+  skipped: 'bg-slate-600/20 text-slate-300 border-slate-500/40',
 };
 
 const LABELS: Record<OccurrenceStatus, string> = {
@@ -12,6 +15,7 @@ const LABELS: Record<OccurrenceStatus, string> = {
   due: 'Due',
   missed: 'Missed',
   upcoming: 'Upcoming',
+  skipped: 'Skipped',
 };
 
 export function StatusBadge({

@@ -144,6 +144,75 @@ describe('validateSyncRecord — typed payloads', () => {
     expect(res).toEqual({ ok: true });
   });
 
+  const validDoseLogPayload = {
+    id: 'd1',
+    slotId: 's1',
+    medId: 'm1',
+    scheduledInstant: 100,
+    actualInstant: 120,
+    dose: 50,
+    status: 'taken' as const,
+  };
+
+  it.each([
+    ['slotId', /slotId/],
+    ['medId', /medId/],
+    ['scheduledInstant', /scheduledInstant/],
+    ['actualInstant', /actualInstant/],
+    ['dose', /dose/],
+  ] as const)('rejects a doseLog missing %s', (field, reason) => {
+    const payload = { ...validDoseLogPayload };
+    delete (payload as Record<string, unknown>)[field];
+    const res = validateSyncRecord({
+      id: 'd1',
+      type: 'doseLog',
+      updatedAt: 1,
+      version: 1,
+      payload,
+    });
+    expect(res).toMatchObject({ ok: false, reason });
+  });
+
+  it('accepts a skipped doseLog with an optional skipReason (FR-18.3)', () => {
+    const res = validateSyncRecord({
+      id: 'd1',
+      type: 'doseLog',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        id: 'd1',
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: 100,
+        actualInstant: 120,
+        dose: 0,
+        status: 'skipped',
+        skipReason: 'clinician advised skipping',
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects a doseLog with a non-string skipReason', () => {
+    const res = validateSyncRecord({
+      id: 'd1',
+      type: 'doseLog',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        id: 'd1',
+        slotId: 's1',
+        medId: 'm1',
+        scheduledInstant: 100,
+        actualInstant: 120,
+        dose: 0,
+        status: 'skipped',
+        skipReason: 123,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /skipReason/ });
+  });
+
   it('rejects a doseLog with an invalid status', () => {
     const res = validateSyncRecord({
       id: 'd1',
@@ -200,6 +269,38 @@ describe('validateSyncRecord — typed payloads', () => {
       payload: { zone: 'Europe/London', adherenceWindowDays: 30, missedDayThreshold: 2 },
     });
     expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts settings with a valid onTimeWindowMinutes (FR-18.4)', () => {
+    const res = validateSyncRecord({
+      id: 'settings',
+      type: 'settings',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        zone: 'Europe/London',
+        adherenceWindowDays: 30,
+        missedDayThreshold: 2,
+        onTimeWindowMinutes: 90,
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects settings with a non-positive onTimeWindowMinutes', () => {
+    const res = validateSyncRecord({
+      id: 'settings',
+      type: 'settings',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        zone: 'Europe/London',
+        adherenceWindowDays: 30,
+        missedDayThreshold: 2,
+        onTimeWindowMinutes: 0,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /onTimeWindowMinutes/ });
   });
 
   it('accepts a valid eventType', () => {
@@ -263,7 +364,9 @@ describe('validateSyncRecord — typed payloads', () => {
     payload,
   });
 
-  it('accepts a valid regimenChange', () => {
+  // Back-compat: a pre-Stage-18 record carries display strings only and no
+  // machine layer. It must keep validating exactly as it did when it was written.
+  it('accepts a valid regimenChange (legacy, display-only diff)', () => {
     const res = validateSyncRecord(
       regimenChangeRecord({
         changedAt: 1000,
@@ -327,5 +430,269 @@ describe('validateSyncRecord — typed payloads', () => {
       }),
     );
     expect(res).toMatchObject({ ok: false, reason: /changes entry/ });
+  });
+
+  // Stage 18 FR-18.1 — the structured machine layer on each diff entry.
+  it('accepts a regimenChange whose diff carries key/medId/slotId + typed values', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        slotId: 's1',
+        summary: 'Morning: Lamotrigine dose 100mg → 150mg',
+        changes: [
+          {
+            field: 'Lamotrigine dose',
+            from: '100mg',
+            to: '150mg',
+            key: 'slot.dose',
+            medId: 'm1',
+            slotId: 's1',
+            fromValue: 100,
+            toValue: 150,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts boolean and null typed values', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'medication-retired',
+        summary: 'Retired Lamotrigine',
+        changes: [
+          {
+            field: 'Status',
+            from: 'Active',
+            to: 'Retired',
+            key: 'med.active',
+            medId: 'm1',
+            fromValue: true,
+            toValue: false,
+          },
+          {
+            field: 'Max single dose',
+            from: '200',
+            to: null,
+            key: 'med.guardrails.maxSingleDose',
+            medId: 'm1',
+            fromValue: 200,
+            toValue: null,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts the medication-reactivated kind', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'medication-reactivated',
+        summary: 'Resumed Lamotrigine',
+        changes: [
+          {
+            field: 'Status',
+            from: 'Retired',
+            to: 'Active',
+            key: 'med.active',
+            medId: 'm1',
+            fromValue: false,
+            toValue: true,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts a diff key it does not recognise (forward compatibility)', () => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'medication-updated',
+        summary: 'x',
+        changes: [
+          {
+            field: 'Future',
+            from: null,
+            to: '1',
+            key: 'med.newerThing',
+            fromValue: null,
+            toValue: 1,
+          },
+        ],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it.each([
+    ['a non-string key', { key: 42 }],
+    ['a non-string medId', { key: 'slot.dose', medId: 7 }],
+    ['a non-string slotId', { key: 'slot.dose', slotId: [] }],
+    ['an object typed value', { key: 'slot.dose', fromValue: { a: 1 }, toValue: 2 }],
+    ['a NaN typed value', { key: 'slot.dose', fromValue: Number.NaN, toValue: 2 }],
+  ])('rejects a diff entry with %s', (_label, extra) => {
+    const res = validateSyncRecord(
+      regimenChangeRecord({
+        changedAt: 1000,
+        zone: 'Europe/London',
+        kind: 'slot-updated',
+        summary: 'x',
+        changes: [{ field: 'Dose', from: '1', to: '2', ...extra }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /changes entry/ });
+  });
+
+  const validSnapshotMed = {
+    id: 'lam',
+    name: 'Lamotrigine',
+    unit: 'mg',
+    halfLifeHours: 30,
+    active: true,
+    guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
+  };
+  const validSnapshotSlot = {
+    id: 'morning',
+    time: '08:00',
+    items: [{ medId: 'lam', dose: 150 }],
+  };
+  const scheduleSnapshotRecord = (payload: object): unknown => ({
+    id: 'snap1',
+    type: 'scheduleSnapshot',
+    updatedAt: 1,
+    version: 1,
+    payload,
+  });
+
+  it('accepts a valid scheduleSnapshot', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [validSnapshotMed],
+        slots: [validSnapshotSlot],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts a scheduleSnapshot with empty medications and slots', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: [],
+      }),
+    );
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects a scheduleSnapshot missing effectiveFrom', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        zone: 'Europe/London',
+        medications: [],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /effectiveFrom/ });
+  });
+
+  it('rejects a scheduleSnapshot missing zone', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        medications: [],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /zone/ });
+  });
+
+  it('rejects a scheduleSnapshot whose medications is not an array', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: 'nope',
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /medications required/ });
+  });
+
+  it('rejects a scheduleSnapshot whose slots is not an array', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: 'nope',
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /slots required/ });
+  });
+
+  it('rejects a scheduleSnapshot medication entry missing an id', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [{ ...validSnapshotMed, id: undefined }],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /medications entry invalid/ });
+  });
+
+  it('rejects a scheduleSnapshot medication entry that fails medication validation', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [{ ...validSnapshotMed, halfLifeHours: 'lots' }],
+        slots: [],
+      }),
+    );
+    expect(res).toMatchObject({
+      ok: false,
+      reason: /medications entry invalid: medication\.halfLifeHours/,
+    });
+  });
+
+  it('rejects a scheduleSnapshot slot entry missing an id', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: [{ ...validSnapshotSlot, id: undefined }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /slots entry invalid/ });
+  });
+
+  it('rejects a scheduleSnapshot slot entry that fails slot validation', () => {
+    const res = validateSyncRecord(
+      scheduleSnapshotRecord({
+        effectiveFrom: 1000,
+        zone: 'Europe/London',
+        medications: [],
+        slots: [{ ...validSnapshotSlot, time: '8am' }],
+      }),
+    );
+    expect(res).toMatchObject({ ok: false, reason: /slots entry invalid: slot\.time/ });
   });
 });

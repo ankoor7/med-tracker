@@ -92,4 +92,74 @@ describe('adherenceTimeline', () => {
     const days = adherenceTimeline(slots, [flex], [], ZONE, 1, now);
     expect(days[0]).toMatchObject({ taken: 0, missed: 0, expected: 0 });
   });
+
+  // Stage 18 FR-18.4/FR-18.3 — the chart must break out on-time/late/skipped
+  // exactly as computeAdherence does (they share `classifyOccurrences`), so the
+  // summary figure and the chart can never disagree.
+  it('breaks out on-time, late, and skipped per day (FR-18.4, FR-18.3)', () => {
+    const m = med({ id: 'm1', adjustWhenLate: true });
+    const slots = [slot({ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }] })];
+    const onTimeDay = at('2026-06-14', '08:00');
+    const lateDay = at('2026-06-15', '08:00');
+    const skippedDay = at('2026-06-16', '08:00');
+    const log = [
+      logEntry({
+        medId: 'm1',
+        slotId: 's1',
+        scheduledInstant: onTimeDay,
+        actualInstant: onTimeDay,
+        status: 'taken',
+      }),
+      logEntry({
+        medId: 'm1',
+        slotId: 's1',
+        scheduledInstant: lateDay,
+        actualInstant: lateDay + 2 * 60 * 60_000, // 2h late
+        status: 'taken',
+      }),
+      logEntry({
+        medId: 'm1',
+        slotId: 's1',
+        scheduledInstant: skippedDay,
+        actualInstant: skippedDay,
+        status: 'skipped',
+        dose: 0,
+      }),
+    ];
+    const now = at('2026-06-16', '23:00');
+    const days = adherenceTimeline(slots, [m], log, ZONE, 3, now);
+    expect(days[0]).toMatchObject({ date: '2026-06-14', onTime: 1, late: 0, expected: 1 });
+    expect(days[1]).toMatchObject({ date: '2026-06-15', onTime: 0, late: 1, expected: 1 });
+    expect(days[2]).toMatchObject({ date: '2026-06-16', skipped: 1, expected: 0 });
+  });
+
+  // Stage 18 FR-18.6 — the calendar/chart consumer needs a per-day breakdown of
+  // how much of `onTime` is merely assumed, so a day made entirely of
+  // assumption never renders identically to a day of real logs.
+  it('reports assumedOnTime per day, distinct from genuinely-logged onTime (FR-18.6)', () => {
+    const m = med({ id: 'm1', adjustWhenLate: true });
+    const slots = [slot({ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }] })];
+    const realDay = at('2026-06-15', '08:00');
+    const real = logEntry({
+      medId: 'm1',
+      slotId: 's1',
+      scheduledInstant: realDay,
+      actualInstant: realDay,
+      status: 'taken',
+    });
+    const now = at('2026-06-16', '23:00');
+    // Day 1 (06-15) has a real log; day 2 (06-16) is unlogged and falls to the
+    // assume-on-time policy.
+    const days = adherenceTimeline(slots, [m], [real], ZONE, 2, now, true);
+    expect(days[0]).toMatchObject({ date: '2026-06-15', onTime: 1, assumedOnTime: 0 });
+    expect(days[1]).toMatchObject({ date: '2026-06-16', onTime: 1, assumedOnTime: 1 });
+  });
+
+  it('assumedOnTime is 0 throughout when assumeTakenOnTime is off', () => {
+    const m = med({ id: 'm1', adjustWhenLate: true });
+    const slots = [slot({ id: 's1', time: '08:00', items: [{ medId: 'm1', dose: 100 }] })];
+    const now = at('2026-06-16', '23:00');
+    const days = adherenceTimeline(slots, [m], [], ZONE, 2, now, false);
+    for (const day of days) expect(day.assumedOnTime).toBe(0);
+  });
 });

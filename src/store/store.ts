@@ -3,10 +3,15 @@ import {
   addDaysToIsoDate,
   buildRegimenChange,
   checkGuardrails,
+  DEFAULT_ON_TIME_WINDOW_MINUTES,
   describeMedicationAdded,
+  describeMedicationReactivated,
   describeMedicationRetired,
+  describeMedicationSlotCascade,
+  describeMedicationStartDate,
   describeSlot,
   diffMedication,
+  diffMedicationStartDate,
   diffSlot,
   entryMatchesOccurrence,
   isoDateInZone,
@@ -14,6 +19,7 @@ import {
   normalizeOuraData,
   overrideMatchesOccurrence,
   slotSubject,
+  buildScheduleSnapshot,
   type DoseLogEntry,
   type DoseOverride,
   type EventInstance,
@@ -21,18 +27,22 @@ import {
   type EventPropertyValue,
   type EventType,
   type Guardrails,
+  type IanaZone,
   type Instant,
   type Medication,
   type OuraDaySummary,
   type RegimenChange,
   type ScheduleItem,
+  type ScheduleSnapshot,
   type Settings,
   type Slot,
+  type SlotCascadeRemoval,
 } from '../core';
 import { getRepository, type TableName } from './repository';
 import { getOuraClient } from '../oura/registry';
 import { seedDataset } from './seed';
 import { mergeDatasets, type ImportMode } from './transfer';
+import { BASELINE_SNAPSHOT_AT } from './migrations';
 import type { Dataset } from '../core/types';
 
 /** Days of Oura history to fetch/overlay; at least two weeks for a useful chart. */
@@ -50,6 +60,9 @@ export interface MedicationInput {
   active: boolean;
   notes?: string;
   guardrails: Guardrails;
+  // When this medication was first prescribed (Stage 18 FR-18.1 piece 3).
+  // Optional: absent means "treat as always prescribed" — see `Medication.startedAt`.
+  startedAt?: Instant;
 }
 
 export interface SlotInput {
@@ -64,6 +77,16 @@ export interface LogDoseInput {
   scheduledInstant: Instant;
   dose: number;
   actualInstant: Instant;
+}
+
+interface SkipDoseInput {
+  slotId: string;
+  medId: string;
+  scheduledInstant: Instant;
+  /** When the skip was recorded (usually "now"). */
+  actualInstant: Instant;
+  /** Optional free-text reason (Stage 18 FR-18.3) — never required. */
+  reason?: string;
 }
 
 export interface DoseOverrideInput {
@@ -97,6 +120,7 @@ interface StoreState {
   eventTypes: EventType[];
   eventInstances: EventInstance[];
   regimenChanges: RegimenChange[];
+  scheduleSnapshots: ScheduleSnapshot[];
   settings: Settings;
 
   // ---- Oura health data (Stage 13) -----------------------------------------
@@ -112,6 +136,16 @@ interface StoreState {
   /** Fetch the last `OURA_WINDOW_DAYS` of Oura data via the active client. */
   syncOura: () => Promise<void>;
 
+  /**
+   * Run `fn` as ONE user-visible regimen edit (Stage 18 FR-18.1 follow-up).
+   * A single Save in the merged editor calls several of the mutating actions
+   * below; wrapping them here collapses the whole edit into one
+   * `ScheduleSnapshot` holding the final state, instead of one snapshot per
+   * action all sharing a millisecond (which `resolveScheduleAsOf` could then
+   * only order by random UUID). Reentrant — the actions bracket themselves too.
+   */
+  runRegimenEdit: <T>(fn: () => T) => T;
+
   addMedication: (input: MedicationInput) => Medication;
   updateMedication: (id: string, patch: Partial<MedicationInput>) => void;
   deleteMedication: (id: string) => void;
@@ -121,6 +155,13 @@ interface StoreState {
   deleteSlot: (id: string) => void;
 
   logDose: (input: LogDoseInput) => DoseLogEntry;
+  /**
+   * Record a deliberately withheld dose (Stage 18 FR-18.3) — distinct from
+   * simply forgetting. No amount is taken (`dose: 0`), so it can never corrupt
+   * a guardrail check or a daily total: `checkGuardrails` only sums entries with
+   * `status === 'taken'`, and this entry's status is `'skipped'`.
+   */
+  skipDose: (input: SkipDoseInput) => DoseLogEntry;
   takeGroup: (slotId: string, scheduledInstant: Instant) => DoseLogEntry[];
   deleteLogEntry: (id: string) => void;
 
@@ -131,6 +172,17 @@ interface StoreState {
    * refreshed warnings.
    */
   adjustDoseTime: (id: string, actualInstant: Instant) => DoseLogEntry | undefined;
+
+  /**
+   * Correct an already-logged dose's amount and/or time (Stage 18 FR-18.2,
+   * Today/History edit paths). Re-runs the shared guardrail check with the
+   * entry excluded from its own history. A correction of the record, not a
+   * regimen change — never records a Stage 16 `RegimenChange`.
+   */
+  editLogEntry: (
+    id: string,
+    patch: { dose?: number; actualInstant?: Instant },
+  ) => DoseLogEntry | undefined;
 
   /** Set/replace a one-time override of a future occurrence's dose (Stage 12). */
   setDoseOverride: (input: DoseOverrideInput) => DoseOverride;
@@ -191,6 +243,107 @@ export const useStore = create<StoreState>((set, get) => {
     persistUpsert('regimenChanges', change);
   };
 
+  const addSnapshot = (snapshot: ScheduleSnapshot): void => {
+    set((s) => ({ scheduleSnapshots: [...s.scheduleSnapshots, snapshot] }));
+    persistUpsert('scheduleSnapshots', snapshot);
+  };
+
+  // Stage 18 FR-18.1. This bracket surrounds every regimen-mutating action so
+  // past days can be rendered from the regimen that was actually in effect on
+  // them.
+  //
+  // The bracket is *reentrant*, and that is the point (FR-18.1 follow-up). One
+  // user-visible edit — a single Save in the merged editor — fires several store
+  // actions synchronously, and one snapshot per action meant 2-4 snapshots
+  // sharing a millisecond. `resolveScheduleAsOf` could only break such a tie by
+  // id (a random UUID), so a past day could render an intermediate, never-saved
+  // regimen. Nesting collapses the whole edit into ONE snapshot taken at the
+  // outermost close, holding the final state, so same-instant ties cannot arise
+  // from a single edit at all. It also cuts snapshot volume roughly 2-4x.
+  let regimenEditDepth = 0;
+
+  // The snapshot log being empty means a dataset that never ran the v2
+  // migration: without a baseline capturing the *pre-edit* regimen, this edit's
+  // snapshot would become the earliest one and resolution would project the
+  // post-edit state back over all history. Taken on the outermost open only.
+  const captureBaselineIfEmpty = (): void => {
+    const { scheduleSnapshots, medications, slots, settings } = get();
+    if (scheduleSnapshots.length > 0) return;
+    addSnapshot(
+      buildScheduleSnapshot(newId(), medications, slots, BASELINE_SNAPSHOT_AT, settings.zone),
+    );
+  };
+
+  const beginRegimenEdit = (): void => {
+    if (regimenEditDepth++ === 0) captureBaselineIfEmpty();
+  };
+
+  /**
+   * Close one level. Only the outermost close captures the post-edit regimen —
+   * by then every nested action has already written, so the snapshot holds the
+   * final state rather than an intermediate one.
+   */
+  const endRegimenEdit = (now: Instant): void => {
+    if (regimenEditDepth === 0) return; // unbalanced close: nothing open
+    if (--regimenEditDepth > 0) return; // inner action; the outermost close captures
+    const { medications, slots, settings } = get();
+    addSnapshot(buildScheduleSnapshot(newId(), medications, slots, now, settings.zone));
+  };
+
+  /**
+   * Run `fn` inside the bracket. `try/finally` is load-bearing: several actions
+   * return early when the target record is missing, and a leaked depth would
+   * suppress every later snapshot for the lifetime of the store.
+   */
+  const inRegimenEdit = <T>(now: Instant, fn: () => T): T => {
+    beginRegimenEdit();
+    try {
+      return fn();
+    } finally {
+      endRegimenEdit(now);
+    }
+  };
+
+  // A dose being resolved — taken (`logDose`) or deliberately withheld
+  // (`skipDose`, Stage 18 FR-18.3) — fulfils any pending one-time override for
+  // that occurrence (Stage 12 FR-12.4), so it must not linger or re-apply.
+  // Shared by both so the two correction paths can't drift.
+  const clearOverrideForOccurrence = (
+    slotId: string,
+    medId: string,
+    scheduledInstant: Instant,
+    zone: IanaZone,
+  ): void => {
+    const date = isoDateInZone(scheduledInstant, zone);
+    for (const o of get().doseOverrides) {
+      if (o.deleted) continue;
+      if (overrideMatchesOccurrence(o, slotId, medId, scheduledInstant, date)) {
+        get().clearDoseOverride(o.id);
+      }
+    }
+  };
+
+  // Shared by `logDose`/`skipDose`: the unit to stamp on a new dose-log entry
+  // is always the medication's current unit, defaulting to '' if the
+  // medication has since been removed (soft-tombstoned meds keep their unit,
+  // but a hard-deleted id should not blow up logging).
+  const unitForMed = (medId: string): string => {
+    const med = get().medications.find((m) => m.id === medId);
+    return med?.unit ?? '';
+  };
+
+  // Shared tail of `logDose`/`skipDose`: store the entry, persist it, and
+  // resolve any pending one-time override for the occurrence it fulfils.
+  const finalizeDoseLogEntry = (entry: DoseLogEntry): DoseLogEntry => {
+    set((s) => ({ doseLog: [...s.doseLog, entry] }));
+    persistUpsert('doseLog', entry);
+    // `entry.zone` is the zone in effect when it was recorded (same value
+    // `settings.zone` held a moment ago in the caller) — reuse it rather than
+    // re-reading settings, so this helper only depends on the entry itself.
+    clearOverrideForOccurrence(entry.slotId, entry.medId, entry.scheduledInstant, entry.zone);
+    return entry;
+  };
+
   return {
     hydrated: false,
     medications: [],
@@ -200,11 +353,13 @@ export const useStore = create<StoreState>((set, get) => {
     eventTypes: [],
     eventInstances: [],
     regimenChanges: [],
+    scheduleSnapshots: [],
     settings: {
       zone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London',
       adherenceWindowDays: 7,
       missedDayThreshold: 3,
       assumeTakenOnTime: true,
+      onTimeWindowMinutes: DEFAULT_ON_TIME_WINDOW_MINUTES,
       updatedAt: 0,
     },
 
@@ -236,6 +391,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (const s of data.slots) persistUpsert('slots', s);
       for (const t of data.eventTypes) persistUpsert('eventTypes', t);
       for (const c of data.regimenChanges) persistUpsert('regimenChanges', c);
+      for (const s of data.scheduleSnapshots) persistUpsert('scheduleSnapshots', s);
       persistSettings(data.settings);
     },
 
@@ -274,198 +430,229 @@ export const useStore = create<StoreState>((set, get) => {
       }
     },
 
+    runRegimenEdit: (fn) => inRegimenEdit(Date.now(), fn),
+
     addMedication: (input) => {
       const now = Date.now();
       const zone = get().settings.zone;
-      const med: Medication = stamp({ id: newId(), updatedAt: now, ...input }, now);
-      set((s) => ({ medications: [...s.medications, med] }));
-      persistUpsert('medications', med);
-      recordChange(
-        buildRegimenChange({
-          kind: 'medication-added',
-          subject: med.name,
-          medId: med.id,
-          changes: describeMedicationAdded(med),
-          now,
-          zone,
-        }),
-      );
-      return med;
+      return inRegimenEdit(now, () => {
+        const med: Medication = stamp({ id: newId(), updatedAt: now, ...input }, now);
+        set((s) => ({ medications: [...s.medications, med] }));
+        persistUpsert('medications', med);
+        recordChange(
+          buildRegimenChange({
+            kind: 'medication-added',
+            subject: med.name,
+            medId: med.id,
+            changes: [...describeMedicationAdded(med), ...describeMedicationStartDate(med, zone)],
+            now,
+            zone,
+          }),
+        );
+        return med;
+      });
     },
 
     updateMedication: (id, patch) => {
       const now = Date.now();
       const zone = get().settings.zone;
-      let prev: Medication | undefined;
-      let updated: Medication | undefined;
-      set((s) => ({
-        medications: s.medications.map((m) => {
-          if (m.id !== id) return m;
-          prev = m;
-          updated = stamp({ ...m, ...patch }, now);
-          return updated;
-        }),
-      }));
-      if (!prev || !updated) return;
-      persistUpsert('medications', updated);
-      // Derive a change from the pre-edit entity. An active → inactive transition
-      // is a retirement; the reverse re-introduces the medication; otherwise a
-      // prescription edit records only the fields that actually differ (no-op = none).
-      if (prev.active && !updated.active) {
-        recordChange(
-          buildRegimenChange({
-            kind: 'medication-retired',
-            subject: updated.name,
-            medId: id,
-            changes: describeMedicationRetired(),
-            now,
-            zone,
+      inRegimenEdit(now, () => {
+        let prev: Medication | undefined;
+        let updated: Medication | undefined;
+        set((s) => ({
+          medications: s.medications.map((m) => {
+            if (m.id !== id) return m;
+            prev = m;
+            updated = stamp({ ...m, ...patch }, now);
+            return updated;
           }),
-        );
-      } else if (!prev.active && updated.active) {
-        recordChange(
-          buildRegimenChange({
-            kind: 'medication-added',
-            subject: updated.name,
-            medId: id,
-            changes: describeMedicationAdded(updated),
-            now,
-            zone,
-          }),
-        );
-      } else {
-        const changes = diffMedication(prev, updated);
-        if (changes.length > 0) {
+        }));
+        if (!prev || !updated) return;
+        persistUpsert('medications', updated);
+        // `startedAt` can change alongside any of the three transitions below, so
+        // it's diffed once and folded into whichever change ends up recorded.
+        const startDateChanges = diffMedicationStartDate(prev, updated, zone);
+        // Derive a change from the pre-edit entity. An active → inactive transition
+        // is a retirement; the reverse re-introduces the medication; otherwise a
+        // prescription edit records only the fields that actually differ (no-op = none).
+        if (prev.active && !updated.active) {
           recordChange(
             buildRegimenChange({
-              kind: 'medication-updated',
+              kind: 'medication-retired',
               subject: updated.name,
               medId: id,
-              changes,
+              changes: [...describeMedicationRetired(updated), ...startDateChanges],
               now,
               zone,
             }),
           );
+        } else if (!prev.active && updated.active) {
+          // Resuming an existing prescription is not the same event as first
+          // prescribing one; recording both as `medication-added` made the two
+          // indistinguishable to anyone reading the history back.
+          recordChange(
+            buildRegimenChange({
+              kind: 'medication-reactivated',
+              subject: updated.name,
+              medId: id,
+              changes: [...describeMedicationReactivated(updated), ...startDateChanges],
+              now,
+              zone,
+            }),
+          );
+        } else {
+          const changes = [...diffMedication(prev, updated), ...startDateChanges];
+          if (changes.length > 0) {
+            recordChange(
+              buildRegimenChange({
+                kind: 'medication-updated',
+                subject: updated.name,
+                medId: id,
+                changes,
+                now,
+                zone,
+              }),
+            );
+          }
         }
-      }
+      });
     },
 
     deleteMedication: (id) => {
       const now = Date.now();
       const zone = get().settings.zone;
-      let tombstoned: Medication | undefined;
-      const affectedSlots: Slot[] = [];
-      set((s) => {
-        const medications = s.medications.map((m) => {
-          if (m.id !== id) return m;
-          tombstoned = stamp({ ...m, deleted: true }, now);
-          return tombstoned;
+      inRegimenEdit(now, () => {
+        let tombstoned: Medication | undefined;
+        const affectedSlots: Slot[] = [];
+        const removals: SlotCascadeRemoval[] = [];
+        set((s) => {
+          const medications = s.medications.map((m) => {
+            if (m.id !== id) return m;
+            tombstoned = stamp({ ...m, deleted: true }, now);
+            return tombstoned;
+          });
+          // FR-MED-4: remove the med from every slot; tombstone now-empty slots.
+          const slots = s.slots.map((slot) => {
+            const removed = slot.deleted ? undefined : slot.items.find((i) => i.medId === id);
+            if (!removed) return slot;
+            const items = slot.items.filter((i) => i.medId !== id);
+            const slotRemoved = items.length === 0;
+            const next = stamp(
+              slotRemoved ? { ...slot, items, deleted: true } : { ...slot, items },
+              now,
+            );
+            // Capture the *pre-edit* slot: it still names the affected occurrence
+            // and carries the dose that is about to disappear.
+            removals.push({ slot, dose: removed.dose, slotRemoved });
+            affectedSlots.push(next);
+            return next;
+          });
+          return { medications, slots };
         });
-        // FR-MED-4: remove the med from every slot; tombstone now-empty slots.
-        const slots = s.slots.map((slot) => {
-          if (slot.deleted || !slot.items.some((i) => i.medId === id)) return slot;
-          const items = slot.items.filter((i) => i.medId !== id);
-          const next = stamp(
-            items.length === 0 ? { ...slot, items, deleted: true } : { ...slot, items },
-            now,
+        if (tombstoned) persistUpsert('medications', tombstoned);
+        for (const slot of affectedSlots) persistUpsert('slots', slot);
+        // Retiring the medication subsumes the cascade slot edits into one marker
+        // — but the cascade is now recorded in that marker's diff rather than lost.
+        if (tombstoned) {
+          const med = tombstoned;
+          recordChange(
+            buildRegimenChange({
+              kind: 'medication-retired',
+              subject: med.name,
+              medId: id,
+              changes: [
+                ...describeMedicationRetired(med),
+                ...describeMedicationSlotCascade(med, removals),
+              ],
+              now,
+              zone,
+            }),
           );
-          affectedSlots.push(next);
-          return next;
-        });
-        return { medications, slots };
+        }
       });
-      if (tombstoned) persistUpsert('medications', tombstoned);
-      for (const slot of affectedSlots) persistUpsert('slots', slot);
-      // Retiring the medication subsumes the cascade slot edits: one marker.
-      if (tombstoned) {
-        recordChange(
-          buildRegimenChange({
-            kind: 'medication-retired',
-            subject: tombstoned.name,
-            medId: id,
-            changes: describeMedicationRetired(),
-            now,
-            zone,
-          }),
-        );
-      }
     },
 
     addSlot: (input) => {
       const now = Date.now();
       const { settings, medications } = get();
-      const slot: Slot = stamp({ id: newId(), updatedAt: now, ...input }, now);
-      set((s) => ({ slots: [...s.slots, slot] }));
-      persistUpsert('slots', slot);
-      const medsById = new Map(medications.map((m) => [m.id, m]));
-      recordChange(
-        buildRegimenChange({
-          kind: 'slot-added',
-          subject: slotSubject(slot),
-          slotId: slot.id,
-          changes: describeSlot(slot, medsById, 'added'),
-          now,
-          zone: settings.zone,
-        }),
-      );
-      return slot;
+      return inRegimenEdit(now, () => {
+        const slot: Slot = stamp({ id: newId(), updatedAt: now, ...input }, now);
+        set((s) => ({ slots: [...s.slots, slot] }));
+        persistUpsert('slots', slot);
+        const medsById = new Map(medications.map((m) => [m.id, m]));
+        recordChange(
+          buildRegimenChange({
+            kind: 'slot-added',
+            subject: slotSubject(slot),
+            slotId: slot.id,
+            changes: describeSlot(slot, medsById, 'added'),
+            now,
+            zone: settings.zone,
+          }),
+        );
+        return slot;
+      });
     },
 
     updateSlot: (id, patch) => {
       const now = Date.now();
       const { settings, medications } = get();
-      let prev: Slot | undefined;
-      let updated: Slot | undefined;
-      set((s) => ({
-        slots: s.slots.map((slot) => {
-          if (slot.id !== id) return slot;
-          prev = slot;
-          updated = stamp({ ...slot, ...patch }, now);
-          return updated;
-        }),
-      }));
-      if (!prev || !updated) return;
-      persistUpsert('slots', updated);
-      const medsById = new Map(medications.map((m) => [m.id, m]));
-      const changes = diffSlot(prev, updated, medsById);
-      if (changes.length > 0) {
-        recordChange(
-          buildRegimenChange({
-            kind: 'slot-updated',
-            subject: slotSubject(updated),
-            slotId: id,
-            changes,
-            now,
-            zone: settings.zone,
+      inRegimenEdit(now, () => {
+        let prev: Slot | undefined;
+        let updated: Slot | undefined;
+        set((s) => ({
+          slots: s.slots.map((slot) => {
+            if (slot.id !== id) return slot;
+            prev = slot;
+            updated = stamp({ ...slot, ...patch }, now);
+            return updated;
           }),
-        );
-      }
+        }));
+        if (!prev || !updated) return;
+        persistUpsert('slots', updated);
+        const medsById = new Map(medications.map((m) => [m.id, m]));
+        const changes = diffSlot(prev, updated, medsById);
+        if (changes.length > 0) {
+          recordChange(
+            buildRegimenChange({
+              kind: 'slot-updated',
+              subject: slotSubject(updated),
+              slotId: id,
+              changes,
+              now,
+              zone: settings.zone,
+            }),
+          );
+        }
+      });
     },
 
     deleteSlot: (id) => {
       const now = Date.now();
       const { settings, medications } = get();
-      let tombstoned: Slot | undefined;
-      set((s) => ({
-        slots: s.slots.map((slot) => {
-          if (slot.id !== id) return slot;
-          tombstoned = stamp({ ...slot, deleted: true }, now);
-          return tombstoned;
-        }),
-      }));
-      if (!tombstoned) return;
-      persistUpsert('slots', tombstoned);
-      const medsById = new Map(medications.map((m) => [m.id, m]));
-      recordChange(
-        buildRegimenChange({
-          kind: 'slot-removed',
-          subject: slotSubject(tombstoned),
-          slotId: id,
-          changes: describeSlot(tombstoned, medsById, 'removed'),
-          now,
-          zone: settings.zone,
-        }),
-      );
+      inRegimenEdit(now, () => {
+        let tombstoned: Slot | undefined;
+        set((s) => ({
+          slots: s.slots.map((slot) => {
+            if (slot.id !== id) return slot;
+            tombstoned = stamp({ ...slot, deleted: true }, now);
+            return tombstoned;
+          }),
+        }));
+        if (!tombstoned) return;
+        persistUpsert('slots', tombstoned);
+        const medsById = new Map(medications.map((m) => [m.id, m]));
+        recordChange(
+          buildRegimenChange({
+            kind: 'slot-removed',
+            subject: slotSubject(tombstoned),
+            slotId: id,
+            changes: describeSlot(tombstoned, medsById, 'removed'),
+            now,
+            zone: settings.zone,
+          }),
+        );
+      });
     },
 
     logDose: (input) => {
@@ -495,19 +682,34 @@ export const useStore = create<StoreState>((set, get) => {
         },
         now,
       );
-      set((s) => ({ doseLog: [...s.doseLog, entry] }));
-      persistUpsert('doseLog', entry);
+      return finalizeDoseLogEntry(entry);
+    },
 
-      // Consume any one-time override for this occurrence — it's been fulfilled
-      // (Stage 12 FR-12.4), so it must not linger or re-apply.
-      const date = isoDateInZone(input.scheduledInstant, settings.zone);
-      for (const o of get().doseOverrides) {
-        if (o.deleted) continue;
-        if (overrideMatchesOccurrence(o, input.slotId, input.medId, input.scheduledInstant, date)) {
-          get().clearDoseOverride(o.id);
-        }
-      }
-      return entry;
+    skipDose: (input) => {
+      const { settings } = get();
+      const now = Date.now();
+      const unit = unitForMed(input.medId);
+      const reason = input.reason?.trim();
+
+      const entry: DoseLogEntry = stamp(
+        {
+          id: newId(),
+          slotId: input.slotId,
+          medId: input.medId,
+          scheduledInstant: input.scheduledInstant,
+          actualInstant: input.actualInstant,
+          dose: 0, // no amount was taken — never originates a dose value
+          unit,
+          zone: settings.zone,
+          status: 'skipped' as const,
+          adjusted: false,
+          warnings: [],
+          ...(reason ? { skipReason: reason } : {}),
+          updatedAt: now,
+        },
+        now,
+      );
+      return finalizeDoseLogEntry(entry);
     },
 
     takeGroup: (slotId, scheduledInstant) => {
@@ -518,13 +720,12 @@ export const useStore = create<StoreState>((set, get) => {
       const date = isoDateInZone(scheduledInstant, settings.zone);
       const created: DoseLogEntry[] = [];
       for (const item of slot.items) {
-        // Skip items already taken for this occurrence (matched on the occurrence
-        // key, so a prior log still counts across a zone change — FR-5.6).
+        // Skip items already resolved for this occurrence — taken or
+        // deliberately skipped (Stage 18 FR-18.3) — matched on the occurrence
+        // key, so a prior entry still counts across a zone change (FR-5.6).
         const exists = get().doseLog.some(
           (e) =>
-            !e.deleted &&
-            e.status === 'taken' &&
-            entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
+            !e.deleted && entryMatchesOccurrence(e, slotId, item.medId, scheduledInstant, date),
         );
         if (exists) continue;
         // Honour a one-time override for this occurrence (Stage 12); logDose then
@@ -559,24 +760,38 @@ export const useStore = create<StoreState>((set, get) => {
       if (tombstoned) persistUpsert('doseLog', tombstoned);
     },
 
-    adjustDoseTime: (id, actualInstant) => {
-      const { doseLog, medications, settings } = get();
+    // Re-time an already-logged dose (calendar drag, Stage 13) — delegates to
+    // `editLogEntry` so the two correction paths (drag vs. edit form, Stage 18
+    // FR-18.2) share one guardrail-recheck implementation.
+    adjustDoseTime: (id, actualInstant) => get().editLogEntry(id, { actualInstant }),
+
+    // Correct an already-logged dose's amount and/or time (Stage 18 FR-18.2).
+    // This is a correction of the record, not a regimen change: it never
+    // originates a dose (the caller supplies both fields), and — unlike
+    // `updateMedication`/`updateSlot` — it deliberately does NOT call
+    // `recordChange`; Stage 16 markers describe changes to the *regimen*, not
+    // fixes to what was recorded about a single past dose.
+    editLogEntry: (id, patch) => {
+      const { doseLog, slots, medications, settings } = get();
       const entry = doseLog.find((e) => e.id === id);
       if (!entry || entry.deleted) return undefined;
       const now = Date.now();
       const med = medications.find((m) => m.id === entry.medId);
-      // Re-validate the (unchanged) dose at the new time against the shared
-      // guardrails, excluding this entry from the prior-dose history so it never
-      // counts against itself.
+      const dose = patch.dose ?? entry.dose;
+      const actualInstant = patch.actualInstant ?? entry.actualInstant;
+      // Re-validate against the shared guardrails, excluding this entry from the
+      // prior-dose history so an edit never counts against itself.
       const others = doseLog.filter((e) => e.id !== id);
       const warnings = med
-        ? checkGuardrails(med, entry.dose, actualInstant, others, settings.zone)
+        ? checkGuardrails(med, dose, actualInstant, others, settings.zone)
         : entry.warnings;
+      const normalDose = scheduledDoseFor(slots, entry.slotId, entry.medId);
+      const adjusted = normalDose != null && dose !== normalDose;
       let updated: DoseLogEntry | undefined;
       set((s) => ({
         doseLog: s.doseLog.map((e) => {
           if (e.id !== id) return e;
-          updated = stamp({ ...e, actualInstant, warnings }, now);
+          updated = stamp({ ...e, dose, actualInstant, warnings, adjusted }, now);
           return updated;
         }),
       }));
@@ -759,6 +974,7 @@ export const useStore = create<StoreState>((set, get) => {
         eventTypes,
         eventInstances,
         regimenChanges,
+        scheduleSnapshots,
         settings,
       } = get();
       const merged = mergeDatasets(
@@ -770,6 +986,7 @@ export const useStore = create<StoreState>((set, get) => {
           eventTypes,
           eventInstances,
           regimenChanges,
+          scheduleSnapshots,
           settings,
         },
         incoming,
@@ -784,6 +1001,7 @@ export const useStore = create<StoreState>((set, get) => {
       for (const t of merged.eventTypes) persistUpsert('eventTypes', t);
       for (const e of merged.eventInstances) persistUpsert('eventInstances', e);
       for (const c of merged.regimenChanges) persistUpsert('regimenChanges', c);
+      for (const s of merged.scheduleSnapshots) persistUpsert('scheduleSnapshots', s);
       persistSettings(merged.settings);
     },
   };

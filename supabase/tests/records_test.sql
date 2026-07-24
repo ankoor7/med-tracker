@@ -8,7 +8,7 @@
 --   - validate_record parity with src/core/cloudRecord.ts validateSyncRecord.
 
 begin;
-select plan(21);
+select plan(27);
 
 -- Two real auth users (records.user_id FKs auth.users).
 insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at)
@@ -64,6 +64,40 @@ select is(
   validate_record('{"id":"o1","type":"doseOverride","updatedAt":1,"version":1,"payload":
     {"slotId":"s1","scheduledInstant":1000,"zone":"Europe/London","dose":50}}'::jsonb),
   'doseOverride.medId required', 'doseOverride missing medId rejected');
+
+-- doseLog parity, including Stage 18 FR-18.3 (skipped status + optional reason).
+select is(
+  validate_record('{"id":"d1","type":"doseLog","updatedAt":1,"version":1,"payload":
+    {"slotId":"s1","medId":"m1","scheduledInstant":100,"actualInstant":120,"dose":50,
+     "status":"taken"}}'::jsonb),
+  null, 'valid taken doseLog passes');
+select is(
+  validate_record('{"id":"d1","type":"doseLog","updatedAt":1,"version":1,"payload":
+    {"slotId":"s1","medId":"m1","scheduledInstant":100,"actualInstant":120,"dose":0,
+     "status":"skipped","skipReason":"clinician advised skipping"}}'::jsonb),
+  null, 'valid skipped doseLog with a reason passes');
+select is(
+  validate_record('{"id":"d1","type":"doseLog","updatedAt":1,"version":1,"payload":
+    {"slotId":"s1","medId":"m1","scheduledInstant":100,"actualInstant":120,"dose":0,
+     "status":"skipped","skipReason":123}}'::jsonb),
+  'doseLog.skipReason must be a string', 'non-string skipReason rejected');
+select is(
+  validate_record('{"id":"d1","type":"doseLog","updatedAt":1,"version":1,"payload":
+    {"slotId":"s1","medId":"m1","scheduledInstant":100,"actualInstant":120,"dose":50,
+     "status":"maybe"}}'::jsonb),
+  'doseLog.status invalid', 'invalid doseLog status rejected');
+
+-- settings parity, including Stage 18 FR-18.4 (global on-time window).
+select is(
+  validate_record('{"id":"settings","type":"settings","updatedAt":1,"version":1,"payload":
+    {"zone":"Europe/London","adherenceWindowDays":7,"missedDayThreshold":3,
+     "onTimeWindowMinutes":90}}'::jsonb),
+  null, 'valid settings with onTimeWindowMinutes passes');
+select is(
+  validate_record('{"id":"settings","type":"settings","updatedAt":1,"version":1,"payload":
+    {"zone":"Europe/London","adherenceWindowDays":7,"missedDayThreshold":3,
+     "onTimeWindowMinutes":0}}'::jsonb),
+  'settings.onTimeWindowMinutes must be a positive number', 'non-positive onTimeWindowMinutes rejected');
 
 -- ---------------------------------------------------------------------------
 -- push_records — LWW guard, idempotency, mixed batch

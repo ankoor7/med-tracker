@@ -22,6 +22,14 @@ export interface Medication {
   active: boolean;
   notes?: string;
   guardrails: Guardrails;
+  // When this medication was first prescribed (Stage 18 FR-18.1). Optional:
+  // a medication with no `startedAt` is treated as having always existed, which
+  // preserves pre-Stage-18 behaviour. Once set, calendar days entirely before it
+  // are excluded from the medication's expected-dose count, so widening the
+  // adherence window can no longer fabricate history predating the regimen.
+  // It is a statement about the past, so it applies retroactively: the current
+  // value governs every historical resolution, including inside snapshots.
+  startedAt?: Instant;
   updatedAt: Instant;
   version?: number; // sync metadata (Stage 2+)
   deleted?: boolean;
@@ -50,12 +58,16 @@ export interface DoseLogEntry {
   medId: string;
   scheduledInstant: Instant;
   actualInstant: Instant;
-  dose: number; // actual amount taken (may be adjusted)
+  dose: number; // actual amount taken (may be adjusted); 0 for a skipped entry
   unit: string;
   zone: IanaZone; // zone in effect when taken
   status: DoseStatus;
   adjusted: boolean; // dose !== scheduled dose
   warnings: string[]; // guardrail messages at log time
+  // Optional free-text reason for a deliberately withheld dose (Stage 18
+  // FR-18.3), e.g. "clinician advised skipping". Only meaningful when
+  // `status === 'skipped'`; never required.
+  skipReason?: string;
   updatedAt: Instant;
   version?: number;
   deleted?: boolean;
@@ -85,20 +97,64 @@ export interface DoseOverride {
 // as same-day-grouped, tappable markers on the timeline charts.
 
 export type RegimenChangeKind =
-  | 'medication-added'
+  | 'medication-added' // first prescribed
+  | 'medication-reactivated' // resumed after retirement (Stage 18: was also 'medication-added')
   | 'medication-updated' // name, unit, half-life, timing-sensitivity, guardrails, notes
   | 'medication-retired' // active → false (or deleted)
   | 'slot-added'
   | 'slot-updated' // time, label, or a per-med amount in the slot
   | 'slot-removed';
 
-// One concrete field that changed, in display-ready form. `from`/`to` are
-// pre-formatted strings (e.g. "100mg", "08:00") so rendering needs no schema;
-// null means the value was newly set (`from`) or cleared/removed (`to`).
+/**
+ * Stable machine identity for a changed field (Stage 18 FR-18.1). Unlike the
+ * human `field` label, these are part of the stored schema: renaming a label is
+ * a copy edit, renaming a key is a data migration.
+ */
+export type RegimenFieldKey =
+  | 'med.name'
+  | 'med.unit'
+  | 'med.halfLifeHours'
+  | 'med.adjustWhenLate'
+  | 'med.notes'
+  | 'med.active'
+  | 'med.guardrails.maxSingleDose'
+  | 'med.guardrails.maxDailyDose'
+  | 'med.guardrails.minIntervalHours'
+  | 'med.startedAt'
+  | 'slot.time'
+  | 'slot.label'
+  | 'slot.dose'
+  | 'slot.removed';
+
+/** The typed value of a changed field; null means unset/absent, never "unknown". */
+export type RegimenFieldValue = string | number | boolean | null;
+
+/**
+ * One concrete field that changed.
+ *
+ * `field`/`from`/`to` are the display layer: pre-formatted strings (e.g. "100mg",
+ * "08:00") so rendering needs no schema; null means the value was newly set
+ * (`from`) or cleared/removed (`to`).
+ *
+ * `key`/`medId`/`slotId`/`fromValue`/`toValue` are the machine layer added in
+ * Stage 18 (FR-18.1). They carry *identity* (which medication, which slot) and
+ * *typed* values, so a change no longer depends on a display name that can be
+ * duplicated, renamed after the fact, or lost when the entity is deleted.
+ *
+ * They are **optional** because records written before Stage 18 do not have
+ * them. Absence means "this record predates structured diffs" — it is never
+ * inferred from the display strings. Use `isStructuredFieldChange` (in
+ * `core/regimenChanges.ts`) to narrow; treat anything else as display-only.
+ */
 export interface RegimenFieldChange {
   field: string; // e.g. "Morning dose", "Name", "Max single dose", "Time"
   from: string | null;
   to: string | null;
+  key?: RegimenFieldKey;
+  medId?: string; // the medication this field belongs to, when applicable
+  slotId?: string; // the slot this field belongs to, when applicable
+  fromValue?: RegimenFieldValue;
+  toValue?: RegimenFieldValue;
 }
 
 export interface RegimenChange {
@@ -116,6 +172,29 @@ export interface RegimenChange {
   deleted?: boolean;
 }
 
+// --- Effective-dated schedule snapshots (Stage 18 FR-18.1) --------------------
+//
+// The historical source of truth for "what was my regimen on day D". The store
+// writes one snapshot of the whole regimen (medications + slots) after every
+// mutating action, stamped with the instant it took effect. Read paths resolve a
+// past day against these rather than reapplying today's configuration — see
+// `core/scheduleHistory.ts`.
+//
+// This is deliberately independent of `RegimenChange`: a change record is a
+// derived, display-oriented diff for the marker layer, whereas a snapshot is the
+// complete state. Historical rendering must not depend on a diff being complete
+// or reversible.
+export interface ScheduleSnapshot {
+  id: string;
+  effectiveFrom: Instant; // when this regimen took effect (UTC ms)
+  zone: IanaZone; // zone in effect when captured (provenance; resolution uses the query zone)
+  medications: Medication[]; // full copies, so the snapshot stands alone
+  slots: Slot[];
+  updatedAt: Instant; // sync metadata (equal to effectiveFrom at creation)
+  version?: number;
+  deleted?: boolean;
+}
+
 export interface Settings {
   zone: IanaZone;
   adherenceWindowDays: number;
@@ -126,6 +205,15 @@ export interface Settings {
   // where a past, untaken dose is "missed"/"due". Optional for back-compat with
   // datasets written before this field existed; read it as `?? true`.
   assumeTakenOnTime?: boolean;
+  // Global on-time window, in minutes, for lateness-aware adherence (Stage 18
+  // FR-18.4): a timing-sensitive dose logged within this many minutes of its
+  // scheduled time counts as "on time"; beyond it, as "late" (still taken —
+  // never folded into "missed"). Single global setting, deliberately with no
+  // per-medication override (settled design decision, spec §7 item 2), so it
+  // applies uniformly. Optional for back-compat with datasets written before
+  // this field existed; read it as `?? DEFAULT_ON_TIME_WINDOW_MINUTES`
+  // (`core/adherence.ts`).
+  onTimeWindowMinutes?: number;
   updatedAt: Instant;
   version?: number;
 }
@@ -189,12 +277,13 @@ export interface Dataset {
   eventTypes: EventType[];
   eventInstances: EventInstance[];
   regimenChanges: RegimenChange[];
+  scheduleSnapshots: ScheduleSnapshot[];
   settings: Settings;
 }
 
 // A single occurrence of one scheduled medication on a given day.
 // Produced by schedule enumeration; consumed by the Today screen.
-export type OccurrenceStatus = 'upcoming' | 'taken' | 'due' | 'missed';
+export type OccurrenceStatus = 'upcoming' | 'taken' | 'due' | 'missed' | 'skipped';
 
 export interface PlannedOccurrence {
   slotId: string;

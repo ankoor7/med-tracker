@@ -7,7 +7,7 @@
 --   - RLS: user A cannot see user B's regimen-change rows.
 
 begin;
-select plan(14);
+select plan(22);
 
 -- Two real auth users (records.user_id FKs auth.users).
 insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at)
@@ -74,6 +74,73 @@ select is(
   validate_record(jsonb_build_object('id','rc1','type','regimenChange','updatedAt',1,'version',1,
     'deleted',true,'payload',jsonb_build_object())),
   null, 'tombstone regimenChange skips deep validation');
+
+-- ---------------------------------------------------------------------------
+-- Stage 18 FR-18.1 — structured diffs (migration 0009)
+-- ---------------------------------------------------------------------------
+
+-- A fully structured slot-dose change: stable key, medId/slotId identity, and
+-- typed numeric from/to values alongside the display strings.
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"slot-updated","slotId":"s1",
+     "summary":"Morning: Lamotrigine dose 100mg → 150mg",
+     "changes":[{"field":"Lamotrigine dose","from":"100mg","to":"150mg","key":"slot.dose",
+                 "medId":"m1","slotId":"s1","fromValue":100,"toValue":150}]}}'::jsonb),
+  null, 'structured field change (key/medId/slotId/typed values) passes');
+
+-- Backward compatibility: a pre-Stage-18 record has display strings only.
+-- `_rchange` builds exactly that shape, and it must still validate (covered
+-- above too, but asserted here as the explicit back-compat guarantee).
+select is(validate_record(_rchange('rc-old', 1000, 1)), null,
+  'legacy regimenChange without the machine layer still passes');
+
+-- Boolean and null typed values (a status flip, a cleared guardrail).
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"medication-retired","summary":"Retired X",
+     "changes":[{"field":"Status","from":"Active","to":"Retired","key":"med.active",
+                 "medId":"m1","fromValue":true,"toValue":false},
+                {"field":"Max single dose","from":"200","to":null,
+                 "key":"med.guardrails.maxSingleDose","medId":"m1",
+                 "fromValue":200,"toValue":null}]}}'::jsonb),
+  null, 'boolean and null typed values accepted');
+
+-- The new kind is accepted; create and reactivate are now distinguishable.
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"medication-reactivated","summary":"Resumed X",
+     "changes":[{"field":"Status","from":"Retired","to":"Active","key":"med.active",
+                 "medId":"m1","fromValue":false,"toValue":true}]}}'::jsonb),
+  null, 'medication-reactivated kind accepted');
+
+-- A key this schema does not name must still sync (forward compatibility).
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"slot-updated","summary":"x",
+     "changes":[{"field":"Future","from":null,"to":"1","key":"med.somethingNewer",
+                 "fromValue":null,"toValue":1}]}}'::jsonb),
+  null, 'unknown-but-well-formed key accepted (forward compatible)');
+
+-- Malformed machine layer is rejected.
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"slot-updated","summary":"x",
+     "changes":[{"field":"Dose","from":"1","to":"2","key":42}]}}'::jsonb),
+  'regimenChange.changes entry invalid', 'non-string key rejected');
+
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"slot-updated","summary":"x",
+     "changes":[{"field":"Dose","from":"1","to":"2","key":"slot.dose","medId":7}]}}'::jsonb),
+  'regimenChange.changes entry invalid', 'non-string medId rejected');
+
+select is(
+  validate_record('{"id":"rc1","type":"regimenChange","updatedAt":1,"version":1,"payload":
+    {"changedAt":1,"zone":"Europe/London","kind":"slot-updated","summary":"x",
+     "changes":[{"field":"Dose","from":"1","to":"2","key":"slot.dose",
+                 "fromValue":{"a":1},"toValue":2}]}}'::jsonb),
+  'regimenChange.changes entry invalid', 'object typed value rejected');
 
 -- ---------------------------------------------------------------------------
 -- push_records — LWW guard for a change record

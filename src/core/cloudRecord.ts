@@ -15,6 +15,7 @@ export type RecordType =
   | 'eventType'
   | 'eventInstance'
   | 'regimenChange'
+  | 'scheduleSnapshot'
   | 'settings';
 
 export const RECORD_TYPES: readonly RecordType[] = [
@@ -25,6 +26,7 @@ export const RECORD_TYPES: readonly RecordType[] = [
   'eventType',
   'eventInstance',
   'regimenChange',
+  'scheduleSnapshot',
   'settings',
 ];
 
@@ -34,6 +36,7 @@ export const RECORD_TYPES: readonly RecordType[] = [
  */
 const REGIMEN_CHANGE_KIND_NAMES: readonly string[] = [
   'medication-added',
+  'medication-reactivated',
   'medication-updated',
   'medication-retired',
   'slot-added',
@@ -118,25 +121,28 @@ export function validateSyncRecord(rec: unknown): ValidationResult {
   return validatePayload(rec.type as RecordType, rec.payload);
 }
 
+/**
+ * Dispatch table, one entry per `RecordType`. A `Record<RecordType, ...>` (rather
+ * than a switch) makes an unhandled type a compile error instead of a runtime
+ * branch, and keeps `validatePayload` itself a single lookup.
+ */
+const PAYLOAD_VALIDATORS: Record<
+  RecordType,
+  (payload: Record<string, unknown>) => ValidationResult
+> = {
+  medication: validateMedication,
+  slot: validateSlot,
+  doseLog: validateDoseLog,
+  doseOverride: validateDoseOverride,
+  eventType: validateEventType,
+  eventInstance: validateEventInstance,
+  regimenChange: validateRegimenChange,
+  scheduleSnapshot: validateScheduleSnapshot,
+  settings: validateSettings,
+};
+
 function validatePayload(type: RecordType, payload: Record<string, unknown>): ValidationResult {
-  switch (type) {
-    case 'medication':
-      return validateMedication(payload);
-    case 'slot':
-      return validateSlot(payload);
-    case 'doseLog':
-      return validateDoseLog(payload);
-    case 'doseOverride':
-      return validateDoseOverride(payload);
-    case 'eventType':
-      return validateEventType(payload);
-    case 'eventInstance':
-      return validateEventInstance(payload);
-    case 'regimenChange':
-      return validateRegimenChange(payload);
-    case 'settings':
-      return validateSettings(payload);
-  }
+  return PAYLOAD_VALIDATORS[type](payload);
 }
 
 function validateGuardrails(v: unknown): boolean {
@@ -167,6 +173,10 @@ function validateSlot(p: Record<string, unknown>): ValidationResult {
   return ok;
 }
 
+// One required-field check per doseLog property plus the Stage 18 FR-18.3
+// optional-skipReason branch; each guard clause is covered in
+// cloudRecord.test.ts and mirrored 1:1 in supabase/tests/records_test.sql
+// (parity is the point — see that file).
 function validateDoseLog(p: Record<string, unknown>): ValidationResult {
   if (!isNonEmptyString(p.slotId)) return fail('doseLog.slotId required');
   if (!isNonEmptyString(p.medId)) return fail('doseLog.medId required');
@@ -174,6 +184,9 @@ function validateDoseLog(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.actualInstant)) return fail('doseLog.actualInstant required');
   if (!isFiniteNumber(p.dose)) return fail('doseLog.dose required');
   if (p.status !== 'taken' && p.status !== 'skipped') return fail('doseLog.status invalid');
+  // Optional free-text reason for a skip (Stage 18 FR-18.3) — never required,
+  // but must be a string when present.
+  if (!isValidOptionalString(p, 'skipReason')) return fail('doseLog.skipReason must be a string');
   return ok;
 }
 
@@ -211,10 +224,53 @@ function validateEventInstance(p: Record<string, unknown>): ValidationResult {
   return ok;
 }
 
-/** A diff entry is `{ field: string, from: string|null, to: string|null }`. */
+/** A typed diff value: `string | number | boolean | null` (Stage 18). */
+function isFieldValue(v: unknown): boolean {
+  if (v === null || typeof v === 'string' || typeof v === 'boolean') return true;
+  return isFiniteNumber(v);
+}
+
+/**
+ * A diff entry. The display layer — `{ field, from, to }` with string-or-null
+ * `from`/`to` — is required. The Stage 18 machine layer (`key`, `medId`,
+ * `slotId`, `fromValue`, `toValue`) is optional, because records written before
+ * it existed omit it; when present each part must be well-formed.
+ *
+ * `key` is deliberately validated as any non-empty string rather than against a
+ * fixed vocabulary: a newer client must be able to sync a key this build does
+ * not yet know about without the server rejecting the write.
+ */
+/** An absent field is fine; a present one must satisfy `check`. */
+function isOptionally(v: unknown, check: (v: unknown) => boolean): boolean {
+  return v === undefined || check(v);
+}
+
+/**
+ * True when `key` on `p` is absent, explicitly `undefined`, or a string — the
+ * shared shape for every optional free-text field on a payload (`doseLog.
+ * skipReason`, `regimenChange.note`). Extracted so `validateDoseLog` doesn't
+ * carry this 3-condition check inline as its own branching.
+ */
+function isValidOptionalString(p: Record<string, unknown>, key: string): boolean {
+  return !(key in p) || p[key] === undefined || typeof p[key] === 'string';
+}
+
+/** The optional Stage 18 machine layer: identity strings + typed values. */
+function hasValidMachineLayer(c: Record<string, unknown>): boolean {
+  return (
+    isOptionally(c.key, isNonEmptyString) &&
+    isOptionally(c.medId, isNonEmptyString) &&
+    isOptionally(c.slotId, isNonEmptyString) &&
+    isOptionally(c.fromValue, isFieldValue) &&
+    isOptionally(c.toValue, isFieldValue)
+  );
+}
+
 function isValidFieldChange(c: unknown): boolean {
   const isStrOrNull = (v: unknown) => v === null || typeof v === 'string';
-  return isPlainObject(c) && isNonEmptyString(c.field) && isStrOrNull(c.from) && isStrOrNull(c.to);
+  if (!isPlainObject(c)) return false;
+  if (!isNonEmptyString(c.field) || !isStrOrNull(c.from) || !isStrOrNull(c.to)) return false;
+  return hasValidMachineLayer(c);
 }
 
 function validateRegimenChange(p: Record<string, unknown>): ValidationResult {
@@ -228,16 +284,62 @@ function validateRegimenChange(p: Record<string, unknown>): ValidationResult {
     return fail('regimenChange.changes required');
   }
   if (!p.changes.every(isValidFieldChange)) return fail('regimenChange.changes entry invalid');
-  if ('note' in p && p.note !== undefined && typeof p.note !== 'string') {
-    return fail('regimenChange.note must be a string');
+  if (!isValidOptionalString(p, 'note')) return fail('regimenChange.note must be a string');
+  return ok;
+}
+
+/**
+ * Validate every entry of `arr` against `validate` after confirming each carries
+ * a non-empty `id` — the shape a snapshot's nested medications/slots share with
+ * their standalone records. Shared by `validateScheduleSnapshot`'s two array
+ * fields so the id/shape check isn't duplicated per field.
+ */
+function validateIdentifiedEntries(
+  arr: unknown,
+  label: string,
+  validate: (v: Record<string, unknown>) => ValidationResult,
+): ValidationResult {
+  if (!Array.isArray(arr)) return fail(`${label} required`);
+  for (const entry of arr) {
+    if (!isPlainObject(entry) || !isNonEmptyString(entry.id)) {
+      return fail(`${label} entry invalid`);
+    }
+    const result = validate(entry);
+    if (!result.ok) return fail(`${label} entry invalid: ${result.reason}`);
   }
   return ok;
+}
+
+/**
+ * An effective-dated regimen snapshot (Stage 18 FR-18.1): when it took effect,
+ * the zone it was captured in, and full copies of the medications and slots. The
+ * nested entities are validated with the same rules as their standalone records,
+ * so a snapshot can never carry a shape the top-level types would reject.
+ */
+function validateScheduleSnapshot(p: Record<string, unknown>): ValidationResult {
+  if (!isFiniteNumber(p.effectiveFrom)) return fail('scheduleSnapshot.effectiveFrom required');
+  if (!isNonEmptyString(p.zone)) return fail('scheduleSnapshot.zone required');
+  const meds = validateIdentifiedEntries(
+    p.medications,
+    'scheduleSnapshot.medications',
+    validateMedication,
+  );
+  if (!meds.ok) return meds;
+  return validateIdentifiedEntries(p.slots, 'scheduleSnapshot.slots', validateSlot);
 }
 
 function validateSettings(p: Record<string, unknown>): ValidationResult {
   if (!isNonEmptyString(p.zone)) return fail('settings.zone required');
   if (!isFiniteNumber(p.adherenceWindowDays)) return fail('settings.adherenceWindowDays required');
   if (!isFiniteNumber(p.missedDayThreshold)) return fail('settings.missedDayThreshold required');
+  // Global on-time window (Stage 18 FR-18.4) — optional for back-compat with
+  // settings written before this field existed, but must be a positive number
+  // when present.
+  if ('onTimeWindowMinutes' in p && p.onTimeWindowMinutes !== undefined) {
+    if (!isFiniteNumber(p.onTimeWindowMinutes) || p.onTimeWindowMinutes <= 0) {
+      return fail('settings.onTimeWindowMinutes must be a positive number');
+    }
+  }
   return ok;
 }
 

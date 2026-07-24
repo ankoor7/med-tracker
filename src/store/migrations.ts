@@ -6,9 +6,11 @@
 // dataset's stored schema version, in order. Keep each transform pure and
 // tested (Stage 2 FR-2.4).
 
+import { newId } from '../core/ids';
+import { buildScheduleSnapshot } from '../core/scheduleHistory';
 import type { Dataset } from '../core/types';
 
-export const CURRENT_SCHEMA_VERSION = 1;
+export const CURRENT_SCHEMA_VERSION = 2;
 
 export interface Migration {
   version: number; // the version this migration produces
@@ -16,10 +18,51 @@ export interface Migration {
   migrate(data: Dataset): Dataset;
 }
 
-// No data migrations yet — v1 is the initial schema. Future versions append a
-// Migration here (e.g. backfilling a new field). The runner and tests already
-// exercise the mechanism so the first real migration is low-risk.
-export const migrations: Migration[] = [];
+/**
+ * The instant a backfilled baseline snapshot takes effect: the epoch, meaning
+ * "as far back as this dataset's history goes". Effective-dating only becomes
+ * meaningful from the user's next edit onwards — we cannot reconstruct a regimen
+ * that was never recorded — so the baseline deliberately claims all prior days,
+ * which reproduces exactly the pre-Stage-18 rendering for them.
+ */
+export const BASELINE_SNAPSHOT_AT = 0;
+
+/**
+ * v2 (Stage 18 FR-18.1): seed the effective-dated snapshot log with a baseline
+ * capturing the regimen as it stands at upgrade time.
+ *
+ * This is load-bearing, not cosmetic. Resolution falls back to the *earliest*
+ * snapshot for dates before it; without a baseline, the user's first post-upgrade
+ * edit would create the only snapshot, and every prior day would resolve to that
+ * post-edit state — the very bug this stage fixes. Skipped when snapshots already
+ * exist so the migration is idempotent.
+ *
+ * Medication `startedAt` is deliberately NOT backfilled: it is prompted for per
+ * medication at upgrade time rather than inferred, and an absent `startedAt`
+ * already means "treat as always prescribed".
+ */
+export const migrations: Migration[] = [
+  {
+    version: 2,
+    description: 'Stage 18: baseline effective-dated schedule snapshot',
+    migrate(data) {
+      // `?? []` because an imported dataset may predate the field entirely.
+      if ((data.scheduleSnapshots ?? []).length > 0) return data;
+      return {
+        ...data,
+        scheduleSnapshots: [
+          buildScheduleSnapshot(
+            newId(),
+            data.medications,
+            data.slots,
+            BASELINE_SNAPSHOT_AT,
+            data.settings.zone,
+          ),
+        ],
+      };
+    },
+  },
+];
 
 /**
  * Apply every migration with `version > fromVersion`, in ascending order.
