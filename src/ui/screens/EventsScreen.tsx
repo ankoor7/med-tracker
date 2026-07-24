@@ -1,4 +1,25 @@
+// Stage 20 Unit 4: migrated onto the Stage 19/Unit 3 React Aria form
+// primitives. Name/notes-adjacent text and numeric fields now use the shared
+// `TextField`/`NumberField` (`../components/fields`) with accessible
+// `FieldError`s; the property-type and event-type pickers are now a themed
+// `Select` (the same `Select`/`Popover`/`ListBox` pattern `SlotEditor` uses
+// for its medication picker) instead of a hand-rolled `<select>`. The date +
+// colour inputs stay native `<input type="date"|"color">` in a `Field`,
+// matching the precedent set by `StartDateField`/`MedicationEditor` — there is
+// no React Aria date-input primitive in `fields.tsx` yet. Store actions
+// (`addEventType`/`updateEventType`/`logEvent`/`updateEventInstance`/
+// `deleteEventInstance`/`setEventTypeArchived`) are unchanged.
+
 import { useMemo, useState } from 'react';
+import {
+  Button as RACButton,
+  Form,
+  ListBox,
+  ListBoxItem,
+  Popover,
+  Select,
+  SelectValue,
+} from 'react-aria-components';
 import {
   DEFAULT_EVENT_PROPERTIES,
   EVENT_PROPERTY_TYPES,
@@ -19,8 +40,13 @@ import {
 } from '../../core';
 import { useStore, type EventInstanceInput, type EventTypeInput } from '../../store/store';
 import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
+import { NumberField, TextField } from '../components/fields';
 import { Modal } from '../components/Modal';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { FormErrorList, ModalFormActions } from '../components/ModalFormFooter';
+
+const SELECT_TRIGGER =
+  'flex items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-left text-sm text-slate-100 outline-none data-[focus-visible]:border-accent-muted data-[hovered]:border-white/20 disabled:opacity-50';
 
 const BLANK_TYPE = (): EventTypeInput => ({
   name: '',
@@ -244,15 +270,20 @@ function TypeEditor({ initial, onClose }: { initial: EventType | null; onClose: 
 
   return (
     <Modal title={initial ? `Edit ${initial.name}` : 'New event type'} onClose={onClose}>
-      <div className="flex flex-col gap-3">
-        <Field label="Name">
-          <input
-            className={inputClass}
-            value={form.name}
-            onChange={(e) => setForm({ ...form, name: e.target.value })}
-            aria-label="Event type name"
-          />
-        </Field>
+      <Form
+        validationBehavior="aria"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+        className="flex flex-col gap-3"
+      >
+        <TextField
+          label="Name"
+          aria-label="Event type name"
+          value={form.name}
+          onChange={(name) => setForm({ ...form, name })}
+        />
 
         <Field label="Colour">
           <input
@@ -294,23 +325,9 @@ function TypeEditor({ initial, onClose }: { initial: EventType | null; onClose: 
           />
         </Field>
 
-        {errors.length > 0 && (
-          <ul className="text-xs text-red-300">
-            {errors.map((msg) => (
-              <li key={msg}>⚠ {msg}</li>
-            ))}
-          </ul>
-        )}
-
-        <div className="mt-1 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={!canSave}>
-            Save
-          </Button>
-        </div>
-      </div>
+        <FormErrorList errors={errors} />
+        <ModalFormActions onCancel={onClose} onSave={save} canSave={canSave} />
+      </Form>
     </Modal>
   );
 }
@@ -328,50 +345,35 @@ function PropertyRow({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-slate-800 p-2">
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Property name">
-          <input
-            className={inputClass}
-            value={prop.name}
-            onChange={(e) => onChange({ name: e.target.value })}
-            aria-label="Property name"
-          />
-        </Field>
+        <TextField
+          label="Property name"
+          aria-label="Property name"
+          value={prop.name}
+          onChange={(name) => onChange({ name })}
+        />
         <Field label="Type">
-          <select
-            className={inputClass}
+          <PropertyTypeSelect
             value={prop.type}
-            onChange={(e) => onChange(typeReset(e.target.value as EventPropertyType))}
-            aria-label="Property type"
-          >
-            {EVENT_PROPERTY_TYPES.map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
+            onChange={(t) => onChange(typeReset(t))}
+            ariaLabel="Property type"
+          />
         </Field>
       </div>
 
       {prop.type === 'scale' && (
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Min">
-            <input
-              type="number"
-              className={inputClass}
-              value={min}
-              onChange={(e) => onChange({ min: Number(e.target.value) })}
-              aria-label="Scale min"
-            />
-          </Field>
-          <Field label="Max">
-            <input
-              type="number"
-              className={inputClass}
-              value={max}
-              onChange={(e) => onChange({ max: Number(e.target.value) })}
-              aria-label="Scale max"
-            />
-          </Field>
+          <NumberField
+            label="Min"
+            aria-label="Scale min"
+            value={min}
+            onChange={(v) => onChange({ min: v })}
+          />
+          <NumberField
+            label="Max"
+            aria-label="Scale max"
+            value={max}
+            onChange={(v) => onChange({ max: v })}
+          />
         </div>
       )}
 
@@ -399,6 +401,45 @@ function typeReset(type: EventPropertyType): Partial<EventPropertyDef> {
   return { type, min: undefined, max: undefined };
 }
 
+/** The property-type picker: a themed React Aria `Select` over the fixed vocabulary. */
+function PropertyTypeSelect({
+  value,
+  onChange,
+  ariaLabel,
+}: {
+  value: EventPropertyType;
+  onChange: (type: EventPropertyType) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <Select
+      aria-label={ariaLabel}
+      selectedKey={value}
+      onSelectionChange={(key) => onChange(key as EventPropertyType)}
+    >
+      <RACButton className={`${SELECT_TRIGGER} w-full`}>
+        <SelectValue />
+        <span aria-hidden className="text-slate-400">
+          ▾
+        </span>
+      </RACButton>
+      <Popover className="w-[--trigger-width] overflow-auto rounded-xl border border-white/10 bg-slate-900/95 p-1 shadow-soft backdrop-blur-md">
+        <ListBox items={EVENT_PROPERTY_TYPES.map((t) => ({ id: t }))}>
+          {(item) => (
+            <ListBoxItem
+              id={item.id}
+              textValue={item.id}
+              className="cursor-pointer rounded-lg px-3 py-2 text-sm outline-none data-[focused]:bg-accent/15 data-[selected]:bg-accent/10"
+            >
+              {item.id}
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </Popover>
+    </Select>
+  );
+}
+
 // ---- Event logger ------------------------------------------------------------
 
 type FormValues = Record<string, string>;
@@ -417,6 +458,64 @@ function coerceValues(type: EventType, form: FormValues): Record<string, EventPr
     out[prop.id] = prop.type === 'text' ? raw : Number(raw);
   }
   return out;
+}
+
+/**
+ * Coerces the raw form strings against the selected type and runs the core
+ * validator, pulled out of `EventLogger` so the component body only branches
+ * once (on `type`) instead of twice — keeps the render function's cyclomatic
+ * complexity down without changing behaviour.
+ */
+function buildEventFormState(type: EventType | undefined, values: FormValues) {
+  if (!type) {
+    return { coerced: {} as Record<string, EventPropertyValue>, errors: ['Pick an event type.'] };
+  }
+  const coerced = coerceValues(type, values);
+  const errors = validateEventInstanceValues(type, coerced);
+  return { coerced, errors };
+}
+
+/** The event-type picker for `EventLogger`: a themed `Select` over the live types. */
+function EventTypeSelect({
+  types,
+  selectedId,
+  isDisabled,
+  onChange,
+}: {
+  types: EventType[];
+  selectedId: string;
+  isDisabled: boolean;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <Select
+      aria-label="Event type"
+      selectedKey={selectedId || null}
+      isDisabled={isDisabled}
+      onSelectionChange={(key) => onChange(String(key))}
+    >
+      <RACButton className={`${SELECT_TRIGGER} w-full`}>
+        <SelectValue />
+        <span aria-hidden className="text-slate-400">
+          ▾
+        </span>
+      </RACButton>
+      <Popover className="w-[--trigger-width] overflow-auto rounded-xl border border-white/10 bg-slate-900/95 p-1 shadow-soft backdrop-blur-md">
+        <ListBox items={types}>
+          {(t) => (
+            <ListBoxItem
+              id={t.id}
+              textValue={t.name}
+              className="flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none data-[focused]:bg-accent/15 data-[selected]:bg-accent/10"
+            >
+              <ColorDot color={t.color} />
+              {t.name}
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </Popover>
+    </Select>
+  );
 }
 
 function EventLogger({
@@ -442,11 +541,15 @@ function EventLogger({
 
   const type = types.find((t) => t.id === typeId);
   const occurredAt = datetimeLocalToInstant(when, zone);
-  const coerced = type ? coerceValues(type, values) : {};
-  const errors = type ? validateEventInstanceValues(type, coerced) : ['Pick an event type.'];
+  const { coerced, errors } = buildEventFormState(type, values);
   const canSave = !!type && errors.length === 0;
 
   const setValue = (propId: string, value: string) => setValues((v) => ({ ...v, [propId]: value }));
+
+  const selectType = (id: string) => {
+    setTypeId(id);
+    if (!initial) setValues({});
+  };
 
   const save = () => {
     if (!type || !canSave) return;
@@ -458,24 +561,21 @@ function EventLogger({
 
   return (
     <Modal title={initial ? 'Edit event' : 'Log event'} onClose={onClose}>
-      <div className="flex flex-col gap-3">
+      <Form
+        validationBehavior="aria"
+        onSubmit={(e) => {
+          e.preventDefault();
+          save();
+        }}
+        className="flex flex-col gap-3"
+      >
         <Field label="Type">
-          <select
-            className={inputClass}
-            value={typeId}
-            onChange={(e) => {
-              setTypeId(e.target.value);
-              if (!initial) setValues({});
-            }}
-            aria-label="Event type"
-            disabled={!!initial}
-          >
-            {types.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
+          <EventTypeSelect
+            types={types}
+            selectedId={typeId}
+            isDisabled={!!initial}
+            onChange={selectType}
+          />
         </Field>
 
         <Field label="Time">
@@ -507,23 +607,9 @@ function EventLogger({
           />
         </Field>
 
-        {errors.length > 0 && (
-          <ul className="text-xs text-red-300">
-            {errors.map((msg) => (
-              <li key={msg}>⚠ {msg}</li>
-            ))}
-          </ul>
-        )}
-
-        <div className="mt-1 flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={save} disabled={!canSave}>
-            Save
-          </Button>
-        </div>
-      </div>
+        <FormErrorList errors={errors} />
+        <ModalFormActions onCancel={onClose} onSave={save} canSave={canSave} />
+      </Form>
     </Modal>
   );
 }
@@ -541,47 +627,41 @@ function ValueInput({
 
   if (prop.type === 'text') {
     return (
-      <Field label={label}>
-        <input
-          className={inputClass}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          aria-label={prop.name || prop.id}
-        />
-      </Field>
+      <TextField
+        label={label}
+        aria-label={prop.name || prop.id}
+        value={value}
+        onChange={onChange}
+      />
     );
   }
+
+  // Scale/number/duration all edit a numeric string through `NumberField`;
+  // like the guardrail fields it wraps, min/max are not clamped in the input
+  // itself — the core (`validateEventInstanceValues`) is the source of truth
+  // for the range/integer checks, surfaced below as the instance's errors.
+  const numberValue = value === '' ? undefined : Number(value);
+  const onNumberChange = (v: number) => onChange(Number.isNaN(v) ? '' : String(v));
 
   if (prop.type === 'scale') {
     const [min, max] = scaleRange(prop);
     return (
-      <Field label={`${label} (${min}–${max})`}>
-        <input
-          type="number"
-          min={min}
-          max={max}
-          step={1}
-          className={inputClass}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          aria-label={prop.name || prop.id}
-        />
-      </Field>
+      <NumberField
+        label={`${label} (${min}–${max})`}
+        aria-label={prop.name || prop.id}
+        value={numberValue}
+        onChange={onNumberChange}
+      />
     );
   }
 
   // number + duration are both numeric; duration is entered in seconds.
   return (
-    <Field label={prop.type === 'duration' ? `${label} (seconds)` : label}>
-      <input
-        type="number"
-        min={prop.type === 'duration' ? 0 : undefined}
-        step="any"
-        className={inputClass}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-label={prop.name || prop.id}
-      />
-    </Field>
+    <NumberField
+      label={prop.type === 'duration' ? `${label} (seconds)` : label}
+      aria-label={prop.name || prop.id}
+      value={numberValue}
+      onChange={onNumberChange}
+    />
   );
 }
