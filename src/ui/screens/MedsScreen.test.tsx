@@ -657,3 +657,114 @@ describe('Meds tab — keyboard and accessibility', () => {
     expect(screen.getByRole('group', { name: 'View regimen by' })).toBeInTheDocument();
   });
 });
+
+// A raw entity id looks like "seed-med-levetiracetam" or a bare uuid/fixture
+// id ("med-3") — never something a patient would recognise as a name.
+const RAW_ID_PATTERN = /seed-med-|^med-\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/i;
+
+// Shared by both DEACTIVATED-medication cases below (deduped per the fallow
+// audit) — one active med ('a') and one deactivated med ('b'), both scheduled
+// in the same time-slot.
+function seedOneActiveOneDeactivated(): void {
+  useStore.setState({
+    medications: [
+      med({ id: 'a', name: 'Lamotrigine', unit: 'mg', active: true }),
+      med({ id: 'b', name: 'Levetiracetam', unit: 'mg', active: false }),
+    ],
+    slots: [
+      slot({
+        id: 's1',
+        time: '08:00',
+        items: [
+          { medId: 'a', dose: 100 },
+          { medId: 'b', dose: 500 },
+        ],
+      }),
+    ],
+  });
+}
+
+describe('Meds tab — no raw entity id ever renders (Stage 18 FR-18.10, AC10)', () => {
+  it('a time-slot holding a DEACTIVATED medication (By time) shows its real name, not the id', () => {
+    seedOneActiveOneDeactivated();
+    render(<MedsScreen />);
+    showView('By time');
+
+    expect(screen.getByText('Levetiracetam')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(RAW_ID_PATTERN);
+  });
+
+  it('a time-slot holding a DEACTIVATED medication (SlotEditor) shows its real name, not the id', () => {
+    seedOneActiveOneDeactivated();
+    render(<MedsScreen />);
+    showView('By time');
+    fireEvent.click(
+      within(screen.getByText('08:00').closest('[class*="rounded-2xl"]')!).getByRole('button', {
+        name: 'Edit',
+      }),
+    );
+    const dialog = screen.getByRole('dialog');
+
+    expect(within(dialog).getByText('Levetiracetam')).toBeInTheDocument();
+    expect(dialog.textContent).not.toMatch(RAW_ID_PATTERN);
+  });
+
+  it('a slot item referencing a medication absent from the medication list (orphaned/tombstoned) falls back to a placeholder, never the raw id', () => {
+    useStore.setState({
+      // 'ghost' does not appear in `medications` at all — the "genuinely
+      // cannot be found" case the spec calls out, distinct from the common
+      // deactivated/soft-deleted case above (which must resolve to the name).
+      medications: [med({ id: 'a', name: 'Lamotrigine', unit: 'mg', active: true })],
+      slots: [
+        slot({
+          id: 's1',
+          time: '08:00',
+          items: [
+            { medId: 'a', dose: 100 },
+            { medId: 'seed-med-ghost', dose: 250 },
+          ],
+        }),
+      ],
+    });
+    render(<MedsScreen />);
+    showView('By time');
+
+    expect(screen.getByText('Unknown medication')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(RAW_ID_PATTERN);
+  });
+});
+
+// Stage 18 FR-18.10: "Half-life", "Min interval" and "Guardrails" carried no
+// inline explanation, unlike "Timing-sensitive (needs an adjusted dose when
+// late)" which already read well. Light-touch — just assert the explanatory
+// text is present where it was added, not the exact wording.
+describe('Meds tab — jargon carries a plain-language inline explanation (FR-18.10)', () => {
+  it('the medication card explains "Half-life"', () => {
+    render(<MedsScreen />);
+    expect(medRow('Lamotrigine').textContent).toMatch(
+      /half-life.*time for half the dose to clear/i,
+    );
+  });
+
+  it('the medication editor explains "Half-life" on its own field', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    expect(
+      within(dialog).getByText(/time for half the dose to clear your system/i),
+    ).toBeInTheDocument();
+  });
+
+  it('the medication editor explains "Min interval" on its own field', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    expect(within(dialog).getByText(/minimum time required between doses/i)).toBeInTheDocument();
+  });
+
+  it('the medication editor explains "Guardrails" under the legend', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    expect(
+      within(dialog).getByText(/safety caps the app checks every logged dose against/i),
+    ).toBeInTheDocument();
+  });
+});

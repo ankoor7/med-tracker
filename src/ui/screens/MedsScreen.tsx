@@ -16,7 +16,7 @@
 import { useState } from 'react';
 import { isoDateInZone, slotsForMedication, type Medication, type Slot } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card, ColorDot } from '../components/ui';
+import { Button, Card, ColorDot, UNKNOWN_MED_NAME } from '../components/ui';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { MedicationEditor } from './MedicationEditor';
 import { SlotEditor } from './SlotEditor';
@@ -142,7 +142,7 @@ function MedicationView() {
                   {!med.active && <span className="text-xs text-slate-500">(inactive)</span>}
                 </div>
                 <p className="mt-1 text-xs text-slate-400">
-                  Half-life {med.halfLifeHours}h ·{' '}
+                  Half-life {med.halfLifeHours}h (time for half the dose to clear) ·{' '}
                   {med.adjustWhenLate ? 'timing-sensitive' : 'flexible'}
                   {med.startedAt != null && <> · Started {isoDateInZone(med.startedAt, zone)}</>}
                 </p>
@@ -275,7 +275,7 @@ function TimeView() {
                   return (
                     <li key={item.medId} className="flex items-center gap-2 text-sm">
                       <ColorDot color={med?.color ?? '#64748b'} />
-                      <span>{med?.name ?? item.medId}</span>
+                      <span>{med?.name ?? UNKNOWN_MED_NAME}</span>
                       <span className="text-xs text-slate-400">
                         {item.dose}
                         {med?.unit ?? ''}
@@ -310,8 +310,9 @@ function TimeView() {
               <p>
                 This removes the {confirmDelete.time}
                 {confirmDelete.label ? ` (${confirmDelete.label})` : ''} slot and stops scheduling{' '}
-                {confirmDelete.items.map((i) => medById.get(i.medId)?.name ?? i.medId).join(', ') ||
-                  'its medications'}{' '}
+                {confirmDelete.items
+                  .map((i) => medById.get(i.medId)?.name ?? UNKNOWN_MED_NAME)
+                  .join(', ') || 'its medications'}{' '}
                 at this time.
               </p>
               <p className="mt-2 text-slate-400">

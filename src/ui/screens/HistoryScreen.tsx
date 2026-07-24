@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import {
   adherenceTimeline,
+  classifyGuardrailBreach,
   computeAdherence,
   DEFAULT_ON_TIME_WINDOW_MINUTES,
   filterLog,
@@ -14,7 +15,7 @@ import {
   type RegimenChange,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card, ColorDot, Field, inputClass } from '../components/ui';
+import { Button, Card, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from '../components/ui';
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
@@ -339,7 +340,7 @@ export function HistoryScreen() {
           confirmLabel="Delete dose"
           body={
             <p>
-              This removes the {medById.get(deleteTarget.medId)?.name ?? deleteTarget.medId} dose
+              This removes the {medById.get(deleteTarget.medId)?.name ?? UNKNOWN_MED_NAME} dose
               logged at {formatDateTimeWithZone(deleteTarget.actualInstant, deleteTarget.zone)}. It
               will stop counting toward adherence.
             </p>
@@ -380,7 +381,7 @@ function LogRow({
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <ColorDot color={m?.color ?? '#64748b'} />
-          <span className="text-sm font-medium">{m?.name ?? entry.medId}</span>
+          <span className="text-sm font-medium">{m?.name ?? UNKNOWN_MED_NAME}</span>
           <span className="text-xs text-slate-400">
             {skipped ? 'Skipped' : `${entry.dose}${entry.unit}`}
           </span>
@@ -438,6 +439,15 @@ function LogRowNote({
   return null;
 }
 
+// Stage 18 FR-18.10: this tag used to hardcode "over-cap" for any warning,
+// which misnamed a min-interval ("too soon") breach — the same leak the
+// acknowledgement button copy had, just at a different site.
+function breachTagLabel(kind: ReturnType<typeof classifyGuardrailBreach>): string {
+  if (kind === 'over-cap') return 'over-cap';
+  if (kind === 'too-soon') return 'too-soon';
+  return 'guardrail';
+}
+
 function LogRowTags({
   entry,
   skipped,
@@ -456,7 +466,11 @@ function LogRowTags({
         <Tag className="border-amber-700 text-amber-300">adjusted</Tag>
       )}
       {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
-      {!skipped && overCap && <Tag className="border-red-700 text-red-300">over-cap</Tag>}
+      {!skipped && overCap && (
+        <Tag className="border-red-700 text-red-300">
+          {breachTagLabel(classifyGuardrailBreach(entry.warnings))}
+        </Tag>
+      )}
     </div>
   );
 }

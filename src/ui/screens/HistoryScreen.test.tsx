@@ -112,6 +112,80 @@ describe('HistoryScreen — dose correction (Stage 18 FR-18.2)', () => {
   });
 });
 
+// Stage 18 FR-18.10: the dose-log row's guardrail tag hardcoded "over-cap"
+// for ANY warning, which misnamed a min-interval ("too soon") breach the
+// same way the acknowledgement button copy did — just at a different site.
+describe('HistoryScreen — dose-log row breach tag names the actual violation (Stage 18 FR-18.10)', () => {
+  it('a min-interval (too-soon) breach is tagged "too-soon", NOT "over-cap"', () => {
+    useStore.setState({
+      hydrated: true,
+      medications: [
+        med({
+          id: 'a',
+          name: 'Lamotrigine',
+          unit: 'mg',
+          guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: 6 },
+        }),
+      ],
+      slots: [
+        slot({ id: 's1', time: '08:00', label: 'Morning', items: [{ medId: 'a', dose: 100 }] }),
+      ],
+      doseLog: [
+        logEntry({
+          id: 'l1',
+          slotId: 's1',
+          medId: 'a',
+          scheduledInstant: NOW - 3600_000,
+          actualInstant: NOW - 3600_000,
+          dose: 100,
+          status: 'taken',
+          warnings: ['Below min interval (0.0h since last dose < 6h).'],
+        }),
+      ],
+      settings: settings({ zone: ZONE }),
+    });
+    renderHistory();
+
+    const row = doseLogRow();
+    expect(within(row).getByText('too-soon')).toBeInTheDocument();
+    expect(within(row).queryByText('over-cap')).not.toBeInTheDocument();
+  });
+
+  it('an over-cap breach is still tagged "over-cap"', () => {
+    useStore.setState({
+      hydrated: true,
+      medications: [
+        med({
+          id: 'a',
+          name: 'Lamotrigine',
+          unit: 'mg',
+          guardrails: { maxSingleDose: 50, maxDailyDose: null, minIntervalHours: null },
+        }),
+      ],
+      slots: [
+        slot({ id: 's1', time: '08:00', label: 'Morning', items: [{ medId: 'a', dose: 100 }] }),
+      ],
+      doseLog: [
+        logEntry({
+          id: 'l1',
+          slotId: 's1',
+          medId: 'a',
+          scheduledInstant: NOW - 3600_000,
+          actualInstant: NOW - 3600_000,
+          dose: 100,
+          status: 'taken',
+          warnings: ['Exceeds max single dose (100mg > 50mg).'],
+        }),
+      ],
+      settings: settings({ zone: ZONE }),
+    });
+    renderHistory();
+
+    const row = doseLogRow();
+    expect(within(row).getByText('over-cap')).toBeInTheDocument();
+  });
+});
+
 describe('HistoryScreen — lateness-aware adherence (Stage 18 FR-18.4)', () => {
   /**
    * One medication ('a') in one slot ('s1') with a single dose-log entry —

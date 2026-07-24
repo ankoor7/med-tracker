@@ -12,6 +12,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   MINUTE_MS,
   checkGuardrails,
+  classifyGuardrailBreach,
   datetimeLocalToInstant,
   describeOffset,
   formatTimeWithZone,
@@ -20,7 +21,7 @@ import {
   type Instant,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, ColorDot, Field, inputClass } from './ui';
+import { Button, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from './ui';
 import { Modal } from './Modal';
 
 export interface GroupLoggerMember {
@@ -104,6 +105,10 @@ export function GroupLogger({
   const canLog =
     included.length > 0 && included.every((e) => e.validDose && (!e.overCap || e.row.confirmed));
   const anyOverCap = included.some((e) => e.overCap);
+  // Breach-kind-aware group button copy (Stage 18 FR-18.10): a min-interval
+  // breach must not read "over-cap". Mixed breach kinds across members fall
+  // back to a safe generic rather than naming the wrong one.
+  const groupBreachKind = classifyGuardrailBreach(included.flatMap((e) => e.warnings));
 
   const submit = () => {
     if (!canLog) return;
@@ -158,10 +163,10 @@ export function GroupLogger({
                   type="checkbox"
                   checked={row.include}
                   onChange={(e) => patchRow(member.medId, { include: e.target.checked })}
-                  aria-label={`Include ${med?.name ?? member.medId}`}
+                  aria-label={`Include ${med?.name ?? UNKNOWN_MED_NAME}`}
                 />
                 <ColorDot color={med?.color ?? '#64748b'} />
-                <span className="font-medium">{med?.name ?? member.medId}</span>
+                <span className="font-medium">{med?.name ?? UNKNOWN_MED_NAME}</span>
                 {dose !== member.normalDose && row.include && (
                   <span className="text-xs text-amber-400">adjusted</span>
                 )}
@@ -180,7 +185,7 @@ export function GroupLogger({
                       onChange={(e) =>
                         patchRow(member.medId, { doseStr: e.target.value, confirmed: false })
                       }
-                      aria-label={`${med?.name ?? member.medId} dose`}
+                      aria-label={`${med?.name ?? UNKNOWN_MED_NAME} dose`}
                     />
                   </Field>
                   {overCap && (
@@ -196,7 +201,16 @@ export function GroupLogger({
                           checked={row.confirmed}
                           onChange={(e) => patchRow(member.medId, { confirmed: e.target.checked })}
                         />
-                        Log this over-cap dose anyway.
+                        {(() => {
+                          const kind = classifyGuardrailBreach(warnings);
+                          const adj =
+                            kind === 'over-cap'
+                              ? 'over-cap '
+                              : kind === 'too-soon'
+                                ? 'too-soon '
+                                : '';
+                          return `Log this ${adj}dose anyway.`;
+                        })()}
                       </label>
                     </div>
                   )}
@@ -212,7 +226,11 @@ export function GroupLogger({
           </Button>
           <Button variant={anyOverCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
             {anyOverCap
-              ? 'Log over-cap group'
+              ? groupBreachKind === 'over-cap'
+                ? 'Log over-cap group'
+                : groupBreachKind === 'too-soon'
+                  ? 'Log too-soon group'
+                  : 'Log group anyway'
               : `Log ${included.length || ''} dose${included.length === 1 ? '' : 's'}`.trim()}
           </Button>
         </div>

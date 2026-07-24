@@ -7,7 +7,7 @@ import {
   type PlannedOccurrence,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card, ColorDot, Ring, Stat } from '../components/ui';
+import { Button, Card, ColorDot, Ring, Stat, UNKNOWN_MED_NAME } from '../components/ui';
 import { StatusBadge } from '../components/StatusBadge';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -145,7 +145,7 @@ export function TodayScreen() {
                   onDelete={() =>
                     setDeleteTarget({
                       id: occ.logEntryId!,
-                      medName: medById.get(occ.medId)?.name ?? occ.medId,
+                      medName: medById.get(occ.medId)?.name ?? UNKNOWN_MED_NAME,
                     })
                   }
                 />
@@ -255,7 +255,7 @@ function OccurrenceRow({
     <li className="flex items-center justify-between gap-2 py-2">
       <div className="flex min-w-0 items-center gap-2">
         <ColorDot color={med?.color ?? '#64748b'} />
-        <span className="truncate text-sm">{med?.name ?? occ.medId}</span>
+        <span className="truncate text-sm">{med?.name ?? UNKNOWN_MED_NAME}</span>
         <span className="text-xs text-slate-400">
           {occ.dose}
           {med?.unit ?? ''}

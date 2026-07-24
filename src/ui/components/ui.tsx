@@ -34,17 +34,34 @@ export function Card({ children, className = '' }: { children: ReactNode; classN
   );
 }
 
-export function Field({ label, children }: { label: string; children: ReactNode }) {
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  /** Short, plain-language explanation rendered under the field (Stage 18 FR-18.10). */
+  hint?: string;
+  children: ReactNode;
+}) {
   return (
     <label className="flex flex-col gap-1.5 text-sm">
       <span className="text-xs font-medium uppercase tracking-wide text-slate-400">{label}</span>
       {children}
+      {hint && <span className="text-xs font-normal normal-case text-slate-500">{hint}</span>}
     </label>
   );
 }
 
 export const inputClass =
   'rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus-visible:border-accent-muted';
+
+/**
+ * Stage 18 FR-18.10 (AC10): a medication reference that cannot be resolved
+ * (truly orphaned — not the common "deactivated" or "deleted" case, which
+ * resolve to the real name) MUST render this, never the raw id string.
+ */
+export const UNKNOWN_MED_NAME = 'Unknown medication';
 
 export function ColorDot({ color }: { color: string }) {
   return (

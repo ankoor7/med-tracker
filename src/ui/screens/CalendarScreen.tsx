@@ -25,7 +25,7 @@ import {
   type OccurrenceStatus,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, Card, ColorDot } from '../components/ui';
+import { Button, Card, ColorDot, UNKNOWN_MED_NAME } from '../components/ui';
 import { ChangeDetail } from '../components/ChangeMarkers';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
 import { GroupLogger, type GroupLoggerTarget } from '../components/GroupLogger';
@@ -424,7 +424,7 @@ function DoseGroup({
   };
 
   const summary = group.members
-    .map((m) => `${m.med?.name ?? m.medId} ${m.dose}${m.med?.unit ?? ''}`)
+    .map((m) => `${m.med?.name ?? UNKNOWN_MED_NAME} ${m.dose}${m.med?.unit ?? ''}`)
     .join(', ');
 
   return (
@@ -513,7 +513,7 @@ function GroupMemberChip({ m }: { m: GroupMember }) {
     <span className="inline-flex items-center gap-1 truncate text-[11px]">
       <ColorDot color={m.med?.color ?? '#64748b'} />
       <span className={m.logEntryId ? 'text-slate-300' : 'text-slate-200'}>
-        {m.med?.name ?? m.medId}
+        {m.med?.name ?? UNKNOWN_MED_NAME}
       </span>
       <span className="tabular-nums opacity-70">
         {m.dose}

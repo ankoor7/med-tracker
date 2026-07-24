@@ -302,7 +302,10 @@ function IdentityFields({
             aria-label="Unit"
           />
         </Field>
-        <Field label="Half-life (hours)">
+        <Field
+          label="Half-life (hours)"
+          hint="Time for half the dose to clear your system — used to judge lateness."
+        >
           <input
             type="number"
             min="0"
@@ -338,17 +341,25 @@ function GuardrailsFieldset({
   errors: Partial<Record<keyof MedicationInput['guardrails'], string>>;
   onChange: (key: keyof MedicationInput['guardrails'], value: string) => void;
 }) {
-  const fields: Array<[keyof MedicationInput['guardrails'], string, string]> = [
+  const fields: Array<[keyof MedicationInput['guardrails'], string, string, string?]> = [
     ['maxSingleDose', 'Max single', 'Max single dose'],
     ['maxDailyDose', 'Max daily', 'Max daily dose'],
-    ['minIntervalHours', 'Min interval (h)', 'Min interval hours'],
+    [
+      'minIntervalHours',
+      'Min interval (h)',
+      'Min interval hours',
+      'Minimum time required between doses.',
+    ],
   ];
   return (
     <fieldset className="rounded-md border border-slate-800 p-3">
       <legend className="px-1 text-xs text-slate-400">Guardrails</legend>
+      <p className="-mt-1 mb-2 px-1 text-xs text-slate-500">
+        Safety caps the app checks every logged dose against — it never sets a dose for you.
+      </p>
       <div className="grid grid-cols-3 gap-3">
-        {fields.map(([key, label, ariaLabel]) => (
-          <Field key={key} label={label}>
+        {fields.map(([key, label, ariaLabel, hint]) => (
+          <Field key={key} label={label} hint={hint}>
             <input
               type="number"
               min="0"

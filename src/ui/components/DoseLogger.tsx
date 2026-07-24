@@ -2,9 +2,11 @@ import { useMemo, useState, type ReactNode } from 'react';
 import {
   activeStrategy,
   checkGuardrails,
+  classifyGuardrailBreach,
   datetimeLocalToInstant,
   describeOffset,
   formatTimeWithZone,
+  guardrailAckLabel,
   instantToDatetimeLocal,
   MINUTE_MS,
   nextOccurrenceForMed,
@@ -356,7 +358,16 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
                         checked={nextConfirmed}
                         onChange={(e) => setNextConfirmed(e.target.checked)}
                       />
-                      Set this over-cap next dose anyway.
+                      {(() => {
+                        const kind = classifyGuardrailBreach(nextWarnings);
+                        const adj =
+                          kind === 'over-cap'
+                            ? 'over-cap '
+                            : kind === 'too-soon'
+                              ? 'too-soon '
+                              : '';
+                        return `Set this ${adj}next dose anyway.`;
+                      })()}
                     </label>
                   </div>
                 )}
@@ -384,10 +395,10 @@ export function DoseLogger({ target, onClose }: { target: LoggerTarget; onClose:
             <Button variant={overCap ? 'danger' : 'primary'} disabled={!canLog} onClick={submit}>
               {target.entryId
                 ? overCap
-                  ? 'Save over-cap dose'
+                  ? guardrailAckLabel(warnings, 'Save')
                   : 'Save changes'
                 : overCap
-                  ? 'Log over-cap dose'
+                  ? guardrailAckLabel(warnings, 'Log')
                   : 'Log dose'}
             </Button>
           </div>

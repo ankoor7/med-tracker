@@ -6,7 +6,7 @@
 import { useState } from 'react';
 import type { Medication, ScheduleItem, Slot } from '../../core';
 import { useStore, type SlotInput } from '../../store/store';
-import { Button, ColorDot, Field, inputClass } from '../components/ui';
+import { Button, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from '../components/ui';
 import { Modal } from '../components/Modal';
 
 export function SlotEditor({ initial, onClose }: { initial: Slot | null; onClose: () => void }) {
@@ -135,7 +135,7 @@ function SlotItemRow({
   onDose: (dose: number) => void;
   onRemove: () => void;
 }) {
-  const name = med?.name ?? item.medId;
+  const name = med?.name ?? UNKNOWN_MED_NAME;
   return (
     <li className="flex items-center gap-2">
       <ColorDot color={med?.color ?? '#64748b'} />

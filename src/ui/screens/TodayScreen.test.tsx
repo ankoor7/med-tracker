@@ -94,6 +94,58 @@ describe('TodayScreen', () => {
     expect(log[0]!.warnings.length).toBeGreaterThan(0);
   });
 
+  // Stage 18 FR-18.10: the ack button used to read "Log over-cap dose" even
+  // for a too-soon (min-interval) breach, which misnames the actual violation.
+  it('a min-interval (too-soon) breach labels the ack button "Log too-soon dose", NOT "over-cap" (FR-18.10)', () => {
+    seed(
+      [
+        med({
+          id: 'a',
+          name: 'Lamotrigine',
+          unit: 'mg',
+          guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: 6 },
+        }),
+      ],
+      [slot({ id: 's1', time: '08:00', label: 'Morning', items: [{ medId: 'a', dose: 100 }] })],
+    );
+    // A dose already taken 1h ago — below the 6h minimum interval. Given a
+    // different `slotId` so it isn't mistaken for the occurrence being
+    // tested below (occurrence matching is slotId+medId+time based).
+    useStore.setState({
+      doseLog: [
+        {
+          id: 'prior',
+          slotId: 'earlier-slot',
+          medId: 'a',
+          scheduledInstant: NOW - 3600_000,
+          actualInstant: NOW - 3600_000,
+          dose: 100,
+          unit: 'mg',
+          zone: ZONE,
+          status: 'taken',
+          adjusted: false,
+          warnings: [],
+          updatedAt: NOW - 3600_000,
+        },
+      ],
+    });
+    render(<TodayScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText(/min interval/i)).toBeInTheDocument();
+
+    const logBtn = within(dialog).getByRole('button', { name: /log too-soon dose/i });
+    expect(logBtn).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /log over-cap dose/i })).not.toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /understand and want to log/i }));
+    fireEvent.click(logBtn);
+
+    const log = activeLog();
+    expect(log).toHaveLength(2);
+  });
+
   it('logging an adjusted dose can set a one-time override for the next dose (Stage 12)', () => {
     seed(
       [med({ id: 'a', name: 'Lamotrigine', unit: 'mg', adjustWhenLate: true })],
