@@ -19,7 +19,9 @@ import {
   planSlotOps,
   rowsForMedication,
   startOfDayInstant,
+  validateMedication,
   type MedTimeRow,
+  type MedicationValidationIssue,
   type SharedTime,
   type Medication,
 } from '../../core';
@@ -59,6 +61,7 @@ export function MedicationEditor({
   // the plan is computed against.
   const zone = useStore((s) => s.settings.zone);
   const doseLog = useStore((s) => s.doseLog);
+  const medications = useStore((s) => s.medications);
 
   const [form, setForm] = useState<MedicationInput>(
     initial
@@ -130,8 +133,22 @@ export function MedicationEditor({
   const dupes = duplicateTimes(rows);
   const badTime = rows.some((r) => !isValidTime(r.time));
   const badDose = rows.some((r) => !(r.dose > 0));
-  const nameOk = form.name.trim().length > 0;
-  const canSave = nameOk && !badTime && !badDose && dupes.length === 0;
+
+  // FR-18.7 (no medication is silently left unscheduled) and FR-18.8 (duplicate
+  // names, non-positive guardrails, daily total vs cap) — validated in the pure
+  // core (`core/medicationValidation.ts`) so the rules are unit-testable and
+  // this component only renders what comes back.
+  const issues = validateMedication({
+    name: form.name,
+    guardrails: form.guardrails,
+    slotDoses: rows.map((r) => r.dose),
+    medId: initial?.id,
+    others: medications,
+    unit: form.unit,
+  });
+  const issueFor = (field: MedicationValidationIssue['field']) =>
+    issues.find((i) => i.field === field);
+  const canSave = issues.length === 0 && !badTime && !badDose && dupes.length === 0;
 
   const save = () => {
     if (!canSave) return;
@@ -172,7 +189,11 @@ export function MedicationEditor({
   return (
     <Modal title={initial ? `Edit ${initial.name}` : 'Add medication'} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        <IdentityFields form={form} onChange={(patch) => setForm((f) => ({ ...f, ...patch }))} />
+        <IdentityFields
+          form={form}
+          nameError={issueFor('name')?.message}
+          onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+        />
 
         <StartDateField
           label="Start date"
@@ -190,13 +211,23 @@ export function MedicationEditor({
           dupes={dupes}
           badTime={badTime}
           badDose={badDose}
+          scheduleError={issueFor('schedule')?.message}
+          dailyTotalError={issueFor('dailyTotal')?.message}
           sharedWith={sharedWith}
           onPatchRow={patchRow}
           onRemoveRow={removeRow}
           onAddRow={addRow}
         />
 
-        <GuardrailsFieldset guardrails={form.guardrails} onChange={setG} />
+        <GuardrailsFieldset
+          guardrails={form.guardrails}
+          errors={{
+            maxSingleDose: issueFor('maxSingleDose')?.message,
+            maxDailyDose: issueFor('maxDailyDose')?.message,
+            minIntervalHours: issueFor('minIntervalHours')?.message,
+          }}
+          onChange={setG}
+        />
 
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -241,9 +272,11 @@ export function MedicationEditor({
 /** What the medication is: name, unit, half-life, colour. */
 function IdentityFields({
   form,
+  nameError,
   onChange,
 }: {
   form: MedicationInput;
+  nameError?: string;
   onChange: (patch: Partial<MedicationInput>) => void;
 }) {
   return (
@@ -254,8 +287,11 @@ function IdentityFields({
           value={form.name}
           onChange={(e) => onChange({ name: e.target.value })}
           aria-label="Name"
+          aria-invalid={nameError != null}
         />
       </Field>
+      {/* FR-18.8: a specific, actionable message — empty or duplicate name. */}
+      {nameError && <p className="-mt-2 text-xs text-red-300">{nameError}</p>}
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Unit">
@@ -295,9 +331,11 @@ function IdentityFields({
 /** The caps the app validates a logged dose against — never originates one. */
 function GuardrailsFieldset({
   guardrails,
+  errors,
   onChange,
 }: {
   guardrails: MedicationInput['guardrails'];
+  errors: Partial<Record<keyof MedicationInput['guardrails'], string>>;
   onChange: (key: keyof MedicationInput['guardrails'], value: string) => void;
 }) {
   const fields: Array<[keyof MedicationInput['guardrails'], string, string]> = [
@@ -306,21 +344,33 @@ function GuardrailsFieldset({
     ['minIntervalHours', 'Min interval (h)', 'Min interval hours'],
   ];
   return (
-    <fieldset className="grid grid-cols-3 gap-3 rounded-md border border-slate-800 p-3">
+    <fieldset className="rounded-md border border-slate-800 p-3">
       <legend className="px-1 text-xs text-slate-400">Guardrails</legend>
-      {fields.map(([key, label, ariaLabel]) => (
-        <Field key={key} label={label}>
-          <input
-            type="number"
-            min="0"
-            step="any"
-            className={inputClass}
-            value={guardrails[key] ?? ''}
-            onChange={(e) => onChange(key, e.target.value)}
-            aria-label={ariaLabel}
-          />
-        </Field>
-      ))}
+      <div className="grid grid-cols-3 gap-3">
+        {fields.map(([key, label, ariaLabel]) => (
+          <Field key={key} label={label}>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              className={inputClass}
+              value={guardrails[key] ?? ''}
+              onChange={(e) => onChange(key, e.target.value)}
+              aria-label={ariaLabel}
+              aria-invalid={errors[key] != null}
+            />
+          </Field>
+        ))}
+      </div>
+      {/* FR-18.8: a negative or zero cap, and the daily total vs maxDailyDose. */}
+      {fields.map(
+        ([key]) =>
+          errors[key] && (
+            <p key={key} className="mt-2 text-xs text-red-300">
+              {errors[key]}
+            </p>
+          ),
+      )}
     </fieldset>
   );
 }
@@ -335,6 +385,8 @@ function TimesFieldset({
   dupes,
   badTime,
   badDose,
+  scheduleError,
+  dailyTotalError,
   sharedWith,
   onPatchRow,
   onRemoveRow,
@@ -345,6 +397,8 @@ function TimesFieldset({
   dupes: string[];
   badTime: boolean;
   badDose: boolean;
+  scheduleError?: string;
+  dailyTotalError?: string;
   sharedWith: (row: MedTimeRow) => SharedTime & { names: string[] };
   onPatchRow: (key: string, patch: Partial<MedTimeRow>) => void;
   onRemoveRow: (key: string) => void;
@@ -356,9 +410,13 @@ function TimesFieldset({
       <p className="text-xs text-slate-500">
         Each time can carry a different amount — a morning and an evening dose need not match.
       </p>
+      {/* FR-18.7: zero times blocks Save outright — no PRN/as-needed concept
+          exists in the domain (see core/types.ts Medication), so a medication
+          with nothing scheduled would otherwise be silently invisible. */}
       {rows.length === 0 && (
-        <p className="text-sm text-slate-500">
-          Not scheduled. Without a time this medication will not appear on Today.
+        <p className="text-sm text-red-300">
+          {scheduleError ??
+            'Add at least one time — without one this medication will not appear on Today.'}
         </p>
       )}
       <ul className="flex flex-col gap-2">
@@ -409,6 +467,8 @@ function TimesFieldset({
       {!badTime && badDose && (
         <p className="text-xs text-amber-400">Every time needs an amount greater than 0.</p>
       )}
+      {/* FR-18.8: the daily total across every slot vs the medication's own cap. */}
+      {dailyTotalError && <p className="text-xs text-red-300">{dailyTotalError}</p>}
     </fieldset>
   );
 }

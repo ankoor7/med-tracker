@@ -92,6 +92,36 @@ function setValue(dialog: HTMLElement, label: string, value: string) {
   fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
 }
 
+/** Open the "Add medication" dialog and fill in its name. */
+function openAddMedicationDialog(name: string): HTMLElement {
+  render(<MedsScreen />);
+  fireEvent.click(screen.getByRole('button', { name: 'Add medication' }));
+  const dialog = screen.getByRole('dialog');
+  setValue(dialog, 'Name', name);
+  return dialog;
+}
+
+/** Click "Add a time" and set the newly added row's time (rows are 1-indexed). */
+function addTimeRow(dialog: HTMLElement, doseNumber: number, time: string) {
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Add a time' }));
+  setValue(dialog, `Time for dose ${doseNumber}`, time);
+}
+
+/** FR-18.7: the editor blocks Save with the "add at least one time" message. */
+function expectScheduleEmptyBlocksSave(dialog: HTMLElement) {
+  expect(dialog).toHaveTextContent(/add at least one time/i);
+  expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+}
+
+/** Open Lamotrigine's editor with a daily cap and dose 1's amount set. */
+function openLamotrigineWithDailyCap(cap: string, doseOne: string): HTMLElement {
+  render(<MedsScreen />);
+  const dialog = openMedEditor('Lamotrigine');
+  setValue(dialog, 'Max daily dose', cap);
+  setValue(dialog, 'Amount for dose 1', doseOne);
+  return dialog;
+}
+
 /** Change records minus the fields that legitimately differ per run. */
 function comparableChanges(changes: RegimenChange[]) {
   return changes.map(({ id: _id, changedAt: _c, updatedAt: _u, ...rest }) => rest);
@@ -206,11 +236,7 @@ describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
   });
 
   it('AC13: adds a medication with guardrails and a twice-daily schedule without leaving the tab, and it appears on Today', () => {
-    render(<MedsScreen />);
-    fireEvent.click(screen.getByRole('button', { name: 'Add medication' }));
-    const dialog = screen.getByRole('dialog');
-
-    setValue(dialog, 'Name', 'Carbamazepine');
+    const dialog = openAddMedicationDialog('Carbamazepine');
     setValue(dialog, 'Unit', 'mg');
     setValue(dialog, 'Max single dose', '400');
     setValue(dialog, 'Max daily dose', '800');
@@ -261,6 +287,10 @@ describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
   it('removes a time from the medication editor, tombstoning a slot left empty', () => {
     render(<MedsScreen />);
     const dialog = openMedEditor('Lamotrigine');
+    // A second time first, so the medication still has one after the removal
+    // below — otherwise FR-18.7 blocks the save (see the dedicated describe).
+    addTimeRow(dialog, 2, '20:00');
+    setValue(dialog, 'Amount for dose 2', '50');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove dose 1' }));
     saveDialog(dialog);
 
@@ -379,8 +409,7 @@ describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
   it('refuses to save two doses at the same time, explaining why', () => {
     render(<MedsScreen />);
     const dialog = openMedEditor('Lamotrigine');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add a time' }));
-    setValue(dialog, 'Time for dose 2', '08:00');
+    addTimeRow(dialog, 2, '08:00');
     setValue(dialog, 'Amount for dose 2', '50');
 
     expect(dialog).toHaveTextContent(/08:00 is listed twice/i);
@@ -403,6 +432,116 @@ describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
 
     const added = useStore.getState().slots.find((s) => s.time === '13:00')!;
     expect(added.items).toEqual([{ medId: 'a', dose: 50 }]);
+  });
+});
+
+// Stage 18 FR-18.7 — a medication cannot be silently saved with no way to
+// appear on Today/Calendar/dose-log. There is no PRN/as-needed concept in the
+// domain, so the only sound fix is to block the save (core/medicationValidation.ts).
+describe('Meds tab — a medication cannot be saved with no scheduled time (FR-18.7)', () => {
+  it('blocks saving a brand-new medication with zero times, with a specific inline message', () => {
+    const dialog = openAddMedicationDialog('Carbamazepine');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove dose 1' }));
+
+    expectScheduleEmptyBlocksSave(dialog);
+    expect(useStore.getState().medications.some((m) => m.name === 'Carbamazepine')).toBe(false);
+  });
+
+  it('blocks removing the last remaining time from an existing medication', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove dose 1' }));
+
+    expectScheduleEmptyBlocksSave(dialog);
+    // Nothing was mutated — the slot survives, untouched.
+    expect(useStore.getState().slots.find((s) => s.id === 's1')?.deleted).toBeFalsy();
+  });
+
+  it('a medication with at least one time saves normally', () => {
+    const dialog = openAddMedicationDialog('Carbamazepine');
+    setValue(dialog, 'Time for dose 1', '09:00');
+    setValue(dialog, 'Amount for dose 1', '100');
+    saveDialog(dialog);
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(useStore.getState().medications.some((m) => m.name === 'Carbamazepine')).toBe(true);
+  });
+});
+
+// Stage 18 FR-18.8 — duplicate names, non-positive guardrails, and a slot set
+// whose daily total silently exceeds `maxDailyDose` (AC8).
+describe('Meds tab — input validation (FR-18.8, AC8)', () => {
+  it('rejects a duplicate medication name, case-insensitively and trimmed, against another active medication', () => {
+    const dialog = openAddMedicationDialog('  LAMOTRIGINE ');
+    setValue(dialog, 'Time for dose 1', '09:00');
+    setValue(dialog, 'Amount for dose 1', '100');
+
+    expect(dialog).toHaveTextContent(/already named.*Lamotrigine/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+    expect(useStore.getState().medications.filter((m) => !m.deleted)).toHaveLength(2);
+  });
+
+  it('does not flag a medication being edited as a duplicate of itself', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    expect(dialog).not.toHaveTextContent(/already named/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('does not flag a name shared only with an inactive medication', () => {
+    // "Levetiracetam" (id 'b') is seeded inactive.
+    const dialog = openAddMedicationDialog('Levetiracetam');
+    setValue(dialog, 'Time for dose 1', '09:00');
+    setValue(dialog, 'Amount for dose 1', '100');
+
+    expect(dialog).not.toHaveTextContent(/already named/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
+  it('rejects a negative guardrail with a specific message and blocks Save', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    setValue(dialog, 'Max daily dose', '-5');
+
+    expect(dialog).toHaveTextContent(/max daily dose must be greater than 0/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('rejects a zero guardrail', () => {
+    render(<MedsScreen />);
+    const dialog = openMedEditor('Lamotrigine');
+    setValue(dialog, 'Max single dose', '0');
+
+    expect(dialog).toHaveTextContent(/max single dose must be greater than 0/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('rejects a slot set whose daily total exceeds maxDailyDose, without flattening per-time-of-day doses', () => {
+    const dialog = openLamotrigineWithDailyCap('400', '200');
+    addTimeRow(dialog, 2, '14:00');
+    setValue(dialog, 'Amount for dose 2', '200');
+    addTimeRow(dialog, 3, '20:00');
+    setValue(dialog, 'Amount for dose 3', '200');
+
+    expect(dialog).toHaveTextContent(/600mg.*exceeds the max daily dose of 400mg/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+    // Confirms the per-time-of-day doses were summed, not flattened to one.
+    expect(
+      within(dialog)
+        .getAllByLabelText(/Amount for dose \d/)
+        .map((el) => (el as HTMLInputElement).value),
+    ).toEqual(['200', '200', '200']);
+  });
+
+  it('passes when the daily total is exactly at the cap (boundary)', () => {
+    const dialog = openLamotrigineWithDailyCap('400', '200');
+    addTimeRow(dialog, 2, '20:00');
+    setValue(dialog, 'Amount for dose 2', '200');
+
+    expect(dialog).not.toHaveTextContent(/exceeds the max daily dose/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeEnabled();
+    saveDialog(dialog);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
 
