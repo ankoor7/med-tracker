@@ -9,18 +9,19 @@ sequenced stages (see `specs/03-implementation-plan.md`).
 
 Package manager is **pnpm** (pinned via `packageManager` + `.nvmrc`).
 
-| Task             | Command           |
-| ---------------- | ----------------- |
-| Install          | `pnpm install`    |
-| Dev server       | `pnpm dev`        |
-| Typecheck        | `pnpm typecheck`  |
-| Lint             | `pnpm lint`       |
-| Format           | `pnpm format`     |
-| Test (run once)  | `pnpm test`       |
-| Test (watch)     | `pnpm test:watch` |
-| E2E (Playwright) | `pnpm test:e2e`   |
-| Production build | `pnpm build`      |
-| Preview build    | `pnpm preview`    |
+| Task              | Command           |
+| ----------------- | ----------------- |
+| Install           | `pnpm install`    |
+| Dev server        | `pnpm dev`        |
+| Typecheck         | `pnpm typecheck`  |
+| Lint              | `pnpm lint`       |
+| Format            | `pnpm format`     |
+| Test (run once)   | `pnpm test`       |
+| Test (watch)      | `pnpm test:watch` |
+| E2E (Playwright)  | `pnpm test:e2e`   |
+| Combined coverage | `pnpm coverage`   |
+| Production build  | `pnpm build`      |
+| Preview build     | `pnpm preview`    |
 
 The backend is **Supabase** (Stage 8 re-platformed off AWS). The app is
 local-first: with no Supabase env configured it runs fully offline.
@@ -50,6 +51,17 @@ UI, then asserts the resulting rows in the Supabase `records` table via a direct
 CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build on push/PR,
 plus a separate `db-tests` job that boots Supabase and runs the pgTAP suite.
 A husky pre-commit hook runs `lint-staged` + `typecheck`.
+
+**Combined coverage:** unit (vitest) and E2E (Playwright) coverage are collected
+as raw V8 data and merged into one report with
+[Monocart Coverage Reports](https://github.com/cenfun/monocart-coverage-reports).
+`pnpm test:coverage` runs vitest with the `vitest-monocart-coverage` custom
+provider, writing `coverage/unit/`. `pnpm test:e2e:coverage` runs the E2E suite
+(needs the local stack, same as `pnpm test:e2e`) with `monocart-reporter`
+collecting per-test browser coverage via `e2e/fixtures.ts`, writing
+`coverage/e2e/`. `pnpm coverage` runs both, then `pnpm coverage:merge`
+(`scripts/merge-coverage.mjs`) combines the two `raw` outputs into
+`coverage/merged/index.html`.
 
 ## Architecture / conventions
 
