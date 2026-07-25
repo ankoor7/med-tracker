@@ -21,6 +21,7 @@ import { Button, Card, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from '../
 import { AccountPanel } from '../components/AccountPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { AdherenceChart } from '../components/AdherenceChart';
+import { ClinicalOutputsCard } from '../components/reports';
 import { FieldDiffList } from '../components/ChangeMarkers';
 import { OuraPanel } from '../components/OuraPanel';
 import { DataTransferPanel } from '../components/DataTransferPanel';
@@ -193,6 +194,8 @@ export function HistoryScreen() {
           <AdherenceChart days={timeline} changes={regimenChanges} zone={settings.zone} />
         </div>
       </Card>
+
+      <ClinicalOutputsCard />
 
       <RegimenChangesCard changes={regimenChanges} zone={settings.zone} />
 
