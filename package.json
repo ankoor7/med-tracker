@@ -23,6 +23,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:report": "playwright show-report",
+    "test:e2e:mocked": "playwright test --config=playwright.mocked.config.ts",
     "local:up": "supabase start",
     "local:down": "supabase stop",
     "local:reset": "supabase db reset",
