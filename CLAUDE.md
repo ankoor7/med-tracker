@@ -9,18 +9,19 @@ sequenced stages (see `specs/03-implementation-plan.md`).
 
 Package manager is **pnpm** (pinned via `packageManager` + `.nvmrc`).
 
-| Task             | Command           |
-| ---------------- | ----------------- |
-| Install          | `pnpm install`    |
-| Dev server       | `pnpm dev`        |
-| Typecheck        | `pnpm typecheck`  |
-| Lint             | `pnpm lint`       |
-| Format           | `pnpm format`     |
-| Test (run once)  | `pnpm test`       |
-| Test (watch)     | `pnpm test:watch` |
-| E2E (Playwright) | `pnpm test:e2e`   |
-| Production build | `pnpm build`      |
-| Preview build    | `pnpm preview`    |
+| Task              | Command           |
+| ----------------- | ----------------- |
+| Install           | `pnpm install`    |
+| Dev server        | `pnpm dev`        |
+| Typecheck         | `pnpm typecheck`  |
+| Lint              | `pnpm lint`       |
+| Format            | `pnpm format`     |
+| Test (run once)   | `pnpm test`       |
+| Test (watch)      | `pnpm test:watch` |
+| E2E (Playwright)  | `pnpm test:e2e`   |
+| Combined coverage | `pnpm coverage`   |
+| Production build  | `pnpm build`      |
+| Preview build     | `pnpm preview`    |
 
 The backend is **Supabase** (Stage 8 re-platformed off AWS). The app is
 local-first: with no Supabase env configured it runs fully offline.
@@ -47,9 +48,33 @@ the build, and the static-host upload (see `supabase/README.md`). DB-only push:
 UI, then asserts the resulting rows in the Supabase `records` table via a direct
 `pg` connection. The Playwright MCP server is registered in `.mcp.json`.
 
+**E2E-mocked:** `pnpm test:e2e:mocked` runs a Docker-free smoke suite
+(`e2e-mocked/`, `playwright.mocked.config.ts`) against a dev server with
+`VITE_SUPABASE_*` set but every Supabase network call intercepted
+(`e2e-mocked/helpers/mockSupabase.ts`) — the only CI coverage of the
+_configured_-backend code path, since the main `build` job always runs
+unconfigured.
+
 CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build on push/PR,
-plus a separate `db-tests` job that boots Supabase and runs the pgTAP suite.
-A husky pre-commit hook runs `lint-staged` + `typecheck`.
+a `coverage` job (below), an `e2e-mocked` job, and a separate `db-tests` job
+that boots Supabase and runs the pgTAP suite. A husky pre-commit hook runs
+`lint-staged` + `typecheck`.
+
+**Combined coverage:** unit (vitest), the real E2E suite, and the E2E-mocked
+suite each collect raw V8 coverage, merged into one report with
+[Monocart Coverage Reports](https://github.com/cenfun/monocart-coverage-reports).
+`pnpm test:coverage` runs vitest with the `vitest-monocart-coverage` custom
+provider, writing `coverage/unit/`. `pnpm test:e2e:coverage` / `pnpm
+test:e2e:mocked:coverage` run the two Playwright suites with `monocart-reporter`
+collecting per-test browser coverage (via `e2e/fixtures.ts` /
+`e2e-mocked/fixtures.ts` and the shared `playwright.coverage.ts`), writing
+`coverage/e2e/` / `coverage/e2e-mocked/`. `pnpm coverage` runs all three suites
+(needs the local Supabase stack for the real E2E suite) then `pnpm
+coverage:merge` (`scripts/merge-coverage.mjs`) combines whichever `raw` outputs
+exist into `coverage/merged/`. `pnpm coverage:ci` skips the real E2E suite
+(unit + E2E-mocked only) — that's what CI's `coverage` job runs, posting the
+summary to the job's GitHub Actions summary and uploading the full report as
+an artifact.
 
 ## Architecture / conventions
 

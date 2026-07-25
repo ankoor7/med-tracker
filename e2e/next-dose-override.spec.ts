@@ -6,7 +6,7 @@
 // proving the override travels the full UI -> store -> sync -> push_records RPC ->
 // Postgres round-trip just like every other record.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { addMedication, addSlot, logDose, signIn, syncNow } from './helpers/app';
 import { clearUserRecords, getRecords, getUserId, closePool } from './helpers/db';
 

@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { coverageReporter } from './playwright.coverage';
 
 // Stage 10 — E2E suite. Runs a real browser against a dedicated dev server, which
 // Vite boots with the local Supabase config from `.env.local` (run `pnpm local:env`
@@ -7,6 +8,13 @@ import { defineConfig, devices } from '@playwright/test';
 // starts empty — UI actions are the only thing that reach the `records` table.
 const PORT = Number(process.env.E2E_PORT ?? 5175);
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
+
+// `pnpm test:e2e:coverage` sets COVERAGE=true — see e2e/fixtures.ts, which
+// collects browser V8 coverage per test and reports it through monocart-reporter.
+// The `raw` report is the input `pnpm coverage:merge` combines with the unit
+// coverage from vitest; left off by default so a plain `pnpm test:e2e` run
+// isn't slowed down by coverage instrumentation.
+const collectCoverage = process.env.COVERAGE === 'true';
 
 export default defineConfig({
   testDir: './e2e',
@@ -17,7 +25,11 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  reporter: collectCoverage
+    ? [['list'], coverageReporter('coverage/e2e', 'SteadyDose E2E Report')]
+    : process.env.CI
+      ? [['list'], ['html', { open: 'never' }]]
+      : 'list',
   use: {
     baseURL,
     trace: 'on-first-retry',

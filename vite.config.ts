@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import type { CoverageOptions } from 'vitest/node';
 import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
@@ -47,5 +48,23 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    coverage: {
+      provider: 'custom',
+      customProviderModule: 'vitest-monocart-coverage',
+      exclude: ['src/**/*.{test,spec}.{ts,tsx}', 'src/test/**'],
+      // A report is still useful when a handful of tests fail.
+      reportOnFailure: true,
+      // `include` and `coverageReportOptions` are read by vitest-monocart-coverage
+      // (github.com/cenfun/vitest-monocart-coverage) but aren't part of vitest's
+      // own `CustomProviderOptions` type, hence the cast.
+      include: ['src/**'],
+      // Combined with the e2e coverage via `pnpm coverage:merge` (monocart) —
+      // the `raw` report is the merge input, the rest are for standalone runs.
+      coverageReportOptions: {
+        name: 'SteadyDose Unit Coverage',
+        outputDir: 'coverage/unit',
+        reports: [['v8'], ['console-summary'], ['raw', { outputDir: 'raw' }]],
+      },
+    } as CoverageOptions,
   },
 });
