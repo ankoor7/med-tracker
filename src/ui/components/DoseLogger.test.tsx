@@ -47,4 +47,5 @@ describeFutureClampContract(
     render(<DoseLogger target={target} onClose={() => {}} />);
   },
   NOW,
+  ZONE,
 );

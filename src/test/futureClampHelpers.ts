@@ -7,15 +7,9 @@
 // in exactly one place instead of being hand-duplicated across both files.
 import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { datetimeLocalToInstant, instantToDatetimeLocal, type IanaZone } from '../core';
 
 const FUTURE_CLAMP_MESSAGE = /can't log a dose in the future/i;
-
-/** Format an instant the way a native `datetime-local` input would show it. */
-function datetimeLocalValue(instant: number): string {
-  const d = new Date(instant);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 /** Locate the "Time taken" datetime-local input in the currently-open logger. */
 function getTimeTakenInput(): HTMLInputElement {
@@ -35,10 +29,14 @@ function expectNoFutureClampMessage(): void {
 /**
  * Assert the full future-clamp contract for an already-rendered logger: the
  * "Time taken" input never shows an instant later than `now`, and the
- * "can't log a dose in the future" explanation is visible.
+ * "can't log a dose in the future" explanation is visible. Reads the input's
+ * datetime-local value back through the component's own `zone` — a naive
+ * `new Date(value)` parse assumes the host's local timezone, which drifts
+ * from a non-UTC test `zone` (e.g. `Europe/London` in BST) by the zone's
+ * offset and falsely fails.
  */
-function expectFutureClamped(input: HTMLInputElement, now: number): void {
-  expect(new Date(input.value).getTime()).toBeLessThanOrEqual(now);
+function expectFutureClamped(input: HTMLInputElement, now: number, zone: IanaZone): void {
+  expect(datetimeLocalToInstant(input.value, zone)).toBeLessThanOrEqual(now);
   expectFutureClampMessage();
 }
 
@@ -50,16 +48,21 @@ function expectFutureClamped(input: HTMLInputElement, now: number): void {
  *   target's `actualInstant` override (undefined = no override, i.e. the
  *   component's own "now" default applies).
  * @param now The fixed "now" the test's clock is pinned to.
+ * @param zone The active zone the logger under test renders its "Time taken"
+ *   input in (must match the `settings({ zone })` the test seeds the store
+ *   with), so the input's value round-trips through the same zone it was
+ *   written in.
  */
 export function describeFutureClampContract(
   componentLabel: string,
   renderLogger: (actualInstant: number | undefined) => void,
   now: number,
+  zone: IanaZone,
 ): void {
   describe(`${componentLabel} — future retime is never silently swapped for "now" (AC9)`, () => {
     it('a target actualInstant in the future is clamped to now, with a visible explanation', () => {
       renderLogger(now + 3600_000);
-      expectFutureClamped(getTimeTakenInput(), now);
+      expectFutureClamped(getTimeTakenInput(), now, zone);
     });
 
     it('a target actualInstant in the past shows no future-clamp explanation', () => {
@@ -70,9 +73,9 @@ export function describeFutureClampContract(
     it('manually typing a future time also clamps with the explanation, not silently', () => {
       renderLogger(undefined);
       fireEvent.change(getTimeTakenInput(), {
-        target: { value: datetimeLocalValue(now + 2 * 3600_000) },
+        target: { value: instantToDatetimeLocal(now + 2 * 3600_000, zone) },
       });
-      expectFutureClamped(getTimeTakenInput(), now);
+      expectFutureClamped(getTimeTakenInput(), now, zone);
     });
 
     it('the explanation clears once the time is moved back to the past', () => {
