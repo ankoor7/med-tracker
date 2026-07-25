@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { coverageReporter } from './playwright.coverage';
 
 // Stage 10 — E2E suite. Runs a real browser against a dedicated dev server, which
 // Vite boots with the local Supabase config from `.env.local` (run `pnpm local:env`
@@ -25,22 +26,7 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: collectCoverage
-    ? [
-        ['list'],
-        [
-          'monocart-reporter',
-          {
-            name: 'SteadyDose E2E Report',
-            outputFile: './coverage/e2e/mcr-report/index.html',
-            coverage: {
-              outputDir: 'coverage/e2e',
-              entryFilter: (entry: { url: string }) => entry.url.search(/\/src\/.+/) !== -1,
-              sourceFilter: (sourcePath: string) => sourcePath.search(/^src\//) !== -1,
-              reports: [['v8'], ['console-summary'], ['raw', { outputDir: 'raw' }]],
-            },
-          },
-        ],
-      ]
+    ? [['list'], coverageReporter('coverage/e2e', 'SteadyDose E2E Report')]
     : process.env.CI
       ? [['list'], ['html', { open: 'never' }]]
       : 'list',

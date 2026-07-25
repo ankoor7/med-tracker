@@ -7,7 +7,8 @@
 // that the configured path (real supabase-js client construction, sign-in,
 // sign-out, sync) never got exercised by anything in CI at all.
 
-import { test, expect, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
+import { test, expect } from './fixtures';
 import { mockSupabase, MOCK_EMAIL, MOCK_PASSWORD } from './helpers/mockSupabase';
 
 async function goToHistoryTab(page: Page) {

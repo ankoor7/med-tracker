@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { coverageReporter } from './playwright.coverage';
 
 // "Configured backend" smoke suite (e2e-mocked/) — a real browser against a
 // dev server booted with VITE_SUPABASE_* set, but every Supabase network call
@@ -9,12 +10,19 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = Number(process.env.E2E_MOCKED_PORT ?? 5176);
 const baseURL = process.env.E2E_MOCKED_BASE_URL ?? `http://localhost:${PORT}`;
 
+// `pnpm test:e2e:mocked:coverage` sets COVERAGE=true — see e2e-mocked/fixtures.ts.
+const collectCoverage = process.env.COVERAGE === 'true';
+
 export default defineConfig({
   testDir: './e2e-mocked',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  reporter: collectCoverage
+    ? [['list'], coverageReporter('coverage/e2e-mocked', 'SteadyDose Configured-Backend Report')]
+    : process.env.CI
+      ? [['list'], ['html', { open: 'never' }]]
+      : 'list',
   use: {
     baseURL,
     trace: 'on-first-retry',

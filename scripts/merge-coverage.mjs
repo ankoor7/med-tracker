@@ -1,9 +1,12 @@
 #!/usr/bin/env node
-// Merges the `raw` V8 coverage exported by `pnpm test:coverage` (vitest, via
-// vitest-monocart-coverage) and `pnpm test:e2e:coverage` (Playwright, via
-// monocart-reporter) into one combined report covering both suites.
+// Merges the `raw` V8 coverage exported by each suite's coverage run — vitest
+// unit tests (`pnpm test:coverage`, via vitest-monocart-coverage), the real
+// e2e/ suite (`pnpm test:e2e:coverage`, needs the local Supabase stack), and
+// the e2e-mocked/ configured-backend suite (`pnpm test:e2e:mocked:coverage`)
+// — into one combined report covering whichever of them were actually run.
 //
-//   pnpm coverage        # runs both suites with coverage, then this script
+//   pnpm coverage      # unit + e2e (Docker) + e2e-mocked, then this script
+//   pnpm coverage:ci   # unit + e2e-mocked only (no Docker) — what CI runs
 //   pnpm coverage:merge  # just the merge, if raw data already exists
 //
 // See https://github.com/cenfun/monocart-coverage-reports#merge-coverage-reports
@@ -15,14 +18,13 @@ import { CoverageReport } from 'monocart-coverage-reports';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-const inputDir = [join(root, 'coverage/unit/raw'), join(root, 'coverage/e2e/raw')].filter((dir) =>
-  existsSync(dir),
-);
+const candidateDirs = ['coverage/unit/raw', 'coverage/e2e/raw', 'coverage/e2e-mocked/raw'];
+const inputDir = candidateDirs.map((dir) => join(root, dir)).filter((dir) => existsSync(dir));
 
 if (inputDir.length === 0) {
   console.error(
-    'No raw coverage found in coverage/unit/raw or coverage/e2e/raw.\n' +
-      'Run `pnpm test:coverage` and/or `pnpm test:e2e:coverage` first, or just `pnpm coverage`.',
+    `No raw coverage found in any of: ${candidateDirs.join(', ')}.\n` +
+      'Run `pnpm coverage` (or `pnpm coverage:ci`), or an individual `pnpm test:*:coverage` script first.',
   );
   process.exit(1);
 }
@@ -41,7 +43,7 @@ const coverageOptions = {
     '**/src/**': true,
   },
 
-  reports: [['v8'], ['console-details'], ['lcovonly']],
+  reports: [['v8'], ['console-details'], ['lcovonly'], ['markdown-summary']],
 };
 
 await new CoverageReport(coverageOptions).generate();
