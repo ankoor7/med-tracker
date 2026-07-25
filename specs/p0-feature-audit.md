@@ -35,13 +35,13 @@ are numbered from 22 up and run on the same Implement→Validate→Review pipeli
 
 ## New stages proposed for the not-built / partial P0s
 
-| Stage | Covers P0s | Spec (authored 2026-07-25) |
-|-------|-----------|---------------|
-| **22** | #3 | `stage-22-medication-identity-metadata.md` |
-| **23** | #6, #7 | `stage-23-clinician-outputs.md` (implements the never-built Stage 17 draft) |
-| **24** | #5 | `stage-24-side-effect-logging.md` |
-| **25** | #8 | `stage-25-reminder-reliability.md` |
-| **26** | #11 (+ #10 posture) | `stage-26-trust-transparency.md` |
+| Stage | Covers P0s | Spec (authored 2026-07-25) | Status |
+|-------|-----------|---------------|--------|
+| **22** | #3 | `stage-22-medication-identity-metadata.md` | ✅ DONE (`62eac7e`) |
+| **23** | #6, #7 | `stage-23-clinician-outputs.md` (implements the never-built Stage 17 draft) | ✅ DONE (`e115f81`) |
+| **24** | #5 | `stage-24-side-effect-logging.md` | next |
+| **25** | #8 | `stage-25-reminder-reliability.md` | |
+| **26** | #11 (+ #10 posture) | `stage-26-trust-transparency.md` | |
 
 _#12 (iOS native) is deferred out of this pass. #10 (E2E) needs no build work — its
 posture is restated in Stage 26._
@@ -84,7 +84,7 @@ None of these block the new stages; fold them into a later polish pass if desire
 2. ✅ Author Stages 22–26 (done 2026-07-25). iOS deferred; #10 needs no build.
 3. 🔄 Spawn subagents to **verify the ✅ Done P0s** (#1, #2, #4, #9, #10) — in
    progress; fold any bugs found into the relevant stage or a fix commit.
-4. Start the Implement→Validate→Review cycle on the first new stage (**Stage 22**),
-   then 23 → 24 → 25 → 26. Sequence note: 22 is a prerequisite for 23 (the med list
-   renders strength/form); 24 feeds 23's summary; 23/24/25/26 are otherwise
-   independent.
+4. Implement→Validate→Review cycle: **Stage 22 ✅**, **Stage 23 ✅** (with the
+   optional Stage 16 regimen-change markers included), then **24 → 25 → 26**.
+   Sequence note: 22 fed 23 (the med list renders strength/form); 24 feeds 23's
+   summary (attributed side effects); 24/25/26 are otherwise independent.

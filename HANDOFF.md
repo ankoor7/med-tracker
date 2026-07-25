@@ -20,6 +20,7 @@ not-built/partial ones, verified the done ones, and shipped the first stage.
 | --------- | ----------------------------------------------------------------- |
 | `3728b48` | P0 audit + Stages **22–26** specs authored                        |
 | `62eac7e` | **Stage 22** implemented — medication `strength` + `form` (P0 #3) |
+| `e115f81` | **Stage 23** implemented — clinician outputs (P0 #6 + #7)         |
 
 **P0 status:** Done & re-verified bug-free by subagents — #1 grouped schedule,
 #2 taken/skipped/late logging, #4 pharmacology extension, #9 local-first storage,
@@ -31,17 +32,35 @@ reliability, **26** trust/privacy policy.
 
 **Stage 22 — DONE.** `strength?`/`form?` on `Medication`; pure
 `medicationLabel()`/`formLabel()`; `validateMedication()` strength trim+cap (40)
-with extracted `isDuplicateName`/`guardrailIssues` helpers (kept the fn under the
-fallow complexity budget — that was the one gate blocker, fixed by extraction not
-suppression); editor Strength field + Form select; Meds list renders the label.
-600 unit tests green, typecheck/lint clean, fallow gate cleared. Validated in the
-running app (set "25 mg" + Tablet → "Lamotrigine 25 mg — Tablet"; reopen retains).
+with extracted `isDuplicateName`/`guardrailIssues` helpers; editor Strength field
 
-**Next:** Stage 23 (clinician outputs). Sequence note in the audit — 22 feeds 23's
-med list; 24 feeds 23's summary; 23/24/25/26 otherwise independent. Non-blocking
-notes from the verification pass are recorded in the audit (§Verification):
-`late` is an adherence classification not an `OccurrenceStatus`; "Take group"
-offered on upcoming slots; a `loadAll` first-run check + a round-trip test gap.
+- Form select; Meds list renders the label. Validated in the app.
+
+**Stage 23 — DONE (with the optional Stage 16 regimen markers, per user request).**
+Pure `core/clinicalReport.ts` — `buildMedicationList` + `buildPreVisitSummary`
+(overall + per-timing-sensitive-med adherence, flare stats with severity/duration
+avgs + weekly clustering, in-period regimen changes, descriptive "what to ask"
+highlights). UI: a "Clinician outputs" card in History opens either report on a
+print-ready white sheet (React Aria overlay, portaled; Print→PDF via `@media
+print` isolating `.sd-print-region`; Share via `navigator.share`→`mailto`;
+disclaimer). Extracted `useDataset()` + `shareReport()`. 608 tests green;
+typecheck/lint clean; fallow gate **passes (warn)** — the residual warn is the
+store-subscription idiom `useDataset` shares with the pre-existing
+HistoryScreen/OuraPanel (a full clear would mean refactoring those two;
+deliberately deferred). Validated live: both reports legible dark-on-white, med
+list shows Stage 22 labels, per-med table excludes flexible meds.
+
+**Gotcha discovered (Stage 23):** the design system's `slate` scale is
+**inverted and theme-flipping** — `text-slate-900` is the _lightest_ token and
+flips with theme. A forced-white print document must use **literal** colours
+(`text-[#0f172a]` etc.), not slate tokens; the embedded AdherenceChart keeps its
+tokens on a dark figure (`print-color-adjust: exact`).
+
+**Next:** Stage 24 (occurrence-linked side-effect logging) — extends the Stage 15
+event system with `medId`/`doseLogEntryId`; feeds Stage 23's summary. Non-blocking
+notes from the P0 verification pass are in the audit (§Verification): `late` isn't
+an `OccurrenceStatus`; "Take group" offered on upcoming slots; a `loadAll`
+first-run check + a round-trip test gap.
 
 _(Local HEAD is ahead of the last push — push before closing.)_
 
