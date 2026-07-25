@@ -8,6 +8,7 @@
 ![Supabase](https://img.shields.io/badge/backend-Supabase-3ECF8E?logo=supabase&logoColor=white)
 ![PWA](https://img.shields.io/badge/PWA-offline--first-5A0FC8?logo=pwa&logoColor=white)
 ![Tested with Playwright](https://img.shields.io/badge/Tested_with-Playwright-2EAD33?logo=playwright&logoColor=white)
+![Coverage](https://raw.githubusercontent.com/ankoor7/med-tracker/main/badges/coverage.svg)
 
 A **local-first, offline-capable PWA** for people on fixed daily medication
 schedules (built for anti-epileptic regimens). It manages a grouped daily
