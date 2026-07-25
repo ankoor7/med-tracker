@@ -1,13 +1,61 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stages 18, 19 AND 20 are
-complete.** Stage 20 (screen migration) landed in 5 units — U1 chrome+nav (React
+_Updated 2026-07-25. Branch: `stage-18-ux-hardening`. Two tracks now live in
+parallel: the **React-Aria UI rewrite** (Stages 19–21; Stage 21 dashboards+calendar
+is mid-flight — U1 History + U2 Calendar committed, see `4951cd6`) and a new
+**P0 feature backlog track** (Stages 22–26). See the P0 section immediately below;
+the older Stage-18 history follows it._
+
+---
+
+## P0 feature backlog (handoff item 2) — started 2026-07-25
+
+Took `research/03-feature-list-prioritised-by-category.md`, mapped all **12 P0s**
+to build status in **`specs/p0-feature-audit.md`**, authored specs for the
+not-built/partial ones, verified the done ones, and shipped the first stage.
+
+**Committed:**
+
+| Commit    | What                                                              |
+| --------- | ----------------------------------------------------------------- |
+| `3728b48` | P0 audit + Stages **22–26** specs authored                        |
+| `62eac7e` | **Stage 22** implemented — medication `strength` + `form` (P0 #3) |
+
+**P0 status:** Done & re-verified bug-free by subagents — #1 grouped schedule,
+#2 taken/skipped/late logging, #4 pharmacology extension, #9 local-first storage,
+#10 encryption posture. Decisions: #10 met by TLS+at-rest (zero-knowledge stays a
+non-goal); **#12 iOS native deferred**. New specs: **22** med metadata (DONE),
+**23** clinician outputs = pre-visit summary + portable med list (implements the
+never-built Stage 17), **24** occurrence-linked side-effect logging, **25** reminder
+reliability, **26** trust/privacy policy.
+
+**Stage 22 — DONE.** `strength?`/`form?` on `Medication`; pure
+`medicationLabel()`/`formLabel()`; `validateMedication()` strength trim+cap (40)
+with extracted `isDuplicateName`/`guardrailIssues` helpers (kept the fn under the
+fallow complexity budget — that was the one gate blocker, fixed by extraction not
+suppression); editor Strength field + Form select; Meds list renders the label.
+600 unit tests green, typecheck/lint clean, fallow gate cleared. Validated in the
+running app (set "25 mg" + Tablet → "Lamotrigine 25 mg — Tablet"; reopen retains).
+
+**Next:** Stage 23 (clinician outputs). Sequence note in the audit — 22 feeds 23's
+med list; 24 feeds 23's summary; 23/24/25/26 otherwise independent. Non-blocking
+notes from the verification pass are recorded in the audit (§Verification):
+`late` is an adherence classification not an `OccurrenceStatus`; "Take group"
+offered on upcoming slots; a `loadAll` first-run check + a round-trip test gap.
+
+_(Local HEAD is ahead of the last push — push before closing.)_
+
+---
+
+## Prior track — Stage 18/19/20/21 (React-Aria UI)
+
+_Stage 20 (screen migration) landed in 5 units — U1 chrome+nav (React
 Aria Tabs), U2 Today, U3 the merged Meds editor, U4 Events, U5 logging dialogs +
-panels — all validated + reviewer-signed-off, 585 unit tests green, build succeeds,
-fallow-clean. **The next work is Stage 21 (dashboards + calendar)** —
-`specs/stage-21-dashboards-calendar.md`, the highest-visual-risk stage with
-legibility as the explicit acceptance bar. The former WIP `17e78b7` was validated +
-signed off earlier this session (§"Snapshot fix — signed off")._
+panels — all validated + reviewer-signed-off, build succeeds, fallow-clean. **Stage
+21 (dashboards + calendar)** is mid-flight — `specs/stage-21-dashboards-calendar.md`,
+the highest-visual-risk stage with legibility as the explicit acceptance bar. The
+former WIP `17e78b7` was validated + signed off earlier (§"Snapshot fix — signed
+off")._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
