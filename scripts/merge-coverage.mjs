@@ -43,7 +43,7 @@ const coverageOptions = {
     '**/src/**': true,
   },
 
-  reports: [['v8'], ['console-details'], ['lcovonly'], ['markdown-summary']],
+  reports: [['v8'], ['console-details'], ['lcovonly'], ['markdown-summary'], ['json-summary']],
 };
 
 await new CoverageReport(coverageOptions).generate();
