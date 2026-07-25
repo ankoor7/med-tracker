@@ -7,7 +7,7 @@
 // that archiving a type is a reversible, non-destructive flag (never a tombstone)
 // while its logged instances survive untouched.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import {
   addEventType,
   archiveEventType,

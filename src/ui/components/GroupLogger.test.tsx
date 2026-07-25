@@ -142,4 +142,5 @@ describeFutureClampContract(
     render(<GroupLogger target={target} onClose={() => {}} />);
   },
   NOW,
+  ZONE,
 );
