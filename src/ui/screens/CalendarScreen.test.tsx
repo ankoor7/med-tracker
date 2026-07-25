@@ -192,7 +192,9 @@ describe('CalendarScreen — guardrail breach indicator on the calendar (FR-18.9
     const block = container.querySelector('[data-block="true"]')!;
 
     expect(screen.getByText(/⚠ too-soon/)).toBeInTheDocument();
-    expect(block.className).toContain('border-red-600');
+    // Stage 21: the breach border is now the design-system status-missed token
+    // (was the hardcoded border-red-600), still the most-severe border treatment.
+    expect(block.className).toContain('border-status-missed');
   });
 });
 

@@ -256,7 +256,7 @@ export function CalendarScreen() {
             <div className="relative mt-1">
               <button
                 type="button"
-                className="rounded-full border border-amber-700 bg-amber-950/40 px-2 py-0.5 text-[11px] text-amber-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
+                className="rounded-full border border-status-due/40 bg-status-due/10 px-2 py-0.5 text-[11px] text-status-due focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-muted"
                 aria-label={`${changeGroup.changes.length} regimen change${
                   changeGroup.changes.length > 1 ? 's' : ''
                 } on this day`}
@@ -493,7 +493,7 @@ function DoseGroup({
         {futureBlocked && (
           <span
             role="status"
-            className="text-[10px] font-semibold text-amber-400"
+            className="text-[10px] font-semibold text-status-due"
             title="Can't log a dose in the future — the drag stops at now"
           >
             · can't go past now
@@ -547,7 +547,7 @@ function GroupBreachChip({ group }: { group: CalendarGroup }) {
   return (
     <span
       role="status"
-      className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-red-400"
+      className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-status-missed"
       title={`Guardrail breach: ${label}`}
       aria-label={`Guardrail breach: ${label}`}
     >
@@ -567,7 +567,9 @@ function GroupBreachChip({ group }: { group: CalendarGroup }) {
 // `DoseGroup`'s own branching stays flat.
 function groupBorderClass(group: CalendarGroup): string {
   if (group.hasBreach)
-    return group.hasLogged ? 'border-2 border-red-600' : 'border-dashed border-2 border-red-600';
+    return group.hasLogged
+      ? 'border-2 border-status-missed'
+      : 'border-dashed border-2 border-status-missed';
   if (group.hasLogged) return 'border-slate-700';
   if (group.hasAssumed) return 'border-dashed border-status-taken/50';
   if (group.hasMissed) return 'border-dashed border-2 border-status-missed/70';
@@ -630,7 +632,7 @@ function GroupMemberChip({ m }: { m: GroupMember }) {
         {m.med?.unit ?? ''}
       </span>
       <MemberStatusGlyph m={m} />
-      {m.overridden && <span className="text-[10px] text-amber-400">·adj</span>}
+      {m.overridden && <span className="text-[10px] text-status-due">·adj</span>}
     </span>
   );
 }
@@ -650,7 +652,7 @@ function MemberStatusGlyph({ m }: { m: GroupMember }) {
         kind === 'over-cap' ? 'over-cap' : kind === 'too-soon' ? 'too-soon' : 'guardrail';
       return (
         <span
-          className="text-[10px] font-semibold text-red-400"
+          className="text-[10px] font-semibold text-status-missed"
           title={`Logged — ${label} guardrail breach`}
           aria-label={`Logged with a ${label} guardrail breach`}
         >
