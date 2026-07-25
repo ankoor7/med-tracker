@@ -1,5 +1,14 @@
 # SteadyDose
 
+[![CI](https://github.com/ankoor7/med-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/ankoor7/med-tracker/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)
+![pnpm](https://img.shields.io/badge/pnpm-9.15.0-F69220?logo=pnpm&logoColor=white)
+![Node](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)
+![Supabase](https://img.shields.io/badge/backend-Supabase-3ECF8E?logo=supabase&logoColor=white)
+![PWA](https://img.shields.io/badge/PWA-offline--first-5A0FC8?logo=pwa&logoColor=white)
+![Tested with Playwright](https://img.shields.io/badge/Tested_with-Playwright-2EAD33?logo=playwright&logoColor=white)
+
 A **local-first, offline-capable PWA** for people on fixed daily medication
 schedules (built for anti-epileptic regimens). It manages a grouped daily
 schedule, lets you log an **adjusted dose** when you're late, enforces your own
