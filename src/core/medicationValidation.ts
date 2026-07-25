@@ -20,11 +20,15 @@ import type { Guardrails } from './types';
 
 export type MedicationValidationField =
   | 'name'
+  | 'strength'
   | 'schedule'
   | 'maxSingleDose'
   | 'maxDailyDose'
   | 'minIntervalHours'
   | 'dailyTotal';
+
+/** Max length of the free-text strength (Stage 22, FR-22.2), e.g. "500 mg". */
+export const MAX_STRENGTH_LENGTH = 40;
 
 export interface MedicationValidationIssue {
   field: MedicationValidationField;
@@ -43,6 +47,11 @@ export interface MedicationNameCandidate {
 export interface ValidateMedicationInput {
   /** The name as entered; comparison trims and lower-cases it. */
   name: string;
+  /**
+   * Optional free-text strength as entered (Stage 22, e.g. "500 mg"). Descriptive
+   * only — never parsed or fed to dose arithmetic. Trimmed; capped in length.
+   */
+  strength?: string;
   guardrails: Guardrails;
   /**
    * The dose entered for every row in the editor's "times & doses" list —
@@ -64,46 +73,21 @@ const GUARDRAIL_LABELS: Record<'maxSingleDose' | 'maxDailyDose' | 'minIntervalHo
   minIntervalHours: 'Min interval',
 };
 
-/**
- * Validates a medication (identity + guardrails + the slot doses the editor
- * plans to save it with) before it reaches the store. Returns every issue
- * found, not just the first — the editor can decide how many to show.
- */
-export function validateMedication(input: ValidateMedicationInput): MedicationValidationIssue[] {
+/** Whether `name` collides with another *active*, non-deleted medication. */
+function isDuplicateName(input: ValidateMedicationInput, trimmedName: string): boolean {
+  // Duplicate check is scoped to OTHER active, non-deleted medications: an
+  // inactive ("stopped taking") or tombstoned medication is not currently
+  // administered, so a same-named active one is not the dose-confusion risk
+  // this guards against, and a user should be free to reuse a retired name.
+  const target = trimmedName.toLowerCase();
+  return input.others.some(
+    (m) => m.id !== input.medId && m.active && !m.deleted && m.name.trim().toLowerCase() === target,
+  );
+}
+
+/** Guardrail-value issues: each cap must be positive, and the daily total must fit. */
+function guardrailIssues(input: ValidateMedicationInput): MedicationValidationIssue[] {
   const issues: MedicationValidationIssue[] = [];
-  const trimmedName = input.name.trim();
-
-  if (trimmedName.length === 0) {
-    issues.push({ field: 'name', code: 'name-required', message: 'Name is required.' });
-  } else {
-    // Duplicate check is scoped to OTHER *active*, non-deleted medications: an
-    // inactive ("stopped taking") or tombstoned medication is not currently
-    // administered, so a same-named active one is not the dose-confusion risk
-    // this guards against, and a user should be free to reuse a retired name.
-    const dupe = input.others.some(
-      (m) =>
-        m.id !== input.medId &&
-        m.active &&
-        !m.deleted &&
-        m.name.trim().toLowerCase() === trimmedName.toLowerCase(),
-    );
-    if (dupe) {
-      issues.push({
-        field: 'name',
-        code: 'name-duplicate',
-        message: `Another active medication is already named “${trimmedName}”. Use a different name, or edit that one instead, to avoid dose confusion.`,
-      });
-    }
-  }
-
-  if (input.slotDoses.length === 0) {
-    issues.push({
-      field: 'schedule',
-      code: 'schedule-empty',
-      message:
-        'Add at least one time. A medication with no scheduled time never appears on Today, Calendar or the dose log.',
-    });
-  }
 
   for (const key of ['maxSingleDose', 'maxDailyDose', 'minIntervalHours'] as const) {
     const v = input.guardrails[key];
@@ -128,6 +112,50 @@ export function validateMedication(input: ValidateMedicationInput): MedicationVa
       });
     }
   }
+
+  return issues;
+}
+
+/**
+ * Validates a medication (identity + guardrails + the slot doses the editor
+ * plans to save it with) before it reaches the store. Returns every issue
+ * found, not just the first — the editor can decide how many to show.
+ */
+export function validateMedication(input: ValidateMedicationInput): MedicationValidationIssue[] {
+  const issues: MedicationValidationIssue[] = [];
+  const trimmedName = input.name.trim();
+
+  if (trimmedName.length === 0) {
+    issues.push({ field: 'name', code: 'name-required', message: 'Name is required.' });
+  } else if (isDuplicateName(input, trimmedName)) {
+    issues.push({
+      field: 'name',
+      code: 'name-duplicate',
+      message: `Another active medication is already named “${trimmedName}”. Use a different name, or edit that one instead, to avoid dose confusion.`,
+    });
+  }
+
+  // Strength is optional; when present it must fit the label (Stage 22 FR-22.2).
+  // A blank/whitespace value is "not specified" and stored as undefined by the
+  // editor, so it is never an error here.
+  if (input.strength != null && input.strength.trim().length > MAX_STRENGTH_LENGTH) {
+    issues.push({
+      field: 'strength',
+      code: 'strength-too-long',
+      message: `Strength must be ${MAX_STRENGTH_LENGTH} characters or fewer.`,
+    });
+  }
+
+  if (input.slotDoses.length === 0) {
+    issues.push({
+      field: 'schedule',
+      code: 'schedule-empty',
+      message:
+        'Add at least one time. A medication with no scheduled time never appears on Today, Calendar or the dose log.',
+    });
+  }
+
+  issues.push(...guardrailIssues(input));
 
   return issues;
 }

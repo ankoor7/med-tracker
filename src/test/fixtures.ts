@@ -31,6 +31,8 @@ export function med(over: Partial<Medication> = {}): Medication {
     adjustWhenLate: over.adjustWhenLate ?? true,
     active: over.active ?? true,
     notes: over.notes,
+    strength: over.strength,
+    form: over.form,
     guardrails,
     startedAt: over.startedAt,
     updatedAt: over.updatedAt ?? 0,

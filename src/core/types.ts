@@ -12,6 +12,20 @@ export interface Guardrails {
   minIntervalHours: number | null;
 }
 
+// Dosage form — the physical presentation of a medication (Stage 22, P0 #3).
+// Descriptive identity only; it never feeds dose arithmetic. `other` is the
+// escape hatch for anything the fixed set does not cover.
+export type MedicationForm =
+  | 'tablet'
+  | 'capsule'
+  | 'liquid'
+  | 'injection'
+  | 'patch'
+  | 'inhaler'
+  | 'drops'
+  | 'cream'
+  | 'other';
+
 export interface Medication {
   id: string;
   name: string;
@@ -21,6 +35,11 @@ export interface Medication {
   adjustWhenLate: boolean; // timing-sensitive vs flexible
   active: boolean;
   notes?: string;
+  // Descriptive product identity (Stage 22, P0 #3). Both optional and additive —
+  // a row written before this stage reads them as `undefined` ("not specified")
+  // and renders its bare name. Neither ever feeds dose calculation.
+  strength?: string; // free text as printed on the pack, e.g. "500 mg", "5 mg/mL"
+  form?: MedicationForm; // dosage form
   guardrails: Guardrails;
   // When this medication was first prescribed (Stage 18 FR-18.1). Optional:
   // a medication with no `startedAt` is treated as having always existed, which

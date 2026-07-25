@@ -32,6 +32,7 @@ import {
   type MedicationValidationIssue,
   type SharedTime,
   type Medication,
+  type MedicationForm,
 } from '../../core';
 import { useStore, type MedicationInput } from '../../store/store';
 import { Button, Field, inputClass } from '../components/ui';
@@ -48,8 +49,25 @@ const BLANK: MedicationInput = {
   adjustWhenLate: true,
   active: true,
   notes: '',
+  strength: '',
+  form: undefined,
   guardrails: { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null },
 };
+
+// Dosage forms offered in the editor, in the order shown. Kept next to the
+// editor because it is the only place a user picks one; the label mapping for
+// display lives in core (`formLabel`).
+const FORM_OPTIONS: { value: MedicationForm; label: string }[] = [
+  { value: 'tablet', label: 'Tablet' },
+  { value: 'capsule', label: 'Capsule' },
+  { value: 'liquid', label: 'Liquid' },
+  { value: 'injection', label: 'Injection' },
+  { value: 'patch', label: 'Patch' },
+  { value: 'inhaler', label: 'Inhaler' },
+  { value: 'drops', label: 'Drops' },
+  { value: 'cream', label: 'Cream' },
+  { value: 'other', label: 'Other' },
+];
 
 /** A row plus the local key React needs while the row has no slot yet. */
 interface EditableRow extends MedTimeRow {
@@ -83,6 +101,8 @@ export function MedicationEditor({
           adjustWhenLate: initial.adjustWhenLate,
           active: initial.active,
           notes: initial.notes ?? '',
+          strength: initial.strength ?? '',
+          form: initial.form,
           guardrails: { ...initial.guardrails },
         }
       : { ...BLANK },
@@ -150,6 +170,7 @@ export function MedicationEditor({
   // this component only renders what comes back.
   const issues = validateMedication({
     name: form.name,
+    strength: form.strength,
     guardrails: form.guardrails,
     slotDoses: rows.map((r) => r.dose),
     medId: initial?.id,
@@ -164,6 +185,8 @@ export function MedicationEditor({
     if (!canSave) return;
     const payload: MedicationInput = {
       ...form,
+      // Blank strength is "not specified" — store undefined, never "" (FR-22.2).
+      strength: form.strength?.trim() ? form.strength.trim() : undefined,
       startedAt: startDateStr === '' ? undefined : startOfDayInstant(startDateStr, zone),
     };
     const store = useStore.getState();
@@ -209,6 +232,7 @@ export function MedicationEditor({
         <IdentityFields
           form={form}
           nameError={issueFor('name')?.message}
+          strengthError={issueFor('strength')?.message}
           onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
         />
 
@@ -288,14 +312,16 @@ export function MedicationEditor({
   );
 }
 
-/** What the medication is: name, unit, half-life, colour. */
+/** What the medication is: name, strength, form, unit, half-life, colour. */
 function IdentityFields({
   form,
   nameError,
+  strengthError,
   onChange,
 }: {
   form: MedicationInput;
   nameError?: string;
+  strengthError?: string;
   onChange: (patch: Partial<MedicationInput>) => void;
 }) {
   return (
@@ -309,6 +335,39 @@ function IdentityFields({
         onChange={(name) => onChange({ name })}
         errorMessage={nameError}
       />
+
+      {/* Stage 22 (P0 #3): descriptive identity — how the med reads on a
+          clinician-facing list ("Levetiracetam 500 mg — Tablet"). Neither field
+          feeds dose arithmetic; both are optional. */}
+      <div className="grid grid-cols-2 gap-3">
+        <TextField
+          label="Strength"
+          aria-label="Strength"
+          hint="As printed on the pack, e.g. “500 mg”. Optional."
+          value={form.strength ?? ''}
+          onChange={(strength) => onChange({ strength })}
+          errorMessage={strengthError}
+        />
+        <Field label="Form">
+          <select
+            className={inputClass}
+            value={form.form ?? ''}
+            onChange={(e) =>
+              onChange({
+                form: e.target.value === '' ? undefined : (e.target.value as MedicationForm),
+              })
+            }
+            aria-label="Form"
+          >
+            <option value="">Not specified</option>
+            {FORM_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <TextField

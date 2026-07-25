@@ -14,7 +14,13 @@
 // unaffected by which view an edit was made from.
 
 import { useState } from 'react';
-import { isoDateInZone, slotsForMedication, type Medication, type Slot } from '../../core';
+import {
+  isoDateInZone,
+  medicationLabel,
+  slotsForMedication,
+  type Medication,
+  type Slot,
+} from '../../core';
 import { useStore } from '../../store/store';
 import { Button, Card, ColorDot, UNKNOWN_MED_NAME } from '../components/ui';
 import { ConfirmDialog } from '../components/ConfirmDialog';
@@ -138,7 +144,7 @@ function MedicationView() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <ColorDot color={med.color} />
-                  <h3 className="font-medium">{med.name}</h3>
+                  <h3 className="font-medium">{medicationLabel(med)}</h3>
                   {!med.active && <span className="text-xs text-slate-500">(inactive)</span>}
                 </div>
                 <p className="mt-1 text-xs text-slate-400">

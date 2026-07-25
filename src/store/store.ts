@@ -30,6 +30,7 @@ import {
   type IanaZone,
   type Instant,
   type Medication,
+  type MedicationForm,
   type OuraDaySummary,
   type RegimenChange,
   type ScheduleItem,
@@ -59,6 +60,9 @@ export interface MedicationInput {
   adjustWhenLate: boolean;
   active: boolean;
   notes?: string;
+  // Descriptive identity (Stage 22, P0 #3); both optional and additive.
+  strength?: string;
+  form?: MedicationForm;
   guardrails: Guardrails;
   // When this medication was first prescribed (Stage 18 FR-18.1 piece 3).
   // Optional: absent means "treat as always prescribed" — see `Medication.startedAt`.

@@ -18,3 +18,4 @@ export * from './ids';
 export * from './cloudRecord';
 export * from './oura';
 export * from './medicationValidation';
+export * from './medicationLabel';

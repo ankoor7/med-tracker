@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { validateMedication, type MedicationNameCandidate } from './medicationValidation';
+import {
+  MAX_STRENGTH_LENGTH,
+  validateMedication,
+  type MedicationNameCandidate,
+} from './medicationValidation';
 import type { Guardrails } from './types';
 
 const noCaps: Guardrails = { maxSingleDose: null, maxDailyDose: null, minIntervalHours: null };
@@ -7,6 +11,45 @@ const noCaps: Guardrails = { maxSingleDose: null, maxDailyDose: null, minInterva
 function others(...cs: MedicationNameCandidate[]): MedicationNameCandidate[] {
   return cs;
 }
+
+describe('validateMedication — strength (Stage 22, FR-22.2)', () => {
+  it('accepts an absent, blank, or normal-length strength', () => {
+    for (const strength of [undefined, '', '   ', '500 mg', '5 mg/mL']) {
+      const issues = validateMedication({
+        name: 'Levetiracetam',
+        strength,
+        guardrails: noCaps,
+        slotDoses: [100],
+        others: [],
+      });
+      expect(issues.some((i) => i.field === 'strength')).toBe(false);
+    }
+  });
+
+  it('rejects a strength longer than the cap (measured after trimming)', () => {
+    const issues = validateMedication({
+      name: 'Levetiracetam',
+      strength: `  ${'x'.repeat(MAX_STRENGTH_LENGTH + 1)}  `,
+      guardrails: noCaps,
+      slotDoses: [100],
+      others: [],
+    });
+    expect(issues).toContainEqual(
+      expect.objectContaining({ field: 'strength', code: 'strength-too-long' }),
+    );
+  });
+
+  it('accepts a strength exactly at the cap', () => {
+    const issues = validateMedication({
+      name: 'Levetiracetam',
+      strength: 'x'.repeat(MAX_STRENGTH_LENGTH),
+      guardrails: noCaps,
+      slotDoses: [100],
+      others: [],
+    });
+    expect(issues.some((i) => i.field === 'strength')).toBe(false);
+  });
+});
 
 describe('validateMedication — name (AC8, FR-18.8)', () => {
   it('rejects an empty/whitespace-only name', () => {
