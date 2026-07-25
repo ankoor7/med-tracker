@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from 'react';
+import { Meter } from 'react-aria-components';
 import {
   adherenceTimeline,
   classifyGuardrailBreach,
@@ -8,6 +9,7 @@ import {
   formatDateTimeWithZone,
   formatTimeWithZone,
   groupChangesByDay,
+  type AdherenceResult,
   type DoseLogEntry,
   type HistoryFilter,
   type IanaZone,
@@ -122,7 +124,10 @@ export function HistoryScreen() {
       <AccountPanel />
 
       {adherence.missedPatternWarning && (
-        <div className="rounded-md border border-red-700 bg-red-950/50 p-3 text-sm text-red-200">
+        <div
+          role="alert"
+          className="rounded-md border border-status-missed/30 bg-status-missed/10 p-3 text-sm text-status-missed"
+        >
           <strong>Missed-pattern warning:</strong> {adherence.missed} timing-sensitive doses missed
           in the last {adherence.windowDays} days (threshold {adherence.threshold}).
         </div>
@@ -132,10 +137,30 @@ export function HistoryScreen() {
         <h3 className="mb-2 text-sm font-medium">
           Adherence — last {adherence.windowDays} days (timing-sensitive only)
         </h3>
-        <div className="flex items-baseline gap-4">
-          <span className="text-3xl font-semibold text-accent-muted">
-            {Math.round(adherence.ratio * 100)}%
-          </span>
+        <div className="flex items-start gap-4">
+          {/* Stage 21: a React Aria Meter for the headline figure — the track
+              gives a glanceable proportion alongside the number, and its
+              accessible name (below) carries the same FR-18.6 assumed-basis
+              caveat the visible note does, so a screen-reader user gets it too. */}
+          <Meter
+            value={Math.round(adherence.ratio * 100)}
+            aria-label={adherenceMeterLabel(adherence)}
+            className="flex w-28 shrink-0 flex-col gap-1.5"
+          >
+            {({ percentage, valueText }) => (
+              <>
+                <span className="text-3xl font-semibold tabular-nums text-accent-muted">
+                  {valueText}
+                </span>
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800/70">
+                  <div
+                    className="h-full rounded-full bg-accent-muted"
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
+              </>
+            )}
+          </Meter>
           <span className="text-xs text-slate-400" data-testid="adherence-counts">
             {adherence.onTime} on time
             {adherence.assumedOnTime > 0 && (
@@ -356,6 +381,17 @@ export function HistoryScreen() {
   );
 }
 
+// Accessible name for the headline adherence Meter (Stage 21 FR-21.3): a
+// screen-reader user gets the same assumed-basis caveat the visible "Basis"
+// note discloses to a sighted user, not just the bare percentage — mirrors
+// TodayScreen's `ringAriaLabel` for the same FR-18.6 distinction.
+function adherenceMeterLabel(adherence: AdherenceResult): string {
+  const pct = Math.round(adherence.ratio * 100);
+  return adherence.assumedOnTime > 0
+    ? `${pct}% on time over the last ${adherence.windowDays} days, including ${adherence.assumedOnTime} assumed on time and not logged`
+    : `${pct}% on time over the last ${adherence.windowDays} days`;
+}
+
 // Branches on taken/skipped/late/adjusted/over-cap to render one dose-log row
 // (Stage 18 FR-18.2/18.3); each branch is exercised by HistoryScreen.test.tsx,
 // splitting further would just move the same conditions into more, smaller,
@@ -434,7 +470,7 @@ function LogRowNote({
     return <p className="mt-0.5 text-xs italic text-slate-400">“{entry.skipReason}”</p>;
   }
   if (!skipped && overCap) {
-    return <p className="text-xs text-red-300">⚠ {entry.warnings.join(' ')}</p>;
+    return <p className="text-xs text-status-missed">⚠ {entry.warnings.join(' ')}</p>;
   }
   return null;
 }
@@ -463,11 +499,11 @@ function LogRowTags({
     <div className="flex flex-wrap justify-end gap-1">
       {skipped && <Tag className="border-slate-500 text-slate-300">skipped</Tag>}
       {!skipped && entry.adjusted && (
-        <Tag className="border-amber-700 text-amber-300">adjusted</Tag>
+        <Tag className="border-status-due/40 text-status-due">adjusted</Tag>
       )}
       {late && <Tag className="border-slate-600 text-slate-300">late</Tag>}
       {!skipped && overCap && (
-        <Tag className="border-red-700 text-red-300">
+        <Tag className="border-status-missed/40 text-status-missed">
           {breachTagLabel(classifyGuardrailBreach(entry.warnings))}
         </Tag>
       )}
@@ -542,7 +578,7 @@ function ChangeRow({ change }: { change: RegimenChange }) {
           </button>
           <button
             type="button"
-            className="text-xs text-red-400 hover:text-red-300 focus:outline-none focus:text-red-200"
+            className="text-xs text-status-missed hover:text-status-missed/80 focus:outline-none focus:text-status-missed"
             onClick={() => deleteChange(change.id)}
             aria-label="Delete change"
           >

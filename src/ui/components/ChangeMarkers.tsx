@@ -25,10 +25,10 @@ interface KindMeta {
 const KIND_META: Record<RegimenChangeKind, KindMeta> = {
   'medication-added': { label: 'Medication added', className: 'bg-accent' },
   'medication-reactivated': { label: 'Medication resumed', className: 'bg-accent' },
-  'medication-updated': { label: 'Prescription changed', className: 'bg-amber-500' },
+  'medication-updated': { label: 'Prescription changed', className: 'bg-status-due' },
   'medication-retired': { label: 'Medication retired', className: 'bg-slate-500' },
   'slot-added': { label: 'Slot added', className: 'bg-accent' },
-  'slot-updated': { label: 'Schedule changed', className: 'bg-amber-500' },
+  'slot-updated': { label: 'Schedule changed', className: 'bg-status-due' },
   'slot-removed': { label: 'Slot removed', className: 'bg-slate-500' },
 };
 
@@ -38,7 +38,7 @@ const KIND_META: Record<RegimenChangeKind, KindMeta> = {
  * recoverable, a blank History screen is not.
  */
 function metaFor(kind: RegimenChangeKind): KindMeta {
-  return KIND_META[kind] ?? { label: 'Regimen changed', className: 'bg-amber-500' };
+  return KIND_META[kind] ?? { label: 'Regimen changed', className: 'bg-status-due' };
 }
 
 /**

@@ -1,10 +1,12 @@
 import { useId } from 'react';
 import type { AdherenceDay, IanaZone, ISODate, RegimenChange } from '../../core';
 import { ChangeMarkers } from './ChangeMarkers';
+import { ChartLegend, ColorSwatch, LegendSwatch } from './ChartLegend';
 
 // Hand-rolled SVG bar chart (no chart dependency — keeps the bundle small per
-// NFR-Performance). One stacked bar per day: on-time (accent) + late (amber) +
-// missed (red) — three distinguishable outcomes (Stage 18 FR-18.4), so a late
+// NFR-Performance). One stacked bar per day: on-time (accent) + late
+// (status-due) + missed (status-missed) — three distinguishable outcomes
+// (Stage 18 FR-18.4), so a late
 // dose can no longer read as visually identical to an on-time one. A skipped
 // dose (FR-18.3) is deliberately excluded from adherence scoring, so it is
 // drawn as a thin neutral segment on top rather than folded into the stack.
@@ -112,8 +114,14 @@ export function AdherenceChart({
                     aria-label="assumed, not logged"
                   />
                 )}
-                <rect x={x} y={lateY} width={barW} height={lateH} className="fill-amber-500" />
-                <rect x={x} y={missedY} width={barW} height={missedH} className="fill-red-600" />
+                <rect x={x} y={lateY} width={barW} height={lateH} className="fill-status-due" />
+                <rect
+                  x={x}
+                  y={missedY}
+                  width={barW}
+                  height={missedH}
+                  className="fill-status-missed"
+                />
                 <rect
                   x={x}
                   y={skippedY}
@@ -149,16 +157,30 @@ export function AdherenceChart({
       </div>
     );
 
-  if (!hasAssumed) return wrapped;
+  // Stage 21 FR-21.2/21.3: a text-labelled legend for every bar segment, not
+  // only the assumed-hatch cue — a patient reads "what did I take, what did
+  // I miss" from the labels, not by decoding four colours against memory.
+  // The hatch swatch only appears when the data actually contains an
+  // assumed portion, matching the chart's own conditional aria-label above.
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1.5">
       {wrapped}
-      <p className="flex items-center gap-1 text-[11px] text-slate-500">
-        <svg aria-hidden width="14" height="10" className="shrink-0 align-middle">
-          <rect width="14" height="10" fill={`url(#${hatchId})`} />
-        </svg>
-        Hatched = assumed on time (not logged), within the solid on-time colour.
-      </p>
+      <ChartLegend>
+        <LegendSwatch swatch={<ColorSwatch className="bg-accent" />} label="On time" />
+        {hasAssumed && (
+          <LegendSwatch
+            swatch={
+              <svg aria-hidden width="10" height="10" className="shrink-0 rounded-[3px]">
+                <rect width="10" height="10" fill={`url(#${hatchId})`} />
+              </svg>
+            }
+            label="Assumed on time (not logged)"
+          />
+        )}
+        <LegendSwatch swatch={<ColorSwatch className="bg-status-due" />} label="Late" />
+        <LegendSwatch swatch={<ColorSwatch className="bg-status-missed" />} label="Missed" />
+        <LegendSwatch swatch={<ColorSwatch className="bg-slate-500" />} label="Skipped" />
+      </ChartLegend>
     </div>
   );
 }

@@ -261,8 +261,9 @@ describe('HistoryScreen — lateness-aware adherence (Stage 18 FR-18.4)', () => 
       screen.getByText(/0 on time · 0 late · 0 missed · 0 expected · 1 skipped/),
     ).toBeInTheDocument();
     // The dose-log row itself reads "Skipped", not a dose amount, and offers no
-    // dose editor.
-    const row = screen.getByText('Skipped').closest<HTMLElement>('li')!;
+    // dose editor. Scoped to a <span> — the Stage 21 adherence-chart legend
+    // also renders the word "Skipped" as one of its state labels.
+    const row = screen.getByText('Skipped', { selector: 'span' }).closest<HTMLElement>('li')!;
     expect(within(row).queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
 });
