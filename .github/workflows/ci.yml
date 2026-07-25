@@ -48,6 +48,87 @@ jobs:
       - name: Build
         run: pnpm build
 
+  # "Configured backend" smoke suite (e2e-mocked/): a real browser against the
+  # app with VITE_SUPABASE_* set, Supabase network calls intercepted rather
+  # than hitting a real backend (see e2e-mocked/helpers/mockSupabase.ts). The
+  # `build` job above always runs unconfigured (no VITE_SUPABASE_*), so
+  # without this, nothing in CI ever exercised the configured code path —
+  # exactly the branch that shipped a crash once (useAuth calling GoTrue
+  # unconditionally). No Docker/Postgres needed, unlike db-tests below or the
+  # full e2e/ suite, so it runs in every job's fast path.
+  e2e-mocked:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run configured-backend E2E suite
+        run: pnpm test:e2e:mocked
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-mocked-report
+          path: playwright-report/
+          retention-days: 7
+
+  # Combined coverage (unit + the configured-backend e2e-mocked/ suite, both
+  # Docker-free) merged into one report with Monocart Coverage Reports — see
+  # scripts/merge-coverage.mjs and CLAUDE.md. The real e2e/ suite needs the
+  # local Supabase stack, so it isn't part of this job; run `pnpm coverage`
+  # locally (with `pnpm local:up`) for a report that includes it too.
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run combined coverage (unit + e2e-mocked)
+        run: pnpm coverage:ci
+
+      - name: Add coverage summary
+        if: always()
+        run: cat coverage/merged/coverage-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload merged coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-merged
+          path: coverage/merged/
+          retention-days: 7
+
   # Server logic now lives in SQL (RLS + push_records + validate_record), so it's
   # covered by pgTAP against a real local Postgres. This boots only the DB
   # container, applies the migrations + seed, and runs the suite. Kept as a

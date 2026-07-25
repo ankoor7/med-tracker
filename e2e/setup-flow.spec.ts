@@ -5,7 +5,7 @@
 // landed in the Supabase `records` table with correct typed payloads, proving the
 // full UI -> store -> sync -> push_records RPC -> Postgres round-trip.
 
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import {
   addMedication,
   addSlot,
