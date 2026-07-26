@@ -257,12 +257,23 @@ export interface EventPropertyDef {
   unit?: string; // optional display hint for `number`
 }
 
+// How an event type is meant to be used (Stage 24, P0 #5). Purely a UI hint so
+// the app can offer a "Log side effect" affordance distinct from flare-ups
+// without hardcoding type names; it never changes how an instance is stored,
+// validated or aggregated.
+export type EventCategory = 'flare' | 'side-effect';
+
 export interface EventType {
   id: string;
   name: string; // e.g. "Seizure"
   color: string; // hex
   properties: EventPropertyDef[];
   notes?: string;
+  // What kind of thing this type records (Stage 24, P0 #5). Optional and
+  // additive: absent means general/flare, which is exactly how every
+  // pre-Stage-24 type behaves, so absence is never "unknown" — it is the
+  // default. Read it as `?? 'flare'` when a concrete value is needed.
+  category?: EventCategory;
   // Event types are never deleted (their instances are kept as history); they are
   // archived instead — hidden from the active picker but still resolvable and
   // reversible via unarchive.
@@ -282,6 +293,16 @@ export interface EventInstance {
   zone: IanaZone; // zone in effect when logged (stable display)
   values: Record<string, EventPropertyValue>; // keyed by EventPropertyDef.id
   note?: string;
+  // The user's stated attribution (Stage 24, P0 #5) — never computed, inferred
+  // or implied by the app. Both optional and additive: absence means the event
+  // is unattributed, which is how every pre-Stage-24 instance (and every
+  // seizure/flare logged without a medication in mind) reads. It is a claim by
+  // the patient, not a finding of causation.
+  medId?: string; // medication the user attributes this event to
+  // The specific logged occurrence, set when the event was logged from a dose
+  // row. Implies `medId` (the dose's medication) — a `doseLogEntryId` without a
+  // `medId` is invalid, and the two must agree; see `core/sideEffects.ts`.
+  doseLogEntryId?: string;
   updatedAt: Instant;
   version?: number;
   deleted?: boolean;
