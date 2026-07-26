@@ -75,7 +75,7 @@
     "fallow": "^2.100.0",
     "globals": "^15.14.0",
     "husky": "^9.1.7",
-    "jsdom": "^25.0.1",
+    "jsdom": "^29.1.1",
     "lint-staged": "^15.3.0",
     "monocart-coverage-reports": "^2.12.12",
     "monocart-reporter": "^2.12.3",
