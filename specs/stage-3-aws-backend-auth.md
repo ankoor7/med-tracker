@@ -11,7 +11,7 @@
 | **Depends on** | Stage 2 |
 | **Implements** | FR-OSS-1..3; sync API surface (FR-SYNC-2 endpoints); architecture §8–§9 |
 | **Milestone** | B |
-| **Status** | Ready after Stage 2 |
+| **Status** | Superseded by Stage 8 (Supabase) |
 
 ## 1. Objective
 Provision the **per-user AWS backend** as infrastructure-as-code and add client authentication. Deliver deployable Cognito auth, a JWT-protected `/sync/*` API over DynamoDB, and static hosting — all in the user's own account. Handlers treat record payloads as opaque pass-through blobs at this stage; Stage 4 introduces the **readable, server-validated record model** and Stage 5 the full sync logic.

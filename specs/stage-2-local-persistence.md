@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 |
 | **Implements** | FR-SYNC-1 (offline source of truth); persistence for all entities |
 | **Milestone** | A |
-| **Status** | Ready after Stage 1 |
+| **Status** | Done |
 
 ## 1. Objective
 Persist all app state on-device so SteadyDose is a fully usable **offline single-device app** that survives reloads. Introduce a repository abstraction and sync-ready record metadata, without any cloud.

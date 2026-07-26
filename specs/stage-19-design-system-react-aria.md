@@ -5,7 +5,7 @@
 | **Depends on** | Stage 18 (the UI it rewrites must be behaviourally complete first) |
 | **Implements** | FR-19.1 … FR-19.8 |
 | **Milestone** | F (UI system rewrite) |
-| **Status** | Draft |
+| **Status** | Done |
 
 ## 1. Objective
 Replace the hand-rolled component primitives and the Oura-inspired custom theme

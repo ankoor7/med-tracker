@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (core `Medication`), Stage 2 (persistence + migrations), Stage 20 (Meds editor on React Aria) |
 | **Implements** | FR-22.1 … FR-22.4 · closes **P0 #3** (`specs/p0-feature-audit.md`) |
 | **Milestone** | Post-release P0 hardening |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Complete the per-medication identity metadata that P0 #3 calls for. Today a

@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (schedule/core), Stage 2 (persistence), Stages 4/5/8 (records + sync + Supabase) |
 | **Implements** | FR-12.1 … FR-12.6 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Support the real-world late-dose workflow end-to-end: when a scheduled dose is

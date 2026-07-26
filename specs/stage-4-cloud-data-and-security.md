@@ -12,7 +12,7 @@
 | **Depends on** | Stage 3 |
 | **Implements** | FR-SEC-1..5; architecture §7, §10 |
 | **Milestone** | B |
-| **Status** | Ready after Stage 3 (precedes Stage 5) |
+| **Status** | Superseded by Stage 8 (Supabase) |
 
 ## 1. Objective
 Make the cloud a **readable, server-usable copy** of the user's data — **not**

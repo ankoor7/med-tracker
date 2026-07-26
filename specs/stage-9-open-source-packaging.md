@@ -5,7 +5,7 @@
 | **Depends on** | Stage 8 (Supabase re-platform); the full feature set (Stages 1–7) |
 | **Implements** | FR-OSS-2..5; bring-your-own-Supabase release |
 | **Milestone** | E (open-source release) |
-| **Status** | Ready after Stage 8 |
+| **Status** | Partial — LICENSE/README/SECURITY.md and one-command `pnpm deploy` done; setup wrapper, `DEPLOY.md`/`EXTENSION.md`/`CONTRIBUTING.md`, and CI release-hardening (FR-9.1/9.2/9.5/9.6) outstanding |
 
 ## 1. Objective
 Make SteadyDose a clean **open-source project that any technical user can stand up

@@ -5,7 +5,7 @@
 | **Depends on** | Stage 0 |
 | **Implements** | FR-MED-\*, FR-SCH-\*, FR-LOG-\*, FR-GRD-\*, FR-TZ-\*, FR-HIS-1..3, extension interface |
 | **Milestone** | A |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Stand up the project and implement the **pure domain core** plus the **full UI** (Today / Schedule / Meds / History) over in-memory state. This is the hardened, typed, tested version of the existing prototype and the spine for all later stages. Decouple business logic from React so it can be unit-tested and reused.

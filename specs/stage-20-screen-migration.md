@@ -5,7 +5,7 @@
 | **Depends on** | Stage 19 (the primitive library + theme must exist) |
 | **Implements** | FR-20.1 … FR-20.6 |
 | **Milestone** | F (UI system rewrite) |
-| **Status** | Draft |
+| **Status** | Done |
 
 ## 1. Objective
 Migrate the app's **form, list, and chrome** surfaces onto the Stage 19 primitives

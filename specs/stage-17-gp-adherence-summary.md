@@ -1,11 +1,16 @@
 # Stage 17 Spec — GP Adherence Summary (clinician report & share)
 
+> **Superseded by Stage 23.** This stage was never built standalone; its
+> requirements (adherence + flare-up summary, print/share) are implemented by
+> `specs/stage-23-clinician-outputs.md` (`core/clinicalReport.ts`,
+> `buildPreVisitSummary`), which also folds in the Stage 16 regimen-change list.
+
 | | |
 |---|---|
 | **Depends on** | Stage 1 (core), Stage 2 (persistence), Stage 7 (adherence + charts), Stage 15 (events = flare-ups); **optional** Stage 16 (regimen-change markers) |
 | **Implements** | FR-17.1 … FR-17.7 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Draft |
+| **Status** | Superseded by Stage 23 |
 
 ## 1. Objective
 Produce a concise, clinician-ready **summary of medication adherence and flare-ups**

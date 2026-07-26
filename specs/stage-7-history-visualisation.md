@@ -5,7 +5,7 @@
 | **Depends on** | Stage 2 (and the extension interface from Stage 1) |
 | **Implements** | FR-HIS-1, FR-HIS-4, FR-HIS-5 |
 | **Milestone** | C |
-| **Status** | Ready after Stage 2 |
+| **Status** | Done — blood-level chart later removed as a user-facing concept (Stage 18, FR-18.11) |
 
 ## 1. Objective
 Provide rich **historical records**, **adherence visualisation**, and a **blood-level chart** that *renders* the output of the user's pharmacology extension (the app charts; it does not calculate). Add **export/import** for full data portability.

@@ -6,7 +6,7 @@
 | **Supersedes** | The AWS surface of architecture §3–§4, §7–§10, §13–§14; Stages 3 & 4 infra; the API tier of Stage 5 |
 | **Implements** | Same FRs as Stages 3–5 (auth, per-user isolation, server-validated readable records, bidirectional LWW sync) on a smaller substrate |
 | **Milestone** | D (re-platform — precedes the open-source release, Stage 9) |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 

@@ -5,7 +5,7 @@
 | **Depends on** | Stage 2 |
 | **Implements** | FR-REM-1..4, FR-HIS-3 (alerting surface) |
 | **Milestone** | C |
-| **Status** | Ready after Stage 2 |
+| **Status** | Done |
 
 ## 1. Objective
 Notify the user when **scheduled doses** are due, support follow-up timing for **adjusted doses**, and raise **missed-pattern alerts** — all zone-aware, via the PWA, with documented graceful degradation where background scheduling is limited.

@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (core), Stage 2 (persistence), Stages 4/5/8 (records + sync + Supabase) |
 | **Implements** | FR-13.1 … FR-13.7 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Let the user track occurrences of their health condition flaring up (e.g.

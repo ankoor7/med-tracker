@@ -5,7 +5,7 @@
 | **Depends on** | — |
 | **Enables** | Stage 1 (and all later stages) |
 | **Milestone** | A (pre-build) |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Establish a **reproducible local development environment** and an **empty-but-wired app shell** with a working dev loop — run, test, lint, typecheck, build — and **green CI**. After this stage, Stage 1 starts on features, not plumbing. No domain logic is built here.

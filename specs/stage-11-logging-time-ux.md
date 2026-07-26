@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (DoseLogger), Stage 2 (persisted log) |
 | **Implements** | FR-11.1, FR-11.2, FR-11.3 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Make recording **when** a dose was actually taken fast and frictionless. A dose is

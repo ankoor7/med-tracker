@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (core), Stage 2 (persistence), Stages 4/5/8 (records + sync + Supabase), Stage 7 (charts) |
 | **Implements** | FR-16.1 … FR-16.7 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Draft |
+| **Status** | Done (delivered alongside Stage 23, per user request) |
 
 ## 1. Objective
 Record **when** a user's medication regimen changed and **what** changed, then
