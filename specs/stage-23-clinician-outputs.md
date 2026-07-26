@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (core), Stage 2 (persistence), Stage 7 (adherence + charts), Stage 15 (events = flare-ups), Stage 22 (med metadata); **optional** Stage 16 (regimen-change markers) |
 | **Implements** | FR-23.1 … FR-23.9 · closes **P0 #6 + #7** (`specs/p0-feature-audit.md`) · **implements the never-built Stage 17 draft** |
 | **Milestone** | Post-release P0 hardening |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 Deliver the two P0 "physician & care-team" outputs — the headline differentiator

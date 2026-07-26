@@ -5,7 +5,7 @@
 | **Depends on** | Stage 19 (primitives + theme), Stage 20 (chrome + forms migrated) |
 | **Implements** | FR-21.1 … FR-21.7 |
 | **Milestone** | F (UI system rewrite) |
-| **Status** | Draft |
+| **Status** | Partial — FR-21.1–21.7 implemented (Unit 1 History+charts `5252bde`, Unit 2 Calendar `4951cd6`); AC21.2 (live legibility judgement) and AC21.4 (live gesture re-check) still need human sign-off |
 
 ## 1. Objective
 Bring the **data-visualisation surfaces** — the History adherence dashboards and

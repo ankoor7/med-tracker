@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (schedule/time/guardrails), Stage 2 (persistence), Stage 11 (5-min step / `roundInstantToStep`), Stage 12 (next-dose override) |
 | **Implements** | FR-13.1 … FR-13.6 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Ready |
+| **Status** | Done |
 
 ## 1. Objective
 When a dose is missed or taken off-schedule, give the user a **daily-calendar

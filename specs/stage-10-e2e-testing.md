@@ -5,7 +5,7 @@
 | **Depends on** | Stage 8 (Supabase backend); Stage 5 (sync engine); Stages 1–7 (full UI) |
 | **Implements** | FR-E2E-1..6; verified UI→DB round-trip |
 | **Milestone** | E (release hardening) |
-| **Status** | Ready after Stage 8 |
+| **Status** | Done |
 
 ## 1. Objective
 Add a **browser-driven end-to-end (E2E) test suite** that exercises SteadyDose the

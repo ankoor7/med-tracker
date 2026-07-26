@@ -1,11 +1,18 @@
 # Stage 5 Spec — Sync Engine
 
+> **API tier superseded by Stage 8.** The bidirectional sync **engine** and its
+> conflict-resolution contract described here are unchanged; Stage 8
+> (`specs/stage-8-supabase-migration.md`) replaced the custom AWS API tier this
+> spec targeted with Supabase (PostgREST + `push_records`) as the transport.
+> Implemented in `src/sync/syncEngine.ts` (pull→push→merge→token loop, LWW via
+> `isNewerRecord`/`applyRemote`, offline outbox) and `src/sync/supabaseBackend.ts`.
+
 | | |
 |---|---|
 | **Depends on** | Stage 3, Stage 4 |
 | **Implements** | FR-SYNC-2, FR-SYNC-3; architecture §8; timezone occurrence-match refinement |
 | **Milestone** | B |
-| **Status** | Ready after Stages 3 & 4 |
+| **Status** | Done |
 
 ## 1. Objective
 Implement **bidirectional, multi-device sync** of **structured (readable)

@@ -5,7 +5,7 @@
 | **Depends on** | Stage 1 (core scheduler + adherence), Stage 2 (persistence), Stage 7 (charts), Stage 13 (calendar drag), Stage 16 (regimen-change records) |
 | **Implements** | FR-18.1 … FR-18.11 |
 | **Milestone** | C (daily-driver polish) |
-| **Status** | Draft |
+| **Status** | Done |
 | **Evidence** | Six scripted user journeys driven through the live UI, 2026-07-20 (see §9) |
 
 ## 1. Objective
