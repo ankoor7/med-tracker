@@ -42,6 +42,19 @@ function dataset(over: Partial<Dataset> = {}): Dataset {
   return { ...datasetDefaults(), ...over };
 }
 
+/**
+ * Export `original` to JSON text and parse it straight back, returning the
+ * imported Dataset. Throws with the parser's own reason if the round trip
+ * failed, so a caller can assert on the data directly instead of repeating the
+ * export/import/ok-guard preamble — and a failure names *why* rather than
+ * reading as a bare `expected false to be true`.
+ */
+function roundTrip(original: Dataset): Dataset {
+  const result = parseImport(exportJSON(original));
+  if (!result.ok) throw new Error(`export/import round trip failed: ${result.reason}`);
+  return result.data;
+}
+
 describe('JSON export/import round-trip (AC5)', () => {
   it('round-trips a full dataset into an empty app', () => {
     const original = dataset();
@@ -77,10 +90,61 @@ describe('JSON export/import round-trip (AC5)', () => {
         }),
       ],
     });
-    const result = parseImport(exportJSON(original));
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.data.medications[0]).toMatchObject({ strength: '500 mg', form: 'tablet' });
+    expect(roundTrip(original).medications[0]).toMatchObject({
+      strength: '500 mg',
+      form: 'tablet',
+    });
+  });
+
+  // Stage 24 (FR-24.6, AC3, P0 #5) — occurrence-linked side-effect
+  // attribution must survive a full JSON export/import round-trip, both when
+  // present and — for a pre-Stage-24 (unattributed) event — in its absence.
+  it('round-trips an attributed eventInstance and a categorised eventType (FR-24.6)', () => {
+    const original = dataset({
+      eventTypes: [
+        eventType({ id: 'et1', name: 'Nausea', category: 'side-effect', updatedAt: 1, version: 1 }),
+      ],
+      eventInstances: [
+        eventInstance({
+          id: 'ei1',
+          typeId: 'et1',
+          occurredAt: 1000,
+          medId: 'm1',
+          doseLogEntryId: 'l1',
+          updatedAt: 1,
+          version: 1,
+        }),
+      ],
+    });
+    const imported = roundTrip(original);
+    expect(imported.eventTypes[0]).toMatchObject({ category: 'side-effect' });
+    expect(imported.eventInstances[0]).toMatchObject({ medId: 'm1', doseLogEntryId: 'l1' });
+  });
+
+  it('preserves the absence of attribution/category through export/import (AC3)', () => {
+    const original = dataset({
+      eventTypes: [eventType({ id: 'et1', name: 'Seizure', updatedAt: 1, version: 1 })],
+      eventInstances: [
+        eventInstance({ id: 'ei1', typeId: 'et1', occurredAt: 1000, updatedAt: 1, version: 1 }),
+      ],
+    });
+    // The wire format is JSON text — parse it back to plain objects rather
+    // than trusting the in-memory Dataset, so an explicit `undefined` key
+    // surviving only in memory can't masquerade as a preserved absence.
+    const parsedJson = JSON.parse(exportJSON(original));
+    expect('category' in parsedJson.data.eventTypes[0]).toBe(false);
+    expect('medId' in parsedJson.data.eventInstances[0]).toBe(false);
+    expect('doseLogEntryId' in parsedJson.data.eventInstances[0]).toBe(false);
+
+    const imported = roundTrip(original);
+    const [importedType] = imported.eventTypes;
+    const [importedInstance] = imported.eventInstances;
+    expect(importedType).toBeDefined();
+    expect(importedInstance).toBeDefined();
+    if (!importedType || !importedInstance) return;
+    expect('category' in importedType).toBe(false);
+    expect('medId' in importedInstance).toBe(false);
+    expect('doseLogEntryId' in importedInstance).toBe(false);
   });
 
   it('rejects a non-SteadyDose file', () => {

@@ -51,6 +51,18 @@ const REGIMEN_CHANGE_KIND_NAMES: readonly string[] = [
 const EVENT_PROPERTY_TYPE_NAMES: readonly string[] = ['number', 'text', 'scale', 'duration'];
 
 /**
+ * The `EventType.category` vocabulary (Stage 24, P0 #5), mirrored from
+ * core/types.ts (`EventCategory`) for envelope validation. Kept in lock-step
+ * with `EventCategory` (and `validate_record`). Validated strictly against
+ * this fixed set — like `REGIMEN_CHANGE_KIND_NAMES` and
+ * `EVENT_PROPERTY_TYPE_NAMES` — rather than permissively like
+ * `RegimenFieldChange.key`, because `category` drives which logging
+ * affordance the UI offers, not just what gets displayed. A future third
+ * category ships with a migration, exactly as a new `RegimenChangeKind` would.
+ */
+const EVENT_CATEGORY_NAMES: readonly string[] = ['flare', 'side-effect'];
+
+/**
  * A readable, typed record as stored in the cloud and moved by the sync engine
  * (Stage 5). `payload` is a native object keyed by `type`; never ciphertext.
  */
@@ -199,19 +211,44 @@ function validateDoseOverride(p: Record<string, unknown>): ValidationResult {
   return ok;
 }
 
+/** One entry of an event type's property schema: identified, named, known kind. */
+function isValidEventPropertyDef(prop: unknown): boolean {
+  return (
+    isPlainObject(prop) &&
+    isNonEmptyString(prop.id) &&
+    isNonEmptyString(prop.name) &&
+    typeof prop.type === 'string' &&
+    EVENT_PROPERTY_TYPE_NAMES.includes(prop.type)
+  );
+}
+
+/**
+ * True when `key` on `p` is absent/undefined, or is one of `allowed` — the
+ * closed-vocabulary sibling of `isValidOptionalString`. Absence is always valid;
+ * a present value must be a known member, never merely a string.
+ */
+function isValidOptionalEnum(
+  p: Record<string, unknown>,
+  key: string,
+  allowed: readonly string[],
+): boolean {
+  const v = p[key];
+  if (!(key in p) || v === undefined) return true;
+  return typeof v === 'string' && allowed.includes(v);
+}
+
 function validateEventType(p: Record<string, unknown>): ValidationResult {
   if (!isNonEmptyString(p.name)) return fail('eventType.name required');
   if (!Array.isArray(p.properties)) return fail('eventType.properties required');
-  for (const prop of p.properties) {
-    if (
-      !isPlainObject(prop) ||
-      !isNonEmptyString(prop.id) ||
-      !isNonEmptyString(prop.name) ||
-      typeof prop.type !== 'string' ||
-      !EVENT_PROPERTY_TYPE_NAMES.includes(prop.type)
-    ) {
-      return fail('eventType.properties entry invalid');
-    }
+  if (!p.properties.every(isValidEventPropertyDef)) {
+    return fail('eventType.properties entry invalid');
+  }
+  // What kind of thing this type records (Stage 24, P0 #5) — optional and
+  // additive; absent means general/flare, exactly how every pre-Stage-24 type
+  // behaves. When present it must be a known category (see
+  // EVENT_CATEGORY_NAMES above).
+  if (!isValidOptionalEnum(p, 'category', EVENT_CATEGORY_NAMES)) {
+    return fail('eventType.category invalid');
   }
   return ok;
 }
@@ -221,6 +258,16 @@ function validateEventInstance(p: Record<string, unknown>): ValidationResult {
   if (!isFiniteNumber(p.occurredAt)) return fail('eventInstance.occurredAt required');
   if (!isNonEmptyString(p.zone)) return fail('eventInstance.zone required');
   if (!isPlainObject(p.values)) return fail('eventInstance.values required');
+  // The user's stated attribution (Stage 24, P0 #5): optional strings only.
+  // Whether they *resolve* to a live medication/dose-log entry is a
+  // cross-record check the domain core performs
+  // (core/sideEffects.ts:validateEventAttribution) — this per-record validator
+  // (like validate_record in SQL) sees one record at a time and cannot do
+  // that lookup; see specs/stage-24-side-effect-logging.md §7.
+  if (!isValidOptionalString(p, 'medId')) return fail('eventInstance.medId must be a string');
+  if (!isValidOptionalString(p, 'doseLogEntryId')) {
+    return fail('eventInstance.doseLogEntryId must be a string');
+  }
   return ok;
 }
 

@@ -1,13 +1,20 @@
--- pgTAP suite for the Stage 13 health-condition event record types.
+-- pgTAP suite for the Stage 13 health-condition event record types, extended
+-- in Stage 24 (FR-24.6, P0 #5) for occurrence-linked side-effect attribution.
 -- Run with:  supabase test db
 --
 -- Covers, for `eventType` / `eventInstance` (mirrors records_test.sql):
 --   - validate_record parity with src/core/cloudRecord.ts validateSyncRecord.
 --   - push_records: LWW guard (newer wins / stale rejected) for an event record.
 --   - RLS: user A cannot see user B's event rows.
+--   - Stage 24: eventInstance.medId/doseLogEntryId and eventType.category
+--     validation, including the settled spec §7 Q1 call — a dangling medId
+--     (referencing no existing record) is ACCEPTED here, because referential
+--     integrity is the client resolver's job
+--     (core/sideEffects.ts:validateEventAttribution), not this per-record,
+--     immutable SQL validator.
 
 begin;
-select plan(13);
+select plan(20);
 
 -- Two real auth users (records.user_id FKs auth.users).
 insert into auth.users (instance_id, id, aud, role, email, created_at, updated_at)
@@ -64,6 +71,58 @@ select is(
   validate_record(jsonb_build_object('id','ei1','type','eventInstance','updatedAt',1,'version',1,
     'deleted',true,'payload',jsonb_build_object())),
   null, 'tombstone eventInstance skips deep validation');
+
+-- ---------------------------------------------------------------------------
+-- Stage 24 (FR-24.6, P0 #5) — side-effect attribution
+-- ---------------------------------------------------------------------------
+
+-- An attributed eventInstance: both medId and doseLogEntryId present.
+select is(
+  validate_record('{"id":"ei2","type":"eventInstance","updatedAt":1,"version":1,"payload":
+    {"typeId":"et1","occurredAt":1000,"zone":"Europe/London","values":{},
+     "medId":"med-1","doseLogEntryId":"log-1"}}'::jsonb),
+  null, 'eventInstance attributed to a medication and dose passes');
+
+select is(
+  validate_record('{"id":"ei3","type":"eventInstance","updatedAt":1,"version":1,"payload":
+    {"typeId":"et1","occurredAt":1000,"zone":"Europe/London","values":{},"medId":42}}'::jsonb),
+  'eventInstance.medId must be a string', 'eventInstance with a non-string medId rejected');
+
+-- A present-but-JSON-null medId must be rejected the same way, not silently
+-- accepted the way a bare `not in (...)` (with no jsonb_typeof guard) would
+-- have let it through — see the jsonb_typeof guard above.
+select is(
+  validate_record('{"id":"ei3b","type":"eventInstance","updatedAt":1,"version":1,"payload":
+    {"typeId":"et1","occurredAt":1000,"zone":"Europe/London","values":{},"medId":null}}'::jsonb),
+  'eventInstance.medId must be a string', 'eventInstance with a null medId rejected');
+
+-- Settled spec §7 Q1: a `medId` that references no existing record in the
+-- database is ACCEPTED — validate_record is immutable and sees one record at
+-- a time, so it cannot perform the cross-record lookup. Referential integrity
+-- is the client resolver's job (core/sideEffects.ts:validateEventAttribution).
+select is(
+  validate_record('{"id":"ei4","type":"eventInstance","updatedAt":1,"version":1,"payload":
+    {"typeId":"et1","occurredAt":1000,"zone":"Europe/London","values":{},
+     "medId":"no-such-medication-anywhere"}}'::jsonb),
+  null, 'eventInstance with a dangling medId is accepted (client resolver''s job)');
+
+select is(
+  validate_record('{"id":"et2","type":"eventType","updatedAt":1,"version":1,"payload":
+    {"name":"Nausea","color":"#000","properties":[],"category":"side-effect"}}'::jsonb),
+  null, 'eventType with category side-effect passes');
+
+select is(
+  validate_record('{"id":"et3","type":"eventType","updatedAt":1,"version":1,"payload":
+    {"name":"X","color":"#000","properties":[],"category":"bogus"}}'::jsonb),
+  'eventType.category invalid', 'eventType with an unknown category rejected');
+
+-- A present-but-JSON-null category is a value, not an absence, and must be
+-- rejected the same way an unknown string is (see the jsonb_typeof guard
+-- above the `not in` check).
+select is(
+  validate_record('{"id":"et3b","type":"eventType","updatedAt":1,"version":1,"payload":
+    {"name":"X","color":"#000","properties":[],"category":null}}'::jsonb),
+  'eventType.category invalid', 'eventType with a null category rejected');
 
 -- ---------------------------------------------------------------------------
 -- push_records — LWW guard for an event record

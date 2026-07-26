@@ -329,6 +329,65 @@ describe('validateSyncRecord — typed payloads', () => {
     expect(res).toMatchObject({ ok: false, reason: /properties entry invalid/ });
   });
 
+  // Stage 24 (FR-24.1, P0 #5) — the side-effect/flare category hint.
+  it('accepts an eventType with category side-effect', () => {
+    const res = validateSyncRecord({
+      id: 'et2',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: { name: 'Nausea', properties: [], category: 'side-effect' },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts an eventType with category flare', () => {
+    const res = validateSyncRecord({
+      id: 'et3',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: { name: 'Seizure', properties: [], category: 'flare' },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts an eventType with no category (pre-Stage-24, AC3)', () => {
+    const res = validateSyncRecord({
+      id: 'et4',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: { name: 'Seizure', properties: [] },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects an eventType with an unknown category', () => {
+    const res = validateSyncRecord({
+      id: 'et5',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: { name: 'X', properties: [], category: 'bogus' },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /category/ });
+  });
+
+  // A present-but-null category is a value, not an absence — it must be
+  // rejected the same way an unknown string is, not silently treated like a
+  // missing key. The SQL twin (0011) special-cases this with jsonb_typeof.
+  it('rejects an eventType with a null category', () => {
+    const res = validateSyncRecord({
+      id: 'et6',
+      type: 'eventType',
+      updatedAt: 1,
+      version: 1,
+      payload: { name: 'X', properties: [], category: null },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /category/ });
+  });
+
   it('accepts a valid eventInstance', () => {
     const res = validateSyncRecord({
       id: 'ei1',
@@ -354,6 +413,108 @@ describe('validateSyncRecord — typed payloads', () => {
       payload: { occurredAt: 1000, zone: 'Europe/London', values: {} },
     });
     expect(res).toMatchObject({ ok: false, reason: /typeId/ });
+  });
+
+  // Stage 24 (FR-24.6, P0 #5) — occurrence-linked side-effect attribution.
+  it('accepts an eventInstance attributed to a medication and dose', () => {
+    const res = validateSyncRecord({
+      id: 'ei2',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        typeId: 'et1',
+        occurredAt: 1000,
+        zone: 'Europe/London',
+        values: {},
+        medId: 'm1',
+        doseLogEntryId: 'l1',
+      },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('accepts an eventInstance with no attribution (pre-Stage-24, AC3)', () => {
+    const res = validateSyncRecord({
+      id: 'ei3',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: { typeId: 'et1', occurredAt: 1000, zone: 'Europe/London', values: {} },
+    });
+    expect(res).toEqual({ ok: true });
+  });
+
+  it('rejects an eventInstance with a non-string medId', () => {
+    const res = validateSyncRecord({
+      id: 'ei4',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        typeId: 'et1',
+        occurredAt: 1000,
+        zone: 'Europe/London',
+        values: {},
+        medId: 42,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /medId/ });
+  });
+
+  it('rejects an eventInstance with a null medId', () => {
+    const res = validateSyncRecord({
+      id: 'ei4b',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        typeId: 'et1',
+        occurredAt: 1000,
+        zone: 'Europe/London',
+        values: {},
+        medId: null,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /medId/ });
+  });
+
+  it('rejects an eventInstance with a non-string doseLogEntryId', () => {
+    const res = validateSyncRecord({
+      id: 'ei5',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        typeId: 'et1',
+        occurredAt: 1000,
+        zone: 'Europe/London',
+        values: {},
+        doseLogEntryId: 42,
+      },
+    });
+    expect(res).toMatchObject({ ok: false, reason: /doseLogEntryId/ });
+  });
+
+  // Settled spec §7 Q1: the SQL/TS record validator never checks that medId
+  // resolves to an existing record — that cross-record check is
+  // core/sideEffects.ts:validateEventAttribution's job. A dangling reference
+  // is a syntactically valid string and passes here.
+  it('accepts an eventInstance whose medId references no existing record', () => {
+    const res = validateSyncRecord({
+      id: 'ei6',
+      type: 'eventInstance',
+      updatedAt: 1,
+      version: 1,
+      payload: {
+        typeId: 'et1',
+        occurredAt: 1000,
+        zone: 'Europe/London',
+        values: {},
+        medId: 'no-such-medication-anywhere',
+      },
+    });
+    expect(res).toEqual({ ok: true });
   });
 
   const regimenChangeRecord = (payload: object): unknown => ({

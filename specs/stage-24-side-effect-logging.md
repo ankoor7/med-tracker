@@ -111,11 +111,34 @@ doseLogEntryId?: string; // the specific logged occurrence, when logged from a d
   in the summary; copy contains no causal/prescriptive claim.
 
 ## 7. Open questions
-- Should the DB validator **hard-reject** a dangling `medId` (referential integrity
-  across record types is awkward in the current single-table design), or accept it
-  and let the client resolver treat unresolved references as unattributed? Current
-  call: **client resolver is authoritative** (accept optional strings server-side,
-  resolve/ignore dangling client-side), matching how the app already handles
-  cross-entity references. Confirm during implementation.
+
+- ~~Should the DB validator **hard-reject** a dangling `medId`, or accept it and let
+  the client resolver treat unresolved references as unattributed?~~
+  **SETTLED (Stage 24 implementation): the client resolver is authoritative.**
+  `validate_record` is declared `immutable` and validates one record at a time,
+  with no cross-record lookup — hard-reject is not merely awkward in the current
+  single-table design, it is **not expressible** there. So the server accepts
+  `medId` / `doseLogEntryId` as optional strings (shape only, like
+  `doseLog.skipReason`), and `core/sideEffects.ts` owns referential integrity at
+  the point of attribution: `validateEventAttribution` rejects a dangling or
+  mismatched reference at entry, before the app ever lets it be saved.
+  `sideEffectsForMedication` itself takes `Pick<Dataset, 'eventTypes' |
+  'eventInstances'>` — it has no access to `medications` and does not
+  independently re-check that its `medId` argument still resolves. The "a
+  reference that dangles *later* (after the attributed-to medication is
+  subsequently deleted) reads as unattributed" property is therefore a
+  call-site guarantee, not the resolver's: every caller drives the lookup from
+  a live medication (`clinicalReport.ts` already iterates
+  `dataset.medications.filter(live)`, never a tombstoned one), so nothing ever
+  invokes `sideEffectsForMedication` with a medId that has since stopped
+  resolving. A post-hoc dangling reference therefore never surfaces under any
+  medication grouping — not because it is detected and filtered, but because no
+  call site asks for it. Whoever wires this into the Stage 23 summary (U4) must
+  preserve that "iterate live medications only" discipline for the guarantee to
+  hold. This matches how the app already handles every other cross-entity
+  reference, and it keeps the DB validator's contract — structural shape, one
+  record at a time — intact. The pgTAP suite asserts the acceptance of a
+  dangling reference explicitly, so the decision is pinned by a test rather
+  than by omission.
 - Do side effects need their own **timeline/history filter** separate from
   flare-ups? Deferred — the `category` field makes it cheap to add later.

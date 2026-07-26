@@ -114,6 +114,69 @@ describe('record mapping', () => {
     });
   });
 
+  // Stage 24 (FR-24.6, P0 #5) — occurrence-linked side-effect attribution
+  // must ride the generic mapping unchanged: toSyncRecord spreads every
+  // remaining entity key into payload, and fromSyncRecord spreads payload
+  // back onto the entity. This proves that holds for the three new fields,
+  // including their *absence* — a pre-Stage-24 (unattributed) instance/type
+  // must not come back with an explicit `medId`/`category` key it never had.
+  it('round-trips an attributed eventInstance and a categorised eventType (FR-24.6)', () => {
+    const i = eventInstance({
+      id: 'ei-attr',
+      typeId: 'et1',
+      values: { severity: 2 },
+      medId: 'm1',
+      doseLogEntryId: 'l1',
+      version: 1,
+    });
+    const iRec = wrap('eventInstances', i);
+    expect(iRec.payload).toMatchObject({ medId: 'm1', doseLogEntryId: 'l1' });
+
+    const { entity } = fromSyncRecord(iRec);
+    expect(entity).toMatchObject({ medId: 'm1', doseLogEntryId: 'l1' });
+
+    const t = eventType({ id: 'et-cat', name: 'Nausea', category: 'side-effect', version: 1 });
+    const tRec = wrap('eventTypes', t);
+    expect(tRec.payload).toMatchObject({ category: 'side-effect' });
+    expect(fromSyncRecord(tRec).entity).toMatchObject({ category: 'side-effect' });
+  });
+
+  // The dishonest version of this test would use toEqual/toMatchObject with
+  // `medId: undefined`, which passes whether the key is present-but-undefined
+  // or absent entirely. Assert on key presence directly so the claim "absence
+  // survives the round trip" is actually checked, not just value equality.
+  it('preserves the absence of medId/doseLogEntryId/category through the wire, not just undefined values', () => {
+    const i = eventInstance({ id: 'ei-plain', typeId: 'et1', values: {}, version: 1 });
+    expect('medId' in i).toBe(true); // the fixture always sets the key, to undefined
+    expect(i.medId).toBeUndefined();
+
+    const iRec = wrap('eventInstances', i);
+    // toSyncRecord spreads every remaining entity key, `undefined` value and
+    // all — so it is faithful to what fromSyncRecord/JSON.stringify will do.
+    expect('medId' in iRec.payload).toBe(true);
+    expect((iRec.payload as Record<string, unknown>).medId).toBeUndefined();
+
+    // The wire format is JSON: `JSON.stringify` drops keys whose value is
+    // `undefined`, so what actually crosses the network never carries the
+    // key at all. Round-trip through real JSON (not just the in-memory
+    // object) to prove the key is truly gone on the far side.
+    const wireRec = JSON.parse(JSON.stringify(iRec));
+    expect('medId' in wireRec.payload).toBe(false);
+    expect('doseLogEntryId' in wireRec.payload).toBe(false);
+
+    const { entity } = fromSyncRecord(wireRec);
+    expect('medId' in entity).toBe(false);
+    expect('doseLogEntryId' in entity).toBe(false);
+
+    const t = eventType({ id: 'et-plain', name: 'Seizure', version: 1 });
+    expect('category' in t).toBe(true);
+    expect(t.category).toBeUndefined();
+    const tRec = wrap('eventTypes', t);
+    const wireTRec = JSON.parse(JSON.stringify(tRec));
+    expect('category' in wireTRec.payload).toBe(false);
+    expect('category' in fromSyncRecord(wireTRec).entity).toBe(false);
+  });
+
   it('round-trips a doseOverride through the wire envelope', () => {
     const o = override({ id: 'o1', medId: 'm', slotId: 's', dose: 75, updatedAt: 9, version: 2 });
     const rec = wrap('doseOverrides', o);
