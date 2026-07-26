@@ -38,7 +38,7 @@ local-first: with no Supabase env configured it runs fully offline.
 
 Dev account: `dev@steadydose.local` / `DevPassw0rd!` (seeded in `supabase/seed.sql`;
 email confirmation is disabled locally). Deploy: `pnpm deploy` runs `supabase db push`,
-the build, and the static-host upload (see `supabase/README.md`). DB-only push:
+the build, then `wrangler pages deploy dist` (Cloudflare Pages). DB-only push:
 `pnpm deploy:db`.
 
 **E2E (Stage 10):** `pnpm test:e2e` runs the Playwright suite (`e2e/`, spec
@@ -58,7 +58,9 @@ unconfigured.
 CI (`.github/workflows/ci.yml`) runs typecheck → lint → test → build on push/PR,
 a `coverage` job (below), an `e2e-mocked` job, and a separate `db-tests` job
 that boots Supabase and runs the pgTAP suite. A husky pre-commit hook runs
-`lint-staged` + `typecheck`.
+`lint-staged` + `typecheck`. A `.claude/hooks/fallow-gate.sh`
+PreToolUse hook blocks git operations while any fallow `*_introduced` count is above 0 —
+clear it by extracting/covering the new code, not by suppressing.
 
 **Combined coverage:** unit (vitest), the real E2E suite, and the E2E-mocked
 suite each collect raw V8 coverage, merged into one report with
@@ -75,6 +77,12 @@ exist into `coverage/merged/`. `pnpm coverage:ci` skips the real E2E suite
 (unit + E2E-mocked only) — that's what CI's `coverage` job runs, posting the
 summary to the job's GitHub Actions summary and uploading the full report as
 an artifact.
+
+**Commit gotchas** (learned the hard way): the pre-commit hook (lint-staged +
+typecheck + fallow) exceeds the 2-min foreground timeout on this codebase — run
+commits with `run_in_background: true`. Write commit messages to a file and use
+`git commit -F <file>` (apostrophes break heredocs). Use `git --no-pager diff`;
+the pager hangs.
 
 ## Architecture / conventions
 
@@ -107,6 +115,29 @@ Folder layout mirrors `specs/02-architecture.md` §4:
   Guardrail checks live in one shared function (`core/guardrails.ts`).
 - **No secrets** in the repo or in prompts. Only `.env.example` is committed.
 - TypeScript is **strict**. Keep `pnpm typecheck` and `pnpm lint` green.
+
+## Workflow
+
+Work is **spec-driven** and built through an **Implement → Validate → Review**
+agent loop, one unit per commit. See [`docs/development-workflow.md`](docs/development-workflow.md)
+for the full method. The loop is run by the
+[`sequential-fix-orchestrator`](.claude/agents/sequential-fix-orchestrator.md) agent —
+use it when work is enumerable up front and each item is independently shippable.
+
+- Specs in `specs/` are the source of truth for what "done" means; a fix is
+  finished when its acceptance criteria pass in the running app, not when tests go
+  green.
+- Settle open questions **in the spec**, not just the chat.
+- Write session state to `HANDOFF.md` at a session boundary.
+
+## Communication
+
+- Be concise and clear. Lead with the answer; cut preamble and filler.
+- State findings plainly. Drop hedges and qualifiers ("I think", "it seems",
+  "probably", "should be fine") unless you are genuinely uncertain — and when you
+  are, say so directly and why.
+- Don't pad claims with validators or self-justification. Report what is true,
+  including when something failed, was skipped, or is unverified.
 
 ## Git conventions
 

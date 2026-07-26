@@ -1,11 +1,14 @@
 import type { SyncStatus } from '../../sync/useSync';
 
+// Stage 20: theme tokens throughout (was raw green/yellow/red Tailwind
+// swatches, which don't invert for the light theme) — same
+// bg/text/border-at-15%/30% idiom as StatusBadge.
 const PHASE_STYLES: Record<SyncStatus['phase'], string> = {
-  idle: 'bg-slate-800 text-slate-300 border-slate-700',
-  syncing: 'bg-slate-800 text-accent-muted border-slate-700',
-  synced: 'bg-green-950 text-status-taken border-green-800',
-  offline: 'bg-yellow-950 text-status-due border-yellow-800',
-  error: 'bg-red-950 text-status-missed border-red-800',
+  idle: 'bg-slate-800/60 text-slate-300 border-slate-700',
+  syncing: 'bg-accent/15 text-accent-muted border-accent/30',
+  synced: 'bg-status-taken/15 text-status-taken border-status-taken/30',
+  offline: 'bg-status-due/15 text-status-due border-status-due/30',
+  error: 'bg-status-missed/15 text-status-missed border-status-missed/30',
 };
 
 function label(status: SyncStatus): string {

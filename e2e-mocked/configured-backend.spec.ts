@@ -12,7 +12,9 @@ import { test, expect } from './fixtures';
 import { mockSupabase, MOCK_EMAIL, MOCK_PASSWORD } from './helpers/mockSupabase';
 
 async function goToHistoryTab(page: Page) {
-  await page.getByRole('button', { name: 'History', exact: true }).click();
+  // Stage 20 migrated the bottom nav to React Aria Tabs: tabs now render with
+  // role="tab", not role="button" (which is what this used to match).
+  await page.getByRole('tab', { name: 'History', exact: true }).click();
 }
 
 async function signIn(page: Page) {

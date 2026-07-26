@@ -22,12 +22,12 @@ export interface SlotSpec {
   items: SlotItemSpec[];
 }
 
-/** Switch the bottom-nav tab. */
+/** Switch the bottom-nav tab (Stage 20: a real ARIA `tab`, not a button). */
 export async function goToTab(
   page: Page,
   tab: 'Today' | 'Calendar' | 'Meds' | 'Events' | 'History',
 ) {
-  await page.getByRole('button', { name: tab, exact: true }).click();
+  await page.getByRole('tab', { name: tab, exact: true }).click();
 }
 
 /** Sign in with the seeded dev account via the Account panel (History tab). */

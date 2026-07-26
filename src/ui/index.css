@@ -27,6 +27,35 @@
   }
 }
 
+/* Clinician outputs (Stage 23): Print → Save as PDF. When a report overlay is
+   open, print only its paper sheet — hide the app chrome and the overlay's own
+   toolbar. `visibility` (not `display`) keeps the sheet's layout intact; the
+   sheet is repositioned to the page origin. `print-color-adjust: exact` on the
+   figures below is set inline where needed. */
+@media print {
+  body {
+    background: white !important;
+  }
+  body * {
+    visibility: hidden !important;
+  }
+  .sd-print-region,
+  .sd-print-region * {
+    visibility: visible !important;
+  }
+  .sd-print-region {
+    position: absolute !important;
+    inset: 0 !important;
+    margin: 0 !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+  }
+  .sd-no-print {
+    display: none !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

@@ -21,8 +21,9 @@ import {
   type Instant,
 } from '../../core';
 import { useStore } from '../../store/store';
-import { Button, ColorDot, Field, inputClass, UNKNOWN_MED_NAME } from './ui';
+import { Button, ColorDot, UNKNOWN_MED_NAME } from './ui';
 import { Modal } from './Modal';
+import { NumberField } from './fields';
 import { TimeTakenField } from './TimeTakenField';
 
 export interface GroupLoggerMember {
@@ -42,7 +43,7 @@ export interface GroupLoggerTarget {
 
 interface Row {
   include: boolean;
-  doseStr: string;
+  dose: number | undefined;
   confirmed: boolean;
 }
 
@@ -71,10 +72,7 @@ export function GroupLogger({
   const [futureClamped, setFutureClamped] = useState(requestedInstant > now);
   const [rows, setRows] = useState<Record<string, Row>>(() =>
     Object.fromEntries(
-      target.members.map((m) => [
-        m.medId,
-        { include: true, doseStr: String(m.normalDose), confirmed: false },
-      ]),
+      target.members.map((m) => [m.medId, { include: true, dose: m.normalDose, confirmed: false }]),
     ),
   );
 
@@ -98,7 +96,7 @@ export function GroupLogger({
   const evaluated = target.members.map((m) => {
     const row = rows[m.medId]!;
     const med = medById.get(m.medId);
-    const dose = Number(row.doseStr);
+    const dose = row.dose ?? Number.NaN;
     const validDose = Number.isFinite(dose) && dose > 0;
     const warnings =
       row.include && validDose && med
@@ -169,20 +167,12 @@ export function GroupLogger({
 
               {row.include && (
                 <>
-                  <Field label={`Dose (${med?.unit ?? ''})`}>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      step="any"
-                      className={inputClass}
-                      value={row.doseStr}
-                      onChange={(e) =>
-                        patchRow(member.medId, { doseStr: e.target.value, confirmed: false })
-                      }
-                      aria-label={`${med?.name ?? UNKNOWN_MED_NAME} dose`}
-                    />
-                  </Field>
+                  <NumberField
+                    label={`Dose (${med?.unit ?? ''})`}
+                    aria-label={`${med?.name ?? UNKNOWN_MED_NAME} dose`}
+                    value={row.dose}
+                    onChange={(v) => patchRow(member.medId, { dose: v, confirmed: false })}
+                  />
                   {overCap && (
                     <div className="rounded-md border border-red-700 bg-red-950/50 p-2 text-xs">
                       <ul className="list-disc pl-5 text-red-200">

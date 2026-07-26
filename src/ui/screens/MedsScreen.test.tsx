@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MedsScreen } from './MedsScreen';
 import { TodayScreen } from './TodayScreen';
@@ -88,8 +88,59 @@ function saveDialog(dialog: HTMLElement) {
   fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
 }
 
+// Stage 20 Unit 3: the editor now renders React Aria fields. `setValue` drives
+// each by its actual DOM:
+//   - TextField / NumberField expose a real <input>; a change + blur commits
+//     the value (NumberField only calls onChange on commit, e.g. blur).
+//   - TimeField renders segmented spinbuttons (no single value input), so a
+//     time is typed digit-by-digit via the `beforeinput` events React Aria's
+//     date segments consume.
 function setValue(dialog: HTMLElement, label: string, value: string) {
-  fireEvent.change(within(dialog).getByLabelText(label), { target: { value } });
+  // A TimeField with a visible <Label> labels the group AND each of its
+  // segments (via aria-labelledby), so `getByLabelText` is ambiguous there;
+  // resolve all matches and pick the input (Text/NumberField) or the group.
+  const matches = within(dialog).getAllByLabelText(label);
+  const input = matches.find((el) => el.tagName === 'INPUT' || el.tagName === 'TEXTAREA');
+  if (input) {
+    fireEvent.change(input, { target: { value } });
+    fireEvent.blur(input);
+    return;
+  }
+  // TimeField group: type HH then MM into the hour/minute segments.
+  const group = matches.find((el) => el.getAttribute('role') === 'group') ?? matches[0]!;
+  const [hh, mm] = value.split(':');
+  const segs = within(group).getAllByRole('spinbutton');
+  for (const c of hh ?? '') typeTimeDigit(segs[0]!, c);
+  for (const c of mm ?? '') typeTimeDigit(segs[1]!, c);
+}
+
+function typeTimeDigit(segment: HTMLElement, digit: string) {
+  act(() => {
+    segment.dispatchEvent(
+      new InputEvent('beforeinput', {
+        data: digit,
+        inputType: 'insertText',
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+}
+
+// FR-20.4: assert a field's error is wired accessibly (`aria-invalid` +
+// `aria-describedby` resolving to an element containing the message), not
+// merely that the message text appears somewhere in the dialog. Stripping
+// `isInvalid`/`FieldError` from the field should make this fail.
+function expectAccessibleFieldError(dialog: HTMLElement, label: string, message: RegExp) {
+  const input = within(dialog).getByLabelText(label);
+  expect(input).toHaveAttribute('aria-invalid', 'true');
+  const describedBy = input.getAttribute('aria-describedby');
+  expect(describedBy).toBeTruthy();
+  const describedByIds = describedBy!.split(/\s+/);
+  const describedText = describedByIds
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ');
+  expect(describedText).toMatch(message);
 }
 
 /** Open the "Add medication" dialog and fill in its name. */
@@ -140,9 +191,13 @@ afterEach(() => {
   // test and suppresses the new dialog's auto-focus. Flushing here keeps each
   // test's focus behaviour isolated.
   cleanup();
-  act(() => {
-    vi.runOnlyPendingTimers();
-  });
+  // Guard: the by-time Select-in-Modal test runs on real timers (see there);
+  // only flush the fake queue when it is actually installed.
+  if (vi.isFakeTimers()) {
+    act(() => {
+      vi.runOnlyPendingTimers();
+    });
+  }
   vi.useRealTimers();
 });
 
@@ -425,22 +480,38 @@ describe('Meds tab — merged medication + schedule (FR-18.12)', () => {
     expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 
-  it('the by-time editor still adds a medication to a slot (migrated ScheduleScreen behaviour)', () => {
+  it('the by-time editor still adds a medication to a slot (migrated ScheduleScreen behaviour)', async () => {
+    // The by-time add flow is a React Aria `Select` popover nested inside the
+    // editor `Modal`. React Aria restores focus on popover close via
+    // requestAnimationFrame; under this file's fake timers that rAF fires after
+    // the popover has unmounted and pins React Aria's module-level `activeScope`
+    // to the dead popover scope, which then suppresses the next Modal's
+    // auto-focus (the keyboard test). Real timers let that rAF settle exactly as
+    // a browser does, so drive this one overlay-in-overlay case on the real
+    // clock and hand fake timers back for the shared afterEach.
+    vi.useRealTimers();
     render(<MedsScreen />);
     showView('By time');
     fireEvent.click(screen.getByRole('button', { name: 'Add time-slot' }));
     const dialog = screen.getByRole('dialog');
-    fireEvent.change(within(dialog).getByLabelText('Time'), { target: { value: '13:00' } });
-    fireEvent.change(within(dialog).getByLabelText('Add medication to slot'), {
-      target: { value: 'a' },
-    });
-    fireEvent.change(within(dialog).getByLabelText('Dose for Lamotrigine'), {
-      target: { value: '50' },
-    });
+    setValue(dialog, 'Time', '13:00');
+
+    // Open the Select and pick the medication (the RA Select tester's built-in
+    // post-select focus assertion doesn't fit this `selectedKey={null}` "add"
+    // menu, so drive it directly and wait for the option to render).
+    fireEvent.click(within(within(dialog).getByTestId('add-med-select')).getByRole('button'));
+    fireEvent.click(await screen.findByRole('option', { name: 'Lamotrigine' }));
+
+    setValue(dialog, 'Dose for Lamotrigine', '50');
     saveDialog(dialog);
 
-    const added = useStore.getState().slots.find((s) => s.time === '13:00')!;
-    expect(added.items).toEqual([{ medId: 'a', dose: 50 }]);
+    await waitFor(() =>
+      expect(useStore.getState().slots.find((s) => s.time === '13:00')).toBeTruthy(),
+    );
+    expect(useStore.getState().slots.find((s) => s.time === '13:00')!.items).toEqual([
+      { medId: 'a', dose: 50 },
+    ]);
+    vi.useFakeTimers();
   });
 });
 
@@ -488,6 +559,10 @@ describe('Meds tab — input validation (FR-18.8, AC8)', () => {
     expect(dialog).toHaveTextContent(/already named.*Lamotrigine/i);
     expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
     expect(useStore.getState().medications.filter((m) => !m.deleted)).toHaveLength(2);
+
+    // FR-20.4: the duplicate-name message must be an accessible field error on
+    // the Name input itself, not just text visible somewhere in the dialog.
+    expectAccessibleFieldError(dialog, 'Name', /already named.*Lamotrigine/i);
   });
 
   it('does not flag a medication being edited as a duplicate of itself', () => {
@@ -514,6 +589,12 @@ describe('Meds tab — input validation (FR-18.8, AC8)', () => {
 
     expect(dialog).toHaveTextContent(/max daily dose must be greater than 0/i);
     expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
+
+    // FR-20.4: the message must be an accessible field error, not just text
+    // visible somewhere in the dialog — `aria-invalid` on the input, and
+    // `aria-describedby` pointing at the element that actually holds the
+    // message, so a screen reader announces it on focus.
+    expectAccessibleFieldError(dialog, 'Max daily dose', /max daily dose must be greater than 0/i);
   });
 
   it('rejects a zero guardrail', () => {
@@ -540,6 +621,15 @@ describe('Meds tab — input validation (FR-18.8, AC8)', () => {
         .getAllByLabelText(/Amount for dose \d/)
         .map((el) => (el as HTMLInputElement).value),
     ).toEqual(['200', '200', '200']);
+
+    // FR-20.4: the daily-total-vs-cap message surfaces on the Max daily dose
+    // field as an accessible field error (see MedicationEditor.tsx's
+    // `issueFor('maxDailyDose') ?? issueFor('dailyTotal')` fallback).
+    expectAccessibleFieldError(
+      dialog,
+      'Max daily dose',
+      /600mg.*exceeds the max daily dose of 400mg/i,
+    );
   });
 
   it('passes when the daily total is exactly at the cap (boundary)', () => {

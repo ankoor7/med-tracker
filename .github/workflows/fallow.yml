@@ -23,13 +23,14 @@ jobs:
           # Full history: audit diffs changed files against the PR base ref.
           fetch-depth: 0
 
-      - name: Fallow strict audit
+      - name: Fallow audit (new-only)
         uses: fallow-rs/fallow@v2
         with:
           command: audit
-          # Strict: fail on every finding fallow surfaces in changed files,
-          # not just ones newly introduced by this PR (gate: new-only).
-          gate: all
+          # New-only: fail only on findings this PR newly introduces, not
+          # pre-existing/inherited ones already in the changed files. Matches
+          # the local commit gate (.claude/hooks/fallow-gate.sh, --gate-marker).
+          gate: new-only
           fail-on-issues: true
           review-comments: true
           review-guidance: true

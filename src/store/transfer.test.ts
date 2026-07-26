@@ -64,6 +64,25 @@ describe('JSON export/import round-trip (AC5)', () => {
     expect(mergeDatasets(empty, result.data, 'replace')).toEqual(original);
   });
 
+  it('round-trips a medication’s strength and form (Stage 22, FR-22.4/AC4)', () => {
+    const original = dataset({
+      medications: [
+        med({
+          id: 'm1',
+          name: 'Levo',
+          strength: '500 mg',
+          form: 'tablet',
+          updatedAt: 1,
+          version: 1,
+        }),
+      ],
+    });
+    const result = parseImport(exportJSON(original));
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.medications[0]).toMatchObject({ strength: '500 mg', form: 'tablet' });
+  });
+
   it('rejects a non-SteadyDose file', () => {
     expect(parseImport(JSON.stringify({ hello: 'world' }))).toMatchObject({ ok: false });
   });

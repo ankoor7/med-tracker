@@ -1,10 +1,80 @@
 # Handoff — Stage 18 (UX hardening)
 
-_Updated 2026-07-24. Branch: `stage-18-ux-hardening`. **Stage 18 is complete** and
-committed **and pushed** — tree clean, HEAD `f67d9e1`, 546 unit tests green,
-typecheck + lint clean. The next work is the **UI rewrite (Stage 19)** — see
-§"Queued next". The former WIP `17e78b7` was validated + reviewer-signed-off this
-session (see §"Snapshot fix — signed off")._
+_Updated 2026-07-25. Branch: `stage-18-ux-hardening`. Two tracks now live in
+parallel: the **React-Aria UI rewrite** (Stages 19–21; Stage 21 dashboards+calendar
+is mid-flight — U1 History + U2 Calendar committed, see `4951cd6`) and a new
+**P0 feature backlog track** (Stages 22–26). See the P0 section immediately below;
+the older Stage-18 history follows it._
+
+---
+
+## P0 feature backlog (handoff item 2) — started 2026-07-25
+
+Took `research/03-feature-list-prioritised-by-category.md`, mapped all **12 P0s**
+to build status in **`specs/p0-feature-audit.md`**, authored specs for the
+not-built/partial ones, verified the done ones, and shipped the first stage.
+
+**Committed:**
+
+| Commit    | What                                                              |
+| --------- | ----------------------------------------------------------------- |
+| `3728b48` | P0 audit + Stages **22–26** specs authored                        |
+| `62eac7e` | **Stage 22** implemented — medication `strength` + `form` (P0 #3) |
+| `e115f81` | **Stage 23** implemented — clinician outputs (P0 #6 + #7)         |
+
+**P0 status:** Done & re-verified bug-free by subagents — #1 grouped schedule,
+#2 taken/skipped/late logging, #4 pharmacology extension, #9 local-first storage,
+#10 encryption posture. Decisions: #10 met by TLS+at-rest (zero-knowledge stays a
+non-goal); **#12 iOS native deferred**. New specs: **22** med metadata (DONE),
+**23** clinician outputs = pre-visit summary + portable med list (implements the
+never-built Stage 17), **24** occurrence-linked side-effect logging, **25** reminder
+reliability, **26** trust/privacy policy.
+
+**Stage 22 — DONE.** `strength?`/`form?` on `Medication`; pure
+`medicationLabel()`/`formLabel()`; `validateMedication()` strength trim+cap (40)
+with extracted `isDuplicateName`/`guardrailIssues` helpers; editor Strength field
+
+- Form select; Meds list renders the label. Validated in the app.
+
+**Stage 23 — DONE (with the optional Stage 16 regimen markers, per user request).**
+Pure `core/clinicalReport.ts` — `buildMedicationList` + `buildPreVisitSummary`
+(overall + per-timing-sensitive-med adherence, flare stats with severity/duration
+avgs + weekly clustering, in-period regimen changes, descriptive "what to ask"
+highlights). UI: a "Clinician outputs" card in History opens either report on a
+print-ready white sheet (React Aria overlay, portaled; Print→PDF via `@media
+print` isolating `.sd-print-region`; Share via `navigator.share`→`mailto`;
+disclaimer). Extracted `useDataset()` + `shareReport()`. 608 tests green;
+typecheck/lint clean; fallow gate **passes (warn)** — the residual warn is the
+store-subscription idiom `useDataset` shares with the pre-existing
+HistoryScreen/OuraPanel (a full clear would mean refactoring those two;
+deliberately deferred). Validated live: both reports legible dark-on-white, med
+list shows Stage 22 labels, per-med table excludes flexible meds.
+
+**Gotcha discovered (Stage 23):** the design system's `slate` scale is
+**inverted and theme-flipping** — `text-slate-900` is the _lightest_ token and
+flips with theme. A forced-white print document must use **literal** colours
+(`text-[#0f172a]` etc.), not slate tokens; the embedded AdherenceChart keeps its
+tokens on a dark figure (`print-color-adjust: exact`).
+
+**Next:** Stage 24 (occurrence-linked side-effect logging) — extends the Stage 15
+event system with `medId`/`doseLogEntryId`; feeds Stage 23's summary. Non-blocking
+notes from the P0 verification pass are in the audit (§Verification): `late` isn't
+an `OccurrenceStatus`; "Take group" offered on upcoming slots; a `loadAll`
+first-run check + a round-trip test gap.
+
+_(Local HEAD is ahead of the last push — push before closing.)_
+
+---
+
+## Prior track — Stage 18/19/20/21 (React-Aria UI)
+
+_Stage 20 (screen migration) landed in 5 units — U1 chrome+nav (React
+Aria Tabs), U2 Today, U3 the merged Meds editor, U4 Events, U5 logging dialogs +
+panels — all validated + reviewer-signed-off, build succeeds, fallow-clean. **Stage
+21 (dashboards + calendar)** is mid-flight — `specs/stage-21-dashboards-calendar.md`,
+the highest-visual-risk stage with legibility as the explicit acceptance bar. The
+former WIP `17e78b7` was validated + signed off earlier (§"Snapshot fix — signed
+off")._
 
 Stage 18 turns the UX-bug findings in `specs/stage-18-ux-hardening.md` into fixes.
 Every fix goes through a three-role subagent pipeline (see §Method). The spec is
@@ -164,17 +234,28 @@ migration and ships the primitives this app needs (`Calendar`, `DateField`/
 
 Three stages, run in order through the Implement→Validate→Review pipeline:
 
-- **Stage 19 — `specs/stage-19-design-system-react-aria.md`.** Foundation:
-  design-token layer for the new theme (light+dark), themed primitives over React
-  Aria replacing `ui.tsx`/`Modal.tsx`/`ConfirmDialog.tsx`/`StatusBadge.tsx`, drop
-  every Oura-style directive, wire `@react-aria/test-utils`, a theme guide. No
-  screen rewrites. Has open questions in §5 (token home, icon set, Tailwind vs
-  React Aria styling) — settle with the user before/early in the stage.
-- **Stage 20 — `specs/stage-20-screen-migration.md`.** Migrate chrome, Today, the
-  merged Meds editor, Events, and the logging dialogs onto the new primitives.
-  **Behaviour parity is load-bearing**: every Stage 18 FR must survive (FR-20.2
-  lists them); the Stage 18 test suite is the oracle.
-- **Stage 21 — `specs/stage-21-dashboards-calendar.md`.** History dashboards +
+- **Stage 19 — `specs/stage-19-design-system-react-aria.md`. ✅ DONE.** CSS-custom-
+  property token layer (light+dark, AA), `Button`/`Modal`/`ConfirmDialog` over React
+  Aria (source-compatible exports; `Field`/`Card`/`ColorDot`/`Ring`/`Stat`/
+  `StatusBadge` kept presentational), Oura _style_ directive dropped (data feature
+  intact), Lucide icons, `@react-aria/test-utils` wired, dev-only theme guide at
+  `?themeguide`. §5 decisions settled (CSS-var tokens, Lucide, Tailwind+`data-*`).
+  Two committed transients cleared: the test-utils dep is now consumed; the
+  tokens.css dark-palette duplication remains documented (dual-signal theming; a
+  DRY `var()` indirection can't be verified under jsdom — revisit if a build-level
+  token test is added).
+- **Stage 20 — `specs/stage-20-screen-migration.md`. ✅ DONE.** 5 units: U1 chrome +
+  bottom nav → React Aria `Tabs` (root-caused a recurring "no tab id" console.error
+  to JSX order — `TabList` before `TabPanels`); U2 Today (token cleanup — already on
+  the primitives); U3 the merged Meds editor onto `Form`/`NumberField`/`TimeField`/
+  `Select` with FR-18.8 validation as accessible `FieldError`s (FR-20.4), AC14
+  change-records mutation-proven; U4 Events (added its first test file + shared
+  `ModalFormFooter`); U5 logging dialogs + panels (new `DateField`/`dateValue`,
+  `NumberField` doses; caught a `RemindersPanel` NaN-leak). New shared primitives:
+  `fields.tsx`, `timeValue.ts`, `dateValue.ts`, `ModalFormFooter.tsx`. A hard
+  `.claude/hooks/fallow-gate.sh` PreToolUse hook blocks git ops while any fallow
+  `*_introduced` > 0 — keep reviewers clearing it (extract, don't suppress).
+- **Stage 21 — `specs/stage-21-dashboards-calendar.md`. ← NEXT.** History dashboards +
   Calendar onto the theme, with **legibility as the explicit acceptance bar** (the
   "easily understood dashboards and calendars" ask). Guards that the FR-18.6/18.9
   visual distinctions and their non-colour cues survive the re-skin, and that the
@@ -198,7 +279,7 @@ _(That file has not been read yet — confirm it exists and scope the work first
 
 ```
 git status                 # expect clean (everything committed + pushed)
-git log --oneline -10      # expect 17e78b7 at HEAD, pushed
-pnpm typecheck && pnpm lint && pnpm test   # expect green (478 tests)
+git log --oneline -10      # Stage 19 Unit 3 at HEAD, pushed
+pnpm typecheck && pnpm lint && pnpm test   # expect green (570 tests)
 pnpm db:test               # expect 79 pgTAP green (needs local stack up)
 ```
