@@ -26,8 +26,20 @@ platform limits background delivery (the honest position the PRD already takes).
 
 > Worked example: 08:00 dose reminder fires. The user misses it. At 08:10 and 08:20
 > it **re-alerts** (escalating), staying **persistent** on the lock screen until the
-> user taps **Taken** or **Snooze** — tapping **Taken** logs the dose and clears the
-> chain; nothing is silently marked "assumed taken" without acknowledgement.
+> user taps **Taken** or **Snooze** — tapping **Taken** logs the dose as a *genuine*
+> entry and clears the chain. If the whole chain is ignored, the occurrence resolves
+> to whatever `assumeTakenOnTime` dictates, exactly as if no reminder had fired: with
+> the setting **on** (the default) it becomes an **assumed-taken** dose, shown
+> distinctly per FR-18.6 — **not** flipped to missed. Escalation is an *offer* to
+> upgrade an assumed dose to a genuinely-logged one; it is never a precondition for
+> the assumed-taken default.
+
+> **Why this matters (non-negotiable):** patient engagement drops sharply during a
+> well-managed "good patch" — the user stops interacting even though they are taking
+> their doses. If enabling reminders silently converted ignored reminders into
+> "missed", turning reminders on would *degrade* the record for exactly the users
+> who need the least friction. Reminders and assume-taken are orthogonal: reminders
+> improve delivery and offer acknowledgement; they never change the default outcome.
 
 ## 2. Scope
 **In:**
@@ -43,7 +55,10 @@ platform limits background delivery (the honest position the PRD already takes).
   pile-up), within platform limits.
 - **Confirm-to-dismiss actions** (advances the P1): notification action buttons
   **Taken** / **Snooze** that log or reschedule directly from the notification,
-  closing the "silent assumed-taken" gap for reminded doses.
+  giving users who *want* explicit acknowledgement an easy path to it. This is
+  additive: an ignored chain still falls back to the `assumeTakenOnTime` default
+  (assumed-taken when on), it does **not** withhold the assumed-taken outcome for
+  reminded doses.
 - **Reliability instrumentation & degradation**: a documented degradation matrix
   (iOS PWA background limits, permission states, offline) and a lightweight
   local "did the last N reminders fire?" self-check surfaced in the reminders panel
@@ -51,8 +66,10 @@ platform limits background delivery (the honest position the PRD already takes).
 
 **Out:** SMS/WhatsApp/email channels; caregiver/"medfriend" alerts (P2);
 appointment reminders (P2); native (Capacitor) notifications — that rides the
-deferred iOS track; changing the assume-taken model itself (Stage 18 settled it) —
-this only adds an **acknowledged** path for reminded doses.
+deferred iOS track; changing the assume-taken model itself (Stage 18 §7.1 settled
+it: **on** by default, and non-negotiable). This stage only adds an **optional
+acknowledged** path for reminded doses; the assumed-taken default remains
+authoritative when the chain is ignored (FR-25.8).
 
 ## 3. Prerequisites
 - Stage 6 core (`core/reminders.ts`: `computeDoseReminders`, `followUpReminder`,
@@ -76,16 +93,26 @@ this only adds an **acknowledged** path for reminded doses.
   occurrence, `requireInteraction` where supported); a re-alert replaces rather
   than stacks.
 - **FR-25.5** — Notification **actions**: **Taken** logs the dose (via the store,
-  cap-checked) and clears the escalation chain; **Snooze** reschedules by a
-  configured interval. Both work from the notification without opening the app
-  where the platform allows, and fall back to deep-linking the app where it does
-  not.
+  cap-checked) as a *genuine* entry and clears the escalation chain; **Snooze**
+  reschedules by a configured interval. Both work from the notification without
+  opening the app where the platform allows, and fall back to deep-linking the app
+  where it does not.
 - **FR-25.6** — A **degradation matrix** is documented (spec + in-app help), and the
   reminders panel shows the current delivery state (permission, subscription,
   push-vs-local) and a **local** last-fired self-check.
 - **FR-25.7** — Reminder preferences gain escalation controls (on/off, offsets, max
   count) with sensible defaults; existing prefs migrate with escalation **off** by
   default (no surprise behaviour change).
+- **FR-25.8** — **Assume-taken is authoritative over reminder state.** An
+  unacknowledged occurrence whose escalation chain is exhausted (or whose reminders
+  never fired) resolves through the **same** assume-taken logic as an occurrence with
+  no reminder at all: with `assumeTakenOnTime` **on** it is an assumed-taken dose
+  (FR-18.6 display rules apply), with it **off** it is missed/unconfirmed as today.
+  Enabling reminders, escalation, or push MUST NOT introduce a new "reminded but
+  unacknowledged ⇒ not taken" state, and MUST NOT change any adherence figure
+  relative to the same install with reminders off. A **genuine** log (via the
+  **Taken** action or in-app) upgrades that occurrence from assumed to logged and
+  stops escalation; ignoring the chain leaves the assumed default untouched.
 
 ## 5. Acceptance criteria
 - **AC1** — With the VAPID key set, subscribing persists a subscription row (RLS:
@@ -103,6 +130,12 @@ this only adds an **acknowledged** path for reminded doses.
   permission/subscription state; no data leaves the device for the self-check.
 - **AC7** — Upgrading an existing install keeps reminders working with escalation
   off until the user opts in; `src/core` boundary intact (scheduling math is pure).
+- **AC8** — With `assumeTakenOnTime` **on**, a dose whose full escalation chain is
+  ignored resolves to **assumed-taken** (shown distinctly, not missed), and the
+  adherence figure for that day is **byte-identical** to the same fixture with
+  reminders off — proving reminders never mutate the outcome. Tapping **Taken**
+  instead upgrades that same occurrence to a genuine log. Core-level, unit-tested
+  and mutation-proven.
 
 ## 6. Open questions
 - **iOS PWA push**: Web Push works in installed iOS PWAs (16.4+) but background
