@@ -101,6 +101,13 @@ code. Applies small clearly-correct fixes itself; reports anything larger.
 **Owns the commit gate** — if the repo blocks commits on lint/complexity/coverage
 thresholds, the reviewer clears them (preferring real fixes over suppressions)
 and confirms green, because you are about to commit.
+**Chases claims made _in the code_, not just in the report.** A comment, docstring,
+or commit message asserting a safety property — "handled in X", "validated
+upstream", "that migration lives in `y.ts`, not here" — is a claim to verify, not
+context to trust. If it names another file, open that file and confirm the thing
+is actually there. A comment that is false is a defect in its own right, even when
+the code around it is correct: it reads as reassurance to the next person who does
+not check, and it is exactly what stops the *next* reviewer looking.
 
 ## Model selection
 
