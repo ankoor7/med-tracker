@@ -16,15 +16,7 @@ export interface Guardrails {
 // Descriptive identity only; it never feeds dose arithmetic. `other` is the
 // escape hatch for anything the fixed set does not cover.
 export type MedicationForm =
-  | 'tablet'
-  | 'capsule'
-  | 'liquid'
-  | 'injection'
-  | 'patch'
-  | 'inhaler'
-  | 'drops'
-  | 'cream'
-  | 'other';
+  'tablet' | 'capsule' | 'liquid' | 'injection' | 'patch' | 'inhaler' | 'drops' | 'cream' | 'other';
 
 export interface Medication {
   id: string;
