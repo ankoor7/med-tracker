@@ -27,13 +27,7 @@ function getPool(): Pool {
 export interface RecordRow {
   id: string;
   type:
-    | 'medication'
-    | 'slot'
-    | 'doseLog'
-    | 'doseOverride'
-    | 'eventType'
-    | 'eventInstance'
-    | 'settings';
+    'medication' | 'slot' | 'doseLog' | 'doseOverride' | 'eventType' | 'eventInstance' | 'settings';
   updated_at: string; // bigint comes back as a string from node-pg
   version: number;
   deleted: boolean;
