@@ -5,7 +5,7 @@
   "description": "SteadyDose — local-first medication adjusted-dose tracker (PWA) with a secure, server-readable cloud.",
   "type": "module",
   "license": "MIT",
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@11.17.0",
   "engines": {
     "node": ">=24.18.0"
   },
