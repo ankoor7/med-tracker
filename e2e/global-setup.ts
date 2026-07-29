@@ -13,6 +13,7 @@ export default async function globalSetup(): Promise<void> {
       `E2E setup: cannot reach the local Supabase stack (${reason}).\n` +
         'Start it first:  pnpm local:up   (then  pnpm local:env)\n' +
         'Reset it if the dev user/migrations are missing:  pnpm local:reset',
+      { cause: err },
     );
   } finally {
     await closePool();

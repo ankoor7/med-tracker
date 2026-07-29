@@ -50,7 +50,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
     "@react-aria/test-utils": "1.0.0-rc.0",
     "@testing-library/jest-dom": "^7.0.0",
@@ -65,7 +65,7 @@
     "@vitejs/plugin-react": "^4.7.0",
     "autoprefixer": "^10.5.4",
     "badge-maker": "^6.0.0",
-    "eslint": "^9.39.5",
+    "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-import-resolver-typescript": "^4.4.5",
     "eslint-plugin-import": "^2.32.0",
