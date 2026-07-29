@@ -1,0 +1,23 @@
+# pnpm 11 settings. pnpm 10/11 moved these out of package.json's "pnpm" field.
+
+# pnpm 11 refuses to install when a dependency's build script is neither
+# approved nor explicitly ignored. Both of these ship platform-native binaries
+# that have to be built/linked for the toolchain to work: esbuild backs vite,
+# unrs-resolver backs eslint-import-resolver-typescript.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true
+
+# pnpm 11 defaults to a 24h minimumReleaseAge supply-chain gate: freshly
+# published versions are rejected. These exact versions are pinned by our own
+# manifest, so they can't be satisfied by an older release. The exemptions are
+# version-scoped, so they lapse automatically on the next bump rather than
+# exempting the package forever. pnpm regenerates this list on install.
+minimumReleaseAgeExclude:
+  - '@supabase/auth-js@2.111.0'
+  - '@supabase/functions-js@2.111.0'
+  - '@supabase/postgrest-js@2.111.0'
+  - '@supabase/realtime-js@2.111.0'
+  - '@supabase/storage-js@2.111.0'
+  - '@supabase/supabase-js@2.111.0'
+  - postcss@8.5.24
