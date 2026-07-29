@@ -76,7 +76,7 @@
     "globals": "^17.8.0",
     "husky": "^9.1.7",
     "jsdom": "^25.0.1",
-    "lint-staged": "^15.5.2",
+    "lint-staged": "^17.2.0",
     "monocart-coverage-reports": "^2.12.12",
     "monocart-reporter": "^2.12.4",
     "pg": "^8.22.0",
