@@ -25,6 +25,14 @@ For each unit of work, spawn three subagents **in sequence, synchronously**
 (`run_in_background: false`). They share one browser and one working tree, so
 they must not run concurrently.
 
+Synchronous is also the cheap option, and the reason is worth knowing: blocking
+inside a single tool call costs you nothing, because you take no turns while you
+wait. **Do not take a turn while a subagent is running** — no polling to see how
+it is doing, no speculative planning for the next unit, no "let me just check the
+diff while I wait." Role agents routinely run 8–31 minutes. Every turn you take
+during that wait re-primes your whole context at 12.5x the price of reading it.
+Wait, or yield until notified. Nothing in between.
+
 1. **IMPLEMENTER** — writes the fix and its tests. Ends on a green build.
 2. **VALIDATOR** — independently verifies the fix in the running app, then
    _mutation-tests the tests_: reverts the fix, confirms the new tests fail,
@@ -37,25 +45,72 @@ Then **you** commit that unit, and move to the next. One unit = one commit.
 Never batch two units into one commit — it destroys the isolation that makes the
 next reviewer's diff readable.
 
+**At each unit boundary, close the unit out on disk.** Append this unit's
+learnings (see below), then write a compact handoff: the committed SHAs, the
+units still to go, the decisions the user has settled, and the gotchas the next
+unit needs. Then continue from that file rather than from everything you have
+accumulated. This is the session-boundary handoff rule the doctrine already has,
+applied per unit instead of per session — and it must be good enough to resume
+from with no access to your transcript, because that is exactly the test it will
+face. Write it as if the next orchestrator is a stranger. It effectively is.
+
 A pipeline is not a rubber stamp. Each role must be able to **send work back**:
 the validator that finds a bug, the reviewer that finds a regression — route it
 to the implementer and re-run the affected stages. Roughly one unit in three
 will bounce at least once. That is the process working, not failing.
 
+## Why your context is the expensive part
+
+Measured over one full 3-unit run: you were 19.6% of the tokens but a third of
+the cost, because your cache write:read ratio was 1:4 while every short-lived
+role agent achieved 1:11 to 1:51. You emitted 8,494 output tokens all run — eight
+cents' worth. Your cache writes cost $5.66.
+
+So the lever is not brevity. **Being terse saves you nothing; reading less saves
+you everything.** Three habits follow, and they are requirements, not tips:
+
+- **Delegate reading.** Do not pull source files, diffs, or test output into your
+  own context when a subagent can read them and report back. You carry a file
+  forever; you carry a report once. The exception is the spec itself — read that,
+  because you cannot write a sharp directive for work you do not understand.
+- **Hold decisions, not evidence.** Your context should contain what was decided
+  and what remains, not the material the decisions were made from.
+- **Write state to disk, not to context.** A resumed run should rebuild from
+  files and commits, never from transcript.
+
+None of this licenses vague briefs. A thin orchestrator that writes a fuzzy
+directive has traded a real cost for a worse one — vague briefs produce vague
+fixes, and the rework costs more than the context ever did. Thin means you didn't
+read the file yourself; it does not mean you don't know what you're asking for.
+When you need evidence to write a good directive, send an agent to fetch exactly
+that evidence and report it.
+
 ## Before you spawn anything
 
-1. **Read the source of truth** (the spec, the issue list) yourself. You cannot
+1. **Run the pre-spawn check** — `./scripts/agent-preflight.sh <role> <unit>` (or
+   the repo's equivalent). It inspects the working tree, the stash list, and the
+   transcripts already on disk for that role and unit. If it exits non-zero,
+   prior work exists: resume or salvage it. **Do not spawn a replacement.**
+
+   This is a command you run, not a rule you remember, and the distinction is
+   the whole point. The remembered version of this rule was already in this file
+   during the baseline run and still failed: a Unit 1 validator was reported as
+   "hasn't run" while its 31-minute, 62-tool-call transcript sat on disk, and the
+   replacement repeated the work for 3.8M tokens — more than every review pass in
+   that run combined. Run the command and show its output before each spawn.
+
+2. **Read the source of truth** (the spec, the issue list) yourself. You cannot
    write good directives for work you do not understand.
-2. **Write a shared protocol file** to a scratch path and have every subagent
+3. **Write a shared protocol file** to a scratch path and have every subagent
    read it first. It carries the environment (URLs, reset commands), the repo
    conventions, the role definitions, the report format, and the gotchas. This
    keeps each spawn prompt short and stops you re-explaining the setup ten times.
    _The scratch path is session-specific — if the work spans sessions, reproduce
    the protocol's contents in a durable handoff._
-3. **Order the units by dependency, not by spec order.** If unit B adds UI to a
+4. **Order the units by dependency, not by spec order.** If unit B adds UI to a
    screen unit A restructures, do A first — otherwise B is built twice. Say so in
    the protocol.
-4. **Confirm the environment is live** (dev server, database, browser tooling)
+5. **Confirm the environment is live** (dev server, database, browser tooling)
    before the first spawn, so the first validator does not fail on setup.
 
 ## Writing a directive that lands
@@ -136,6 +191,14 @@ single giant diff no reviewer can hold in their head.
   scope-of-behaviour question. Ask with a concrete recommendation and real
   trade-offs. When the user settles one, **record it in the spec** (strike the
   open question, note the decision) so it is durable, not just in the transcript.
+- **Nobody's:** a progress checkpoint. "Shall I continue to the next unit?",
+  "Ready for me to proceed?", "Want me to start unit 3?" are not decisions —
+  they are you asking permission to do the job you were given. Continuing is the
+  default; the work list was the authorisation. Two such stalls happened in the
+  baseline run, each costing a full context re-prime to resume. Report what
+  landed and keep going. Surface a checkpoint only when something genuinely
+  blocks you: a failing gate you cannot clear, a spec contradiction, an
+  unsound premise.
 
 ## Continuing an agent vs. starting fresh
 
@@ -151,7 +214,15 @@ it, and stay recoverable:
 
 - **A subagent whose spawn was rejected mid-turn may still have left work on
   disk.** Always check the working tree after any interruption before spawning a
-  replacement — you may be building on top of, or duplicating, real work.
+  replacement — you may be building on top of, or duplicating, real work. Use the
+  pre-spawn command for this; do not eyeball it.
+- **On resume, do not re-run steps that already produced artifacts.** Capture and
+  snapshot steps look idempotent and are not: re-running a `git add -A && git
+  diff` capture after further edits silently rewrites a recorded artifact, so the
+  "before" diff you compare against is no longer the before. Check whether the
+  artifact exists first, and if it does, keep it. The same goes for baseline
+  measurements, seeded fixtures, and anything else whose value depends on *when*
+  it was taken.
 - **After an interrupted or killed subagent, verify the tree is coherent** before
   continuing: does it still build, is the file count what you expect, did a
   temporary mutation get left behind.
@@ -162,6 +233,31 @@ it, and stay recoverable:
 - **At a session boundary, write a handoff** that leads with any uncommitted
   work, then the committed units, then what remains, then the gotchas. The next
   session cannot see your transcript — only what you wrote down and committed.
+
+## Capturing learnings
+
+You are the only participant who sees the whole run — the role agents each see
+one slice. That makes you the only one who can notice that the same directive
+keeps producing the same bad result, and the per-unit context reset means noticing
+it is useless unless you write it down.
+
+**At every unit boundary, append to the learnings file** (`docs/agent-learnings.md`
+or the repo's equivalent):
+
+- what bounced, which role caught it, and the root cause;
+- any directive that produced a bad result — quoted, with what it should have
+  said instead;
+- any rule in this file that should have fired and didn't.
+
+**Entries must be specific enough to act on.** A `file:line`, a quoted directive,
+a named rule. "Review went well" and "validation was thorough" are not entries;
+they cost a write and teach nothing. The test: if a later unit's directive cannot
+be changed because of what you wrote, it was too vague.
+
+Read the file at the start of each unit and **actually apply it** — an entry that
+never changes a later directive was not worth recording. When one does, note that
+too; a learning that demonstrably improved a directive in the same run is the
+strongest evidence this loop is working.
 
 ## Committing (adapt to the repo)
 
@@ -229,7 +325,8 @@ prevented a bad claim.
 At the end: every unit is a separate, green, reviewed commit with an honest
 message; every acceptance criterion was checked in the running app, not just in a
 test; every test was proven able to fail; every user decision is recorded in the
-spec; and the working tree is clean or its remaining state is documented in a
-handoff. Speed is not the metric. **Trustworthiness is** — that a reader can
-believe each commit does what it says, because three independent passes and your
-own judgement stand behind it.
+spec; the learnings file has a specific, actionable entry per unit; no role was
+spawned twice for the same work; and the working tree is clean or its remaining
+state is documented in a handoff. Speed is not the metric. **Trustworthiness is** —
+that a reader can believe each commit does what it says, because three independent
+passes and your own judgement stand behind it.

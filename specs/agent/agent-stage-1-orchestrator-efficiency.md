@@ -5,7 +5,7 @@
 | **Depends on** | `.claude/agents/sequential-fix-orchestrator.md`, `docs/development-workflow.md` |
 | **Implements** | FR-A1.1 … FR-A1.8 |
 | **Milestone** | Agent-method trial |
-| **Status** | Ready |
+| **Status** | FR-A1.1 … FR-A1.8 built (2026-07-29); acceptance criteria pending the trial run, which follows A2's |
 
 ## 1. Objective
 
@@ -114,8 +114,11 @@ cost (that is `agent-stage-2-validator-efficiency.md`); reviewer changes (settle
 
 - **AC-A1.1** — On a ≥3-unit trial stage, orchestrator **cache write:read improves from 1:4 to
   ≥1:10**, measured by FR-A1.6 against a re-measured baseline on the same stage.
-- **AC-A1.2** — Orchestrator **cost share falls from 35.4% to ≤20%** of run cost, without
-  shifting the spend into role agents: total run cost per unit MUST NOT increase.
+- **AC-A1.2** — Orchestrator **cost share falls from 48.6% to ≤25%** of run cost, without
+  shifting the spend into role agents: total run cost per unit MUST NOT increase. Both numbers
+  are **per-model** (§8) — the orchestrator runs on opus, so pricing the run at a single flat
+  rate understates it by ~2.5× and makes the target meaningless. `pnpm agent:measure` defaults
+  to per-model; do not compare a per-model figure against a flat-rate one.
 - **AC-A1.3** — The three personas are intact and each still owns its stage. Demonstrated by a
   unit that bounces: the reviewer or validator sends work back and the implementer is resumed,
   not restarted.
@@ -154,24 +157,48 @@ sub-changes (FR-A1.4, A1.6, A1.7, A1.8), which carry no such risk.
   context. The doctrine is explicit that vague briefs produce vague fixes. Watch AC-A1.4 closely
   — this is the most likely way this stage does harm.
 
-## 8. Baseline (measured 2026-07-28)
+## 8. Baseline (measured 2026-07-28, corrected 2026-07-29)
 
-One full run, Stage 25 units 1–3, `claude-sonnet-5` roles under an `opus` orchestrator.
+One full run, Stage 25 units 1–3. **Priced per-model**, which is the correction: the
+orchestrator and all three implementers ran on `claude-opus-5` ($5/$25 per MTok), the other
+roles on `claude-sonnet-5` (introductory $2/$10 through 2026-08-31).
 
 | Group | Tokens | % tok | Cost | % cost |
 | --- | ---: | ---: | ---: | ---: |
-| Orchestrator | 10,866,688 | 19.6% | $7.47 | 35.4% |
-| Validators (5 runs) | 24,673,321 | 44.4% | $6.36 | 30.2% |
-| Implementers (3) | 7,195,577 | 13.0% | $2.50 | 11.8% |
-| Reviewers, kept (4) | 5,994,324 | 10.8% | $2.09 | 9.9% |
-| Reviewers, killed (4) | 1,240,364 | 2.2% | $0.76 | 3.6% |
-| Setup exploration (2) | 442,300 | 0.8% | $0.23 | 1.1% |
-| **Total** | **55,530,329** | | **$21.10** | |
+| **Orchestrator** (opus) | 10,927,812 | 19.6% | **$20.21** | **48.6%** |
+| Validators (5 runs) | 24,719,397 | 44.3% | $6.82 | 16.4% |
+| Implementers (3, opus) | 7,262,859 | 13.0% | $7.93 | 19.1% |
+| Reviewers (11 runs) | 12,474,369 | 22.3% | $5.75 | 13.8% |
+| Setup exploration (2) | 454,113 | 0.8% | $0.88 | 2.1% |
+| **Total** | **55,838,550** | | **$41.59** | |
 
-Token class mix: cache read 92.5% / cache write 7.3% / output 0.1% / input 0.1%.
-Cost by class: cache read $10.27, **cache write $10.16**, output $0.58, input $0.08.
+Token class mix: cache read 92.0% / cache write 7.3% / output 0.7% / input 0.1%.
+Orchestrator cache write:read **1:4**, against 1:11–1:51 for every short-lived role agent.
 
-Identified waste: **4.39M tokens / $1.60 (7.9%)** — one duplicated validator ($0.85) and four
-rate-limit-killed runs ($0.76).
+Unfinished-run spend: **$2.00 (4.8%)** — one duplicated validator that was interrupted
+mid-tool-call, and four rate-limit-killed reviewer runs.
 
-Full analysis: `research/05-agent-token-economics.md`.
+### What changed from the original figures
+
+The first pass at this baseline reported **$21.10 / 55,530,329 tokens / orchestrator 35.4% of
+cost**. `scripts/measure-agent-tokens.py` reproduces those numbers exactly with
+`--flat-rate claude-sonnet-5`, which is how two defects in them were found:
+
+1. **Every token was priced at Sonnet rates**, including the opus orchestrator and opus
+   implementers. Correcting this is most of the change: the orchestrator is **nearly half** the
+   run's true cost, not a third. The thesis of this spec is stronger than it originally claimed.
+2. **Output tokens were undercounted 6.3×** (58,423 → 366,644). A logical assistant message is
+   written as several transcript records, each repeating the same prompt-side usage while
+   `output_tokens` grows; only the last record carries the true total. Deduplicating by message
+   id and keeping the *first* record — the obvious implementation — silently discards the output
+   and every tool call after the opening content block. See `docs/agent-learnings.md`.
+
+Neither defect affects the cache write:read ratio, so **AC-A1.1 is unchanged**. AC-A1.2's target
+is restated against the corrected share.
+
+For comparison with anything measured under the old convention, `--flat-rate claude-sonnet-5`
+gives $24.18 total and a 33.4% orchestrator cost share (the residual difference from $21.10 is
+defect 2 alone).
+
+Full analysis: `research/05-agent-token-economics.md` — note its §4 and §6 tables carry both
+defects and should be read against this section.
