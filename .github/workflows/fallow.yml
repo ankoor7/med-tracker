@@ -18,13 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # Full history: audit diffs changed files against the PR base ref.
           fetch-depth: 0
 
       - name: Fallow audit (new-only)
-        uses: fallow-rs/fallow@v2
+        uses: fallow-rs/fallow@v3
         with:
           command: audit
           # New-only: fail only on findings this PR newly introduces, not
