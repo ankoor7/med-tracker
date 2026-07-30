@@ -26,7 +26,43 @@ Format, newest run first:
 
 ---
 
-## 2026-07-30 — Agent Stage A2 trial, unit 1
+## 2026-07-30 — A2 trial attempt 1 VOIDED (provider outage)
+
+An Anthropic outage landed mid-run. Attempt 1 was discarded and the trial
+restarted from `a3e5ae3`. What the void turned on, and what it did not:
+
+- **An outage interrupts requests; it does not corrupt code.** Unit 1's work was
+  independently verified sound before being discarded — green typecheck/lint,
+  628 tests, `schedule.ts` absent from the diff (so its mutation really was
+  restored), and all 19 escalation tests passing (so no mutation survived in the
+  new file either). Work validity and measurement validity are separate questions
+  and should be assessed separately.
+- **The metrics were void, not adjustable.** Retries and a resume both force cache
+  re-writes, so cost, cache write:read and wall-clock were measuring the incident.
+  Critically, the outage and a wedged Playwright browser produce _the same
+  signature_ — a transcript ending mid-tool-call — so the two causes could not be
+  separated after the fact. **That inseparability is the reason to void rather
+  than correct.** Do not attempt to subtract an incident from a measurement you
+  cannot attribute.
+- **Ratio ACs need an orchestrator-independent form.** AC-A2.5's "validator share
+  of run cost" has the orchestrator in its denominator, so an orchestrator stall
+  moves it while the validator is unchanged. Its "tokens per unit" half was
+  untouched. Ratio-of-total criteria are fragile to infrastructure; absolute
+  per-agent criteria are not. AC-A2.5 now gates on the absolute half.
+- **Keep the safety net outside the experiment.** The restart deliberately ships
+  no A1 tooling into the trial worktree — no `agent-preflight.sh`, no learnings
+  file, no liveness clause. Operational guardrails are held externally instead
+  (a staleness monitor, and preflight run from the main repo), so the run stays
+  pure A2 while still being recoverable. A trial that cannot finish measures
+  nothing, but a trial that smuggles in the other stage's intervention measures
+  the wrong thing.
+- **Preflight must report delivery, not duration.** Ported from the orchestrator's
+  own script, which independently reached the same conclusion: a prior transcript
+  is only actionable if you know whether it _delivered a report_, ended
+  mid-tool-call, or was truncated. Turn count alone is what allowed "no report
+  arrived" to be misread as "it never ran".
+
+## 2026-07-30 — Agent Stage A2 trial, unit 1 (attempt 1, voided — kept for method value)
 
 - **Rule that didn't fire, again:** the orchestrator reported "Stopped before the
   unit 1 validator ran" while a 56-turn, 34-tool validator transcript

@@ -129,10 +129,16 @@ validator into another persona (the three personas are settled); orchestrator-si
 - **AC-A2.3 — Turn reduction.** Validator assistant turns per unit fall **≥35%** against a
   re-measured baseline on the same stage.
 - **AC-A2.4 — Batching.** Tools-per-turn rises from **1.07 to ≥1.8**.
-- **AC-A2.5 — Cost.** Validator share of run cost falls from **30.2% to ≤20%**, and validator
-  tokens per unit fall **≥40%** (the quadratic relationship means the turn cut should
-  over-deliver here; if it does not, context is growing for another reason — investigate before
-  accepting).
+- **AC-A2.5 — Cost.** Validator **tokens per unit fall ≥40%** against the re-measured baseline.
+  This absolute figure is the pass/fail criterion, because it depends only on the validator's own
+  transcript. Validator *share of run cost* (baseline 30.2%) MUST still be reported, but is
+  **advisory, not gating**: its denominator includes the orchestrator, so any orchestrator stall,
+  resume, or provider incident moves it without the validator changing at all. The quadratic
+  relationship means the turn cut should over-deliver on tokens per unit; if it does not, context
+  is growing for another reason — investigate before accepting.
+
+  Settled 2026-07-30 after the first trial attempt was voided by an Anthropic outage: the
+  share-of-cost number was contaminated in a way the tokens-per-unit number was not.
 - **AC-A2.6 — Snapshot ratio.** Full `browser_snapshot` calls per unit fall **≥50%**, with
   targeted queries taking their place — and AC-A2.2 still passes.
 - **AC-A2.7 — Mutation proof intact.** Every new test in the trial stage is still demonstrated

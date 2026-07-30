@@ -73,7 +73,37 @@ else
       transcript="${meta%.meta.json}.jsonl"
       desc="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("description",""))' "$meta" 2>/dev/null)"
       turns="$(grep -c '"type":"assistant"' "$transcript" 2>/dev/null || echo 0)"
-      echo "!! $(basename "$transcript")  turns~$turns  \"$desc\""
+      # Whether it DELIVERED matters more than how long it ran. "No report
+      # arrived" and "it never ran" look identical from the orchestrator's seat,
+      # and mistaking the first for the second is what triggers a duplicate spawn.
+      state="$(python3 - "$transcript" 2>/dev/null <<'PYEOF' || echo "unknown"
+import json, sys
+groups, order = {}, []
+for line in open(sys.argv[1]):
+    try: rec = json.loads(line)
+    except Exception: continue
+    if rec.get("type") != "assistant": continue
+    msg = rec.get("message") or {}
+    if not msg.get("usage"): continue
+    key = msg.get("id")
+    if key not in groups:
+        groups[key] = []; order.append(key)
+    groups[key].append(msg)
+if not order:
+    print("empty"); raise SystemExit
+final = groups[order[-1]]
+blocks = [b.get("type") for m in final for b in (m.get("content") or []) if isinstance(b, dict)]
+out = max((m.get("usage") or {}).get("output_tokens", 0) for m in final)
+if blocks and blocks[-1] == "tool_use":
+    print("MID-FLIGHT (died during a tool call, no report)")
+elif not out:
+    print("TRUNCATED (final message cut off, no report)")
+else:
+    print(f"delivered a report ({out} output tokens)")
+PYEOF
+)"
+      echo "!! $(basename "$transcript")  turns~$turns  $state"
+      echo "     \"$desc\""
     done <<<"$matches"
     echo "!! Prior transcript(s) exist. Inspect before spawning:"
     echo "   ./scripts/measure-agent-tokens.py '$latest_session'"
