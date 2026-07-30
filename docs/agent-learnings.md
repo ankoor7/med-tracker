@@ -26,6 +26,48 @@ Format, newest run first:
 
 ---
 
+## 2026-07-30 — Agent Stage A2 trial, unit 1
+
+- **Rule that didn't fire, again:** the orchestrator reported "Stopped before the
+  unit 1 validator ran" while a 56-turn, 34-tool validator transcript
+  (`agent-af527349c6b68cfae`) sat on disk having spent $1.19. This is the
+  baseline's most expensive failure reproduced almost verbatim, in a fresh run,
+  on a worktree that deliberately did **not** carry the FR-A1.4 guard. So the
+  failure is **structural, not a one-off**: an orchestrator that loses a subagent
+  cannot tell "it never ran" from "it ran and died", because from its own vantage
+  point both look like no report arriving. Its offer to "resume the unit 1
+  validator; nothing needs redoing" would have produced a duplicate spawn.
+
+  `scripts/agent-preflight.sh validator 1 <session>` surfaced the orphan in one
+  command. This is the strongest evidence yet that FR-A1.4 has to be mechanical:
+  the run that lacked the check repeated the exact defect the check was written
+  for, while the check found it immediately.
+
+- **Environmental, and expensive:** the validator hung on
+  `mcp__playwright__browser_find` and never received a result — 409 minutes of
+  wall clock, ~6.8h, for 26 turns, ending mid-tool-call with no report. Six
+  Chrome processes were left wedged at 0% CPU while the dev server stayed healthy
+  (HTTP 200 in 3ms), so the failure was the browser session, not the app. **A
+  hung MCP call is indistinguishable from a slow subagent** from the outside,
+  which is what let it burn most of a night. Worth a wall-clock ceiling per role
+  spawn, after which the orchestrator checks liveness instead of continuing to
+  wait. Recovery: `pkill -f "[C]hrome.*playwright"`, then resume — the dev server
+  does not need restarting.
+
+- **Cost shape of a stalled run:** orchestrator cache write:read degraded to
+  **1:3** (baseline 1:4) and it took 46.6% of a partial run's cost on 17 turns.
+  Long blocking waits are exactly where the ratio goes bad, which is the premise
+  behind FR-A1.2.
+
+- **Early A2 signal, not yet scoreable:** the unit-1 validator hit **1.31
+  tools/turn** against the 1.07 baseline, and took **one** `browser_snapshot`
+  (3KB) where the baseline unit-1 validator took six (31KB). Directionally what
+  FR-A2.1 and FR-A2.2 intend. It cannot be scored against AC-A2.3/AC-A2.4 from an
+  interrupted run — a validator that died before its interactive pass has an
+  artificially low turn count.
+
+---
+
 ## 2026-07-29 — Agent Stage 1, measurement harness
 
 Not an orchestrated run: these came out of building `scripts/measure-agent-tokens.py`
