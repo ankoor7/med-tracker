@@ -48,8 +48,14 @@ cache read, so 7.3% of tokens can carry ~48% of cost. Rates in
 | Spec | Subject | Status |
 | --- | --- | --- |
 | [`trial-protocol.md`](trial-protocol.md) | Shared harness: subject, controls, isolation, sequencing | Ready |
-| [`agent-stage-2-validator-efficiency.md`](agent-stage-2-validator-efficiency.md) | Validator cost and interaction realism | Ready — **run first** |
-| [`agent-stage-1-orchestrator-efficiency.md`](agent-stage-1-orchestrator-efficiency.md) | Orchestrator cost, cache behaviour, learnings capture | Ready — run second |
+| [`agent-stage-2-validator-efficiency.md`](agent-stage-2-validator-efficiency.md) | Validator cost and interaction realism | Ready — **trial runs first** |
+| [`agent-stage-1-orchestrator-efficiency.md`](agent-stage-1-orchestrator-efficiency.md) | Orchestrator cost, cache behaviour, learnings capture | **Built, trial pending** — runs second |
+
+`agent-stage-1` is **built but unmeasured**: its FRs are landed (agent-file changes,
+`scripts/measure-agent-tokens.py`, `scripts/agent-preflight.sh`, `docs/agent-learnings.md`)
+because the measurement harness is a prerequisite for measuring either stage. Its acceptance
+criteria still need a trial run, and that run comes after A2's. See `trial-protocol.md` §5 for
+why the A2 worktree must not inherit the A1 agent-file changes.
 
 Both trials use the **same subject: Stage 25 units 1–3**, rebuilt from `a3e5ae3`. Read
 [`trial-protocol.md`](trial-protocol.md) before starting either — it carries the controls that
