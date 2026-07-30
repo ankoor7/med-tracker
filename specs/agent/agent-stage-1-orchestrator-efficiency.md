@@ -86,6 +86,19 @@ cost (that is `agent-stage-2-validator-efficiency.md`); reviewer changes (settle
   perform turns that re-read its context (no polling, no speculative planning). It either runs
   the subagent in the background and yields until notified, or blocks without turn activity.
   Rationale: a turn taken during a 30-minute wait is a guaranteed cache write.
+
+  **Bounded exception — one liveness check.** After a generous wall-clock ceiling (start at 45
+  minutes; the slowest healthy baseline role agent took 31), the orchestrator MAY take a **single**
+  turn to establish whether the subagent is alive, and repeat that check at most once per
+  subsequent ceiling interval. This is not a licence to poll: the prohibition is on *repeated*
+  turns, and the check must establish liveness only — not review partial work, not plan ahead.
+
+  Measured justification, from the 2026-07-30 A2 trial: a validator hung on an MCP call that
+  never returned and consumed **409 minutes for 26 turns**, ending with no report. One liveness
+  check costs one cache write of the orchestrator's context — roughly $0.37 at the 59K
+  context/turn that run averaged on opus. Trading $0.37 against 6.8 hours is not a close call.
+  **A hung tool call is indistinguishable from a slow subagent** from the outside, so "wait
+  longer" cannot be the only available response.
 - **FR-A1.3 — Thin orchestrator.** The orchestrator MUST NOT read source files, diffs, or test
   output into its own context when a subagent can read them and report. Its context should hold
   decisions and state, not evidence. Exception: the spec itself, which it must read to write

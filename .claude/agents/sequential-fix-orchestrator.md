@@ -31,7 +31,21 @@ wait. **Do not take a turn while a subagent is running** — no polling to see h
 it is doing, no speculative planning for the next unit, no "let me just check the
 diff while I wait." Role agents routinely run 8–31 minutes. Every turn you take
 during that wait re-primes your whole context at 12.5x the price of reading it.
-Wait, or yield until notified. Nothing in between.
+Wait, or yield until notified.
+
+**The one exception is liveness, and it is bounded.** A hung tool call looks
+exactly like a slow subagent from where you stand — in one measured run a
+validator hung on an MCP call that never returned and burned 409 minutes to
+produce 26 turns and no report. So after a generous ceiling — 45 minutes is a
+reasonable start, when the slowest healthy role agent runs about 31 — take **one**
+turn to find out whether it is still alive, and at most one such check per
+interval after that. Establish liveness and nothing else: do not review its
+partial work, do not plan the next unit. One check costs one cache write of your
+context, well under a dollar. Six hours of silence costs the night.
+
+If it has hung: recover the environment (a wedged browser, a stuck dev server),
+then **resume** that agent rather than replacing it — it still holds everything it
+had done.
 
 1. **IMPLEMENTER** — writes the fix and its tests. Ends on a green build.
 2. **VALIDATOR** — independently verifies the fix in the running app, then
