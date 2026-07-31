@@ -48,6 +48,18 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
     css: false,
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
+    // Unit tests always run **unconfigured**, whatever is in the developer's
+    // `.env.local`. Vite loads that file into `import.meta.env` for tests too, so
+    // running `pnpm local:env` used to silently flip `isBackendConfigured()` and
+    // change which branch a component rendered — a suite that passed on CI and on
+    // a fresh clone but failed on exactly the machines where the backend worked.
+    // A test that needs the configured path stubs these explicitly (see
+    // AccountPanel.test.tsx); the configured code path's real coverage is the
+    // `e2e-mocked` suite.
+    env: {
+      VITE_SUPABASE_URL: '',
+      VITE_SUPABASE_ANON_KEY: '',
+    },
     coverage: {
       provider: 'custom',
       customProviderModule: 'vitest-monocart-coverage',
