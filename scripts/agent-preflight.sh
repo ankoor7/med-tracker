@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Pre-spawn check for the sequential-fix-orchestrator (FR-A1.4).
+# Pre-spawn check for the role agents (FR-A1.4, ratchet-first per FR-A3.4).
 #
-#   ./scripts/agent-preflight.sh <role> <unit> [session-dir]   e.g. validator 2
+#   ./scripts/agent-preflight.sh <role> <unit> [session-dir]   e.g. validator unit-2
 #
 # session-dir defaults to the most recently touched session for this repo, which
 # is the run in progress. Pass it explicitly to audit an earlier run.
@@ -11,6 +11,11 @@
 # cost 3.8M tokens — more than every review pass in that run combined — because
 # the orchestrator believed a subagent "hadn't run" while its 31-minute
 # transcript sat on disk.
+#
+# The authoritative answer now comes from `.agent/units.json` (FR-A3.4): a role
+# whose entry says it ran but produced no outcome is a *resume* case, never a
+# *respawn* case. Transcript scanning stays as corroboration — it catches a role
+# that ran before the ratchet existed, or one that died before recording itself.
 #
 # Exit 0 = clear to spawn. Exit 3 = prior work found; resume or salvage it
 # instead of spawning a replacement.
@@ -24,22 +29,77 @@ if [[ -z "$ROLE" || -z "$UNIT" ]]; then
   exit 2
 fi
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# Tooling path and target-repo path are resolved independently: the loop may run
+# against a separate worktree from the one holding these scripts.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="${AGENT_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
+export AGENT_ROOT="$REPO_ROOT"
 SLUG="$(printf '%s' "$REPO_ROOT" | tr '/' '-')"
 PROJECT_DIR="$HOME/.claude/projects/$SLUG"
+UNITS_FILE="$REPO_ROOT/.agent/units.json"
 
 found=0
+verdict=""
 
-echo "=== Pre-spawn check: $ROLE / unit $UNIT ==="
+echo "=== Pre-spawn check: $ROLE / $UNIT ==="
+
+echo
+echo "--- Ratchet (authoritative) ---"
+if [[ -f "$UNITS_FILE" ]]; then
+  run_state="$(node "$SCRIPT_DIR/agent/ratchet.mjs" role-state "$UNIT" "$ROLE" 2>/dev/null || echo '')"
+  if [[ -z "$run_state" ]]; then
+    echo "!! could not read run state for $UNIT/$ROLE — inspect $UNITS_FILE by hand"
+    found=1
+  else
+    outcome="$(printf '%s' "$run_state" |
+      node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).outcome)}catch{console.log("unparseable")}})')"
+    echo "recorded outcome: $outcome"
+    case "$outcome" in
+      never-ran)
+        echo "no run recorded — the ratchet has no objection"
+        ;;
+      green)
+        echo "!! this role ALREADY COMPLETED this unit. Advance the pipeline; do not re-run it."
+        verdict="already complete"
+        found=1
+        ;;
+      hung | no-outcome)
+        echo "!! this role RAN BUT DELIVERED NOTHING. Resume that agent — it still holds its work."
+        verdict="resume (ran without delivering)"
+        found=1
+        ;;
+      bounced | stopped-at-gate)
+        echo "!! this role returned \`$outcome\`. Resume the implementer; do not spawn a duplicate."
+        verdict="resume (sent work back)"
+        found=1
+        ;;
+      *)
+        echo "!! unrecognised outcome \`$outcome\` — inspect before spawning"
+        found=1
+        ;;
+    esac
+  fi
+else
+  echo "(no .agent/units.json — falling back to transcript heuristics only)"
+fi
 
 echo
 echo "--- Working tree ---"
-if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
-  git -C "$REPO_ROOT" status --short
+# `.agent/` is excluded deliberately: the ratchet is *written during* a unit, so
+# treating its churn as abandoned work would make this alarm fire before every
+# single spawn — and an alarm that always fires is one nobody reads.
+code_changes="$(git -C "$REPO_ROOT" status --porcelain -- ':(exclude).agent' 2>/dev/null)"
+if [[ -n "$code_changes" ]]; then
+  printf '%s\n' "$code_changes"
   echo "!! Uncommitted changes present. A prior agent may have left this."
   found=1
 else
-  echo "clean"
+  echo "clean (excluding .agent/ run state)"
+fi
+state_changes="$(git -C "$REPO_ROOT" status --porcelain -- .agent 2>/dev/null)"
+if [[ -n "$state_changes" ]]; then
+  echo "run state modified (expected mid-unit):"
+  printf '%s\n' "$state_changes"
 fi
 
 echo
@@ -57,14 +117,16 @@ echo "--- Recent commits ---"
 git -C "$REPO_ROOT" log --oneline -5 2>/dev/null || echo "(no commits)"
 
 echo
-echo "--- Existing transcripts for $ROLE / unit $UNIT ---"
+echo "--- Existing transcripts for $ROLE / $UNIT (corroboration) ---"
 # Newest session first: the run in progress is the one being appended to.
 latest_session="${3:-$(ls -dt "$PROJECT_DIR"/*/ 2>/dev/null | head -1)}"
 if [[ -z "$latest_session" ]]; then
   echo "(no session directory under $PROJECT_DIR)"
 else
+  # Match both `unit-2` and `unit 2` spellings.
+  unit_pattern="${UNIT//unit-/unit *}"
   matches="$(
-    grep -ril "unit *$UNIT" "$latest_session/subagents/"*.meta.json 2>/dev/null |
+    grep -ril "$unit_pattern" "$latest_session/subagents/"*.meta.json 2>/dev/null |
       xargs -I{} grep -ril "$ROLE" {} 2>/dev/null
   )"
   if [[ -n "$matches" ]]; then
@@ -106,7 +168,7 @@ PYEOF
       echo "     \"$desc\""
     done <<<"$matches"
     echo "!! Prior transcript(s) exist. Inspect before spawning:"
-    echo "   ./scripts/measure-agent-tokens.py '$latest_session'"
+    echo "   pnpm agent:measure '$latest_session'"
     found=1
   else
     echo "none"
@@ -115,7 +177,7 @@ fi
 
 echo
 if (( found )); then
-  echo "RESULT: prior work found — resume or salvage it, do NOT spawn a replacement."
+  echo "RESULT: prior work found${verdict:+ — $verdict} — resume or salvage it, do NOT spawn a replacement."
   exit 3
 fi
 echo "RESULT: clear to spawn."
