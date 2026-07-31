@@ -56,6 +56,8 @@ Sequenced after 22–26. It depends on Stage 18's assume-taken resolution (stock
 consumption follows the same policy as adherence) and inherits Stage 25's delivery
 work for its four new reminder kinds, so it wants the P0 block landed first.
 
+| **28** | Supporting capability (not a P0/P1 line) — iCalendar `.ics` export | `stage-28-calendar-export.md` | **Draft — not ready for implementation** (blockers in its §10); unscheduled |
+
 Grouping rationale: #6 and #7 are the two "physician outputs" P0s and share the
 report/share plumbing, so they belong together (Stage 23), and both consume the
 med metadata from Stage 22 — hence 22 sequences first as a small prerequisite.
