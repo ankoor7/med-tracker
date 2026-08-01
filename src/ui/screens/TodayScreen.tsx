@@ -3,6 +3,7 @@ import {
   formatTimeWithZone,
   isoDateInZone,
   plannedSlotsAsOf,
+  sideEffectTypeOptions,
   type Medication,
   type PlannedOccurrence,
 } from '../../core';
@@ -10,6 +11,7 @@ import { useStore } from '../../store/store';
 import { Button, Card, ColorDot, Ring, Stat, UNKNOWN_MED_NAME } from '../components/ui';
 import { StatusBadge } from '../components/StatusBadge';
 import { DoseLogger, type LoggerTarget } from '../components/DoseLogger';
+import { EventLogger, type EventAttributionPrefill } from '../components/EventLogger';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useNow } from '../lib/useNow';
 import { useScheduleData } from '../lib/useScheduleData';
@@ -28,9 +30,13 @@ export function TodayScreen() {
     useScheduleData();
   const takeGroup = useStore((s) => s.takeGroup);
   const deleteLogEntry = useStore((s) => s.deleteLogEntry);
+  const eventTypes = useStore((s) => s.eventTypes);
 
   const [target, setTarget] = useState<LoggerTarget | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
+  // Stage 24 FR-24.3: the attribution a "Log side effect" action starts the
+  // event logger from. Non-null while that dialog is open.
+  const [sideEffectFor, setSideEffectFor] = useState<EventAttributionPrefill | null>(null);
 
   const today = isoDateInZone(now, zone);
   const planned = useMemo(
@@ -151,6 +157,9 @@ export function TodayScreen() {
                       medName: medById.get(occ.medId)?.name ?? UNKNOWN_MED_NAME,
                     })
                   }
+                  onLogSideEffect={() =>
+                    setSideEffectFor({ medId: occ.medId, doseLogEntryId: occ.logEntryId })
+                  }
                 />
               ))}
             </ul>
@@ -159,6 +168,17 @@ export function TodayScreen() {
       })}
 
       {target && <DoseLogger target={target} onClose={() => setTarget(null)} />}
+
+      {sideEffectFor && (
+        <EventLogger
+          title="Log side effect"
+          types={sideEffectTypeOptions(eventTypes)}
+          zone={zone}
+          initial={null}
+          prefill={sideEffectFor}
+          onClose={() => setSideEffectFor(null)}
+        />
+      )}
 
       {deleteTarget && (
         <ConfirmDialog
@@ -247,12 +267,14 @@ function OccurrenceRow({
   onLog,
   onSkip,
   onDelete,
+  onLogSideEffect,
 }: {
   occ: PlannedOccurrence;
   med: Medication | undefined;
   onLog: () => void;
   onSkip: () => void;
   onDelete: () => void;
+  onLogSideEffect: () => void;
 }) {
   return (
     <li className="flex items-center justify-between gap-2 py-2">
@@ -272,7 +294,13 @@ function OccurrenceRow({
           </span>
         )}
       </div>
-      <OccurrenceActions occ={occ} onLog={onLog} onSkip={onSkip} onDelete={onDelete} />
+      <OccurrenceActions
+        occ={occ}
+        onLog={onLog}
+        onSkip={onSkip}
+        onDelete={onDelete}
+        onLogSideEffect={onLogSideEffect}
+      />
     </li>
   );
 }
@@ -299,16 +327,27 @@ function isUnresolved(occ: PlannedOccurrence): boolean {
   return occ.status === 'upcoming' || occ.status === 'due' || occ.status === 'missed';
 }
 
+// Stage 24 FR-24.3: a side effect can be attributed to a dose the user
+// actually took and actually logged — so this needs a real entry to point
+// `doseLogEntryId` at, and the assume-taken-on-time fill-in has none. A
+// *skipped* entry is excluded too: the dose was never taken, so there is
+// nothing about it for the user to report an effect of.
+function canAttributeSideEffect(occ: PlannedOccurrence): boolean {
+  return occ.status === 'taken' && isGenuinelyLogged(occ);
+}
+
 function OccurrenceActions({
   occ,
   onLog,
   onSkip,
   onDelete,
+  onLogSideEffect,
 }: {
   occ: PlannedOccurrence;
   onLog: () => void;
   onSkip: () => void;
   onDelete: () => void;
+  onLogSideEffect: () => void;
 }) {
   const isSkipped = occ.status === 'skipped';
   const genuinelyLogged = isGenuinelyLogged(occ);
@@ -328,6 +367,15 @@ function OccurrenceActions({
           onClick={onSkip}
         >
           Skip
+        </Button>
+      )}
+      {canAttributeSideEffect(occ) && (
+        <Button
+          variant="ghost"
+          className="text-slate-400 data-[hovered]:bg-slate-700/40"
+          onClick={onLogSideEffect}
+        >
+          Log side effect
         </Button>
       )}
       {genuinelyLogged && (

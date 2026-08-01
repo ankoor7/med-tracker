@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TodayScreen } from './TodayScreen';
 import { useStore } from '../../store/store';
-import { med, settings, slot } from '../../test/fixtures';
+import { eventType, med, settings, slot } from '../../test/fixtures';
 import { withFixedClock } from '../../test/fixedClock';
 import {
   submitLogDose,
@@ -430,5 +430,116 @@ describe('TodayScreen', () => {
       const row = screen.getByText('Lamotrigine').closest<HTMLElement>('li')!;
       expect(within(row).queryByRole('button', { name: 'Skip' })).not.toBeInTheDocument();
     });
+  });
+});
+
+// ---- Stage 24 FR-24.3: "Log side effect" from a logged dose row -------------
+//
+// Attribution is the user's *stated* association with that dose. Nothing here
+// asserts, or lets the app assert, that the dose caused anything.
+
+const DROWSINESS = eventType({
+  id: 'drowsy',
+  name: 'Drowsiness',
+  category: 'side-effect',
+  properties: [{ id: 'severity', name: 'Severity', type: 'scale', min: 1, max: 5 }],
+});
+
+/** Log the 08:00 dose for real, then return its log entry. */
+function logTheMorningDose() {
+  fireEvent.click(screen.getByRole('button', { name: 'Log' }));
+  submitLogDose();
+  return activeLog()[0]!;
+}
+
+describe('TodayScreen — log a side effect from a dose (Stage 24)', () => {
+  it('pre-fills the medication and the occurrence, and the saved event carries both ids (AC2)', () => {
+    useStore.setState({ eventTypes: [DROWSINESS], eventInstances: [] });
+    render(<TodayScreen />);
+    const entry = logTheMorningDose();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Log side effect' }));
+    const dialog = screen.getByRole('dialog');
+
+    // Pre-filled: the dose's medication, and the specific occurrence.
+    expect(within(dialog).getByLabelText('Attributed to')).toHaveTextContent('Lamotrigine');
+    expect(within(dialog).getByTestId('attributed-dose')).toHaveTextContent(/Lamotrigine dose/);
+    // Offered the side-effect type, already selected (the only one marked).
+    expect(within(dialog).getByLabelText('Event type')).toHaveTextContent('Drowsiness');
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    const logged = useStore.getState().eventInstances.filter((e) => !e.deleted);
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.typeId).toBe('drowsy');
+    expect(logged[0]!.medId).toBe('a');
+    expect(logged[0]!.doseLogEntryId).toBe(entry.id);
+  });
+
+  it('the dialog states an association, never a cause', () => {
+    useStore.setState({ eventTypes: [DROWSINESS], eventInstances: [] });
+    render(<TodayScreen />);
+    logTheMorningDose();
+    fireEvent.click(screen.getByRole('button', { name: 'Log side effect' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(/attributed to/i);
+    expect(dialog.textContent).not.toMatch(/caused by|linked to|due to|because of|side effect of/i);
+  });
+
+  it('is not offered before the dose is logged, nor on an assumed-taken row', () => {
+    useStore.setState({ eventTypes: [DROWSINESS] });
+    const { unmount } = render(<TodayScreen />);
+    expect(screen.queryByRole('button', { name: 'Log side effect' })).not.toBeInTheDocument();
+    unmount();
+
+    // Assume-taken-on-time fills the row in with no real entry to point at.
+    useStore.setState({ settings: settings({ zone: ZONE, assumeTakenOnTime: true }) });
+    render(<TodayScreen />);
+    expect(screen.getAllByText(/assumed/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Log side effect' })).not.toBeInTheDocument();
+  });
+
+  it('is not offered on a skipped dose — nothing was taken to report an effect of', () => {
+    useStore.setState({ eventTypes: [DROWSINESS] });
+    render(<TodayScreen />);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip' }));
+    const dialog = screen.getByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: /mark skipped/i }));
+
+    expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Log side effect' })).not.toBeInTheDocument();
+  });
+
+  it('a user with no event types yet gets a way to create one, not an empty picker', () => {
+    useStore.setState({ eventTypes: [], eventInstances: [] });
+    render(<TodayScreen />);
+    logTheMorningDose();
+    fireEvent.click(screen.getByRole('button', { name: 'Log side effect' }));
+
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).queryByLabelText('Event type')).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create type' }));
+
+    const created = useStore.getState().eventTypes.filter((t) => !t.deleted);
+    expect(created).toHaveLength(1);
+    expect(created[0]!.name).toBe('Side effect');
+    expect(created[0]!.category).toBe('side-effect');
+    // …and the dialog is now a working logger with that type selected.
+    expect(within(dialog).getByLabelText('Event type')).toHaveTextContent('Side effect');
+  });
+
+  it('falls back to every live type when the user has none marked as side effects', () => {
+    useStore.setState({
+      eventTypes: [eventType({ id: 'seizure', name: 'Seizure' })],
+      eventInstances: [],
+    });
+    render(<TodayScreen />);
+    logTheMorningDose();
+    fireEvent.click(screen.getByRole('button', { name: 'Log side effect' }));
+
+    expect(within(screen.getByRole('dialog')).getByLabelText('Event type')).toHaveTextContent(
+      'Seizure',
+    );
   });
 });

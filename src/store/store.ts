@@ -22,6 +22,7 @@ import {
   buildScheduleSnapshot,
   type DoseLogEntry,
   type DoseOverride,
+  type EventCategory,
   type EventInstance,
   type EventPropertyDef,
   type EventPropertyValue,
@@ -106,6 +107,10 @@ export interface EventTypeInput {
   color: string;
   properties: EventPropertyDef[];
   notes?: string;
+  // Stage 24 FR-24.1. Optional: absent means general/flare, which is what every
+  // pre-Stage-24 type is, so an editor that never touches the control leaves
+  // the stored type byte-identical.
+  category?: EventCategory;
 }
 
 export interface EventInstanceInput {
@@ -113,6 +118,11 @@ export interface EventInstanceInput {
   occurredAt: Instant;
   values: Record<string, EventPropertyValue>;
   note?: string;
+  // The user's stated attribution (Stage 24 FR-24.2). Both optional; validated
+  // by `core/sideEffects.ts` at the point of entry (the UI gates save on it,
+  // the same way it gates on `validateEventInstanceValues`).
+  medId?: string;
+  doseLogEntryId?: string;
 }
 
 interface StoreState {
@@ -854,7 +864,9 @@ export const useStore = create<StoreState>((set, get) => {
 
     addEventType: (input) => {
       const now = Date.now();
-      const type: EventType = stamp({ id: newId(), updatedAt: now, ...input }, now);
+      // Spread first, stamped fields last — a key added to `EventTypeInput`
+      // later must never be able to overwrite the generated id or `updatedAt`.
+      const type: EventType = stamp({ ...input, id: newId(), updatedAt: now }, now);
       set((s) => ({ eventTypes: [...s.eventTypes, type] }));
       persistUpsert('eventTypes', type);
       return type;
@@ -892,16 +904,18 @@ export const useStore = create<StoreState>((set, get) => {
     logEvent: (input) => {
       const now = Date.now();
       const { settings } = get();
+      // Spread the input rather than copying it field-by-field: the enumerated
+      // form silently dropped every field added to `EventInstanceInput` after
+      // it was written (Stage 24's `medId`/`doseLogEntryId` were lost on the
+      // way to IndexedDB even though the types carried them).
+      //
+      // The spread goes **first** so the app-stamped fields always win. Putting
+      // it last would be the mirror image of the bug just fixed: a key added to
+      // `EventInstanceInput` later would silently override the app's own
+      // stamping. `zone` in particular is the zone in effect at log time and
+      // must always come from settings — a caller must never be able to set it.
       const instance: EventInstance = stamp(
-        {
-          id: newId(),
-          typeId: input.typeId,
-          occurredAt: input.occurredAt,
-          zone: settings.zone,
-          values: input.values,
-          note: input.note,
-          updatedAt: now,
-        },
+        { ...input, id: newId(), zone: settings.zone, updatedAt: now },
         now,
       );
       set((s) => ({ eventInstances: [...s.eventInstances, instance] }));

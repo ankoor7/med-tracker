@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { sideEffectsForMedication, validateEventAttribution } from './sideEffects';
+import {
+  sideEffectTypeOptions,
+  sideEffectsForMedication,
+  validateEventAttribution,
+} from './sideEffects';
 import { eventInstance, eventType, logEntry, med } from '../test/fixtures';
 import type { Dataset } from './types';
 
@@ -274,5 +278,53 @@ describe('sideEffectsForMedication (FR-24.5, AC5)', () => {
   it('returns an empty list for a medication with nothing attributed to it', () => {
     const data = resolverData({ eventInstances: oneAttributedToLam() });
     expect(sideEffectsForMedication(data, 'lev')).toEqual([]);
+  });
+});
+
+describe('sideEffectTypeOptions (FR-24.3 picker)', () => {
+  const drowsy = eventType({ id: 'drowsy', name: 'Drowsiness', category: 'side-effect' });
+  const rash = eventType({ id: 'rash', name: 'Rash', category: 'side-effect' });
+  const seizure = eventType({ id: 'seizure', name: 'Seizure' }); // no category = general/flare
+
+  it('offers only the types marked as side effects when at least one is marked', () => {
+    expect(sideEffectTypeOptions([seizure, drowsy, rash]).map((t) => t.id)).toEqual([
+      'drowsy',
+      'rash',
+    ]);
+  });
+
+  it('falls back to every live type when nothing is marked, so the affordance is never a dead end', () => {
+    const nausea = eventType({ id: 'nausea', name: 'Nausea', category: 'flare' });
+    expect(sideEffectTypeOptions([seizure, nausea]).map((t) => t.id)).toEqual([
+      'seizure',
+      'nausea',
+    ]);
+  });
+
+  it('excludes deleted and archived types from both the marked list and the fallback', () => {
+    const archivedSideEffect = eventType({
+      id: 'old',
+      name: 'Old',
+      category: 'side-effect',
+      archived: true,
+    });
+    const deletedSideEffect = eventType({
+      id: 'gone',
+      name: 'Gone',
+      category: 'side-effect',
+      deleted: true,
+    });
+    expect(
+      sideEffectTypeOptions([archivedSideEffect, deletedSideEffect, drowsy]).map((t) => t.id),
+    ).toEqual(['drowsy']);
+
+    // With every marked type out of play, the fallback also skips them.
+    expect(sideEffectTypeOptions([archivedSideEffect, deletedSideEffect, seizure])).toEqual([
+      seizure,
+    ]);
+  });
+
+  it('returns nothing when the user has no live types at all', () => {
+    expect(sideEffectTypeOptions([])).toEqual([]);
   });
 });

@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useStore } from './store';
+import { useStore, type EventInstanceInput } from './store';
 import { LocalRepository, SteadyDoseDB } from './localRepository';
 import { setRepository, nullRepository } from './repository';
 import { isoDateInZone, resolveScheduleAsOf, resolveWallTimeToInstant } from '../core';
@@ -517,6 +517,106 @@ describe('store + LocalRepository', () => {
     // Archiving is reversible.
     useStore.getState().setEventTypeArchived(type.id, false);
     expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.archived).toBe(false);
+  });
+
+  // Stage 24 (FR-24.2/AC1). `logEvent` used to build the EventInstance
+  // field-by-field, so any field added to `EventInstanceInput` later was
+  // silently dropped on the way to IndexedDB — the entity type compiled, the
+  // UI compiled, and the attribution just wasn't there after a reload. This
+  // asserts the round-trip at store level so a re-introduction of that drop
+  // fails here and not only in a screen test.
+  it('an attributed event survives logEvent -> IndexedDB -> rehydrate (Stage 24)', async () => {
+    await useStore.getState().hydrate();
+    useStore.setState({ medications: [], slots: [], eventTypes: [], eventInstances: [] });
+
+    const med = useStore.getState().addMedication({ ...MED_INPUT, name: 'Levetiracetam' });
+    useStore.getState().addSlot({ time: '08:00', items: [{ medId: med.id, dose: 500 }] });
+    const slotId = useStore.getState().slots[0]!.id;
+    const scheduledInstant = Date.UTC(2026, 5, 18, 7, 0);
+    const dose = useStore.getState().logDose({
+      slotId,
+      medId: med.id,
+      scheduledInstant,
+      dose: 500,
+      actualInstant: scheduledInstant,
+    });
+
+    const type = useStore.getState().addEventType({
+      name: 'Drowsiness',
+      color: '#9333ea',
+      properties: [],
+      category: 'side-effect',
+    });
+    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.category).toBe(
+      'side-effect',
+    );
+
+    const inst = useStore.getState().logEvent({
+      typeId: type.id,
+      occurredAt: scheduledInstant + 3600_000,
+      values: {},
+      medId: med.id,
+      doseLogEntryId: dose.id,
+    });
+    // Present in the returned entity, not merely accepted by the input type.
+    expect(inst.medId).toBe(med.id);
+    expect(inst.doseLogEntryId).toBe(dose.id);
+    // The store still stamps the zone itself; a caller cannot supply one.
+    expect(inst.zone).toBe(useStore.getState().settings.zone);
+
+    await reloadFromFreshRepo();
+
+    const reloaded = useStore.getState().eventInstances.find((e) => e.id === inst.id);
+    expect(reloaded?.medId).toBe(med.id);
+    expect(reloaded?.doseLogEntryId).toBe(dose.id);
+    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.category).toBe(
+      'side-effect',
+    );
+  });
+
+  it('an unattributed event round-trips with the attribution fields absent (Stage 24 AC3)', async () => {
+    await useStore.getState().hydrate();
+    const type = useStore
+      .getState()
+      .addEventType({ name: 'Seizure', color: '#9333ea', properties: [] });
+    const inst = useStore
+      .getState()
+      .logEvent({ typeId: type.id, occurredAt: Date.now(), values: {} });
+
+    await reloadFromFreshRepo();
+
+    const reloaded = useStore.getState().eventInstances.find((e) => e.id === inst.id);
+    expect(reloaded).toBeTruthy();
+    expect(reloaded?.medId).toBeUndefined();
+    expect(reloaded?.doseLogEntryId).toBeUndefined();
+    expect(useStore.getState().eventTypes.find((t) => t.id === type.id)?.category).toBeUndefined();
+  });
+
+  // `logEvent` spreads `input` *before* the app-stamped fields (`id`, `zone`,
+  // `updatedAt`) precisely so a caller can never override them — the mirror
+  // image of the field-drop bug above. `EventInstanceInput` doesn't declare
+  // any of those three names today, so an ordinary call can't exercise this;
+  // the cast below simulates a future/misbehaving caller supplying one
+  // anyway, to prove the stamping wins regardless of spread contents.
+  it('logEvent never lets the input override the app-stamped id/zone/updatedAt', async () => {
+    await useStore.getState().hydrate();
+    const type = useStore
+      .getState()
+      .addEventType({ name: 'Seizure', color: '#9333ea', properties: [] });
+
+    const spoofed = {
+      typeId: type.id,
+      occurredAt: Date.now(),
+      values: {},
+      id: 'spoofed-id',
+      zone: 'Spoofed/Zone',
+      updatedAt: 1,
+    } as unknown as EventInstanceInput;
+
+    const inst = useStore.getState().logEvent(spoofed);
+    expect(inst.id).not.toBe('spoofed-id');
+    expect(inst.zone).toBe(useStore.getState().settings.zone);
+    expect(inst.updatedAt).not.toBe(1);
   });
 
   it('emits one regimen change per meaningful edit and none for a no-op (Stage 16 AC1)', async () => {

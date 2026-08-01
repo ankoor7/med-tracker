@@ -8,7 +8,7 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventsScreen } from './EventsScreen';
 import { useStore } from '../../store/store';
-import { eventType, eventInstance, settings } from '../../test/fixtures';
+import { eventType, eventInstance, logEntry, med, settings } from '../../test/fixtures';
 import { openDeleteConfirm, cancelDialog } from '../../test/doseLogDialogHelpers';
 
 const ZONE = 'Europe/London';
@@ -37,6 +37,12 @@ function seed() {
         values: { severity: 3, duration: 90 },
       }),
     ],
+    medications: [
+      med({ id: 'lam', name: 'Lamotrigine' }),
+      med({ id: 'lev', name: 'Levetiracetam' }),
+      med({ id: 'old', name: 'Retired med', active: false }),
+    ],
+    doseLog: [logEntry({ id: 'dose-1', medId: 'lam', actualInstant: NOW - 7200_000, zone: ZONE })],
     settings: settings({ zone: ZONE }),
   });
 }
@@ -229,5 +235,122 @@ describe('Events tab — logging instances', () => {
     render(<EventsScreen />);
     expect(screen.getByText('Unknown type')).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/seed-etype-ghost/);
+  });
+});
+
+// ---- Stage 24: side-effect category + attribution ---------------------------
+//
+// Attribution is the user's *stated* association. These tests assert the
+// association is captured and survives a reopen — never that the app derives,
+// suggests or endorses one.
+
+/** Pick an option from an open React Aria `Select` by its accessible name. */
+async function chooseOption(dialog: HTMLElement, selectLabel: string, optionName: string) {
+  fireEvent.click(within(dialog).getByLabelText(selectLabel));
+  fireEvent.click(await screen.findByRole('option', { name: optionName }));
+}
+
+describe('Events tab — side-effect category (Stage 24 FR-24.1)', () => {
+  it('marks a new type as a side effect, and the choice is stored (AC1)', async () => {
+    vi.useRealTimers();
+    render(<EventsScreen />);
+    const dialog = openTypeEditor('New type');
+    fireEvent.change(within(dialog).getByLabelText('Event type name'), {
+      target: { value: 'Drowsiness' },
+    });
+    await chooseOption(dialog, 'Event kind', 'Side effect');
+    saveDialog(dialog);
+
+    const created = useStore.getState().eventTypes.find((t) => t.name === 'Drowsiness');
+    expect(created?.category).toBe('side-effect');
+    vi.useFakeTimers();
+  });
+
+  it('leaves an existing type without a category untouched when the control is not used', () => {
+    // Absence is the default (general/flare), not "unknown" — opening and
+    // saving an old type must not silently stamp a category onto it.
+    expect(useStore.getState().eventTypes.find((t) => t.id === 'et1')?.category).toBeUndefined();
+    render(<EventsScreen />);
+    fireEvent.click(within(typeRow('Seizure')).getByRole('button', { name: 'Edit' }));
+    saveDialog(screen.getByRole('dialog'));
+
+    expect(useStore.getState().eventTypes.find((t) => t.id === 'et1')?.category).toBeUndefined();
+  });
+
+  it('reopening a side-effect type shows it still marked as one', () => {
+    useStore.setState({
+      eventTypes: [eventType({ id: 'et1', name: 'Drowsiness', category: 'side-effect' })],
+    });
+    render(<EventsScreen />);
+    fireEvent.click(within(typeRow('Drowsiness')).getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Side effect');
+  });
+});
+
+describe('Events tab — attribution (Stage 24 FR-24.2)', () => {
+  it('logs an event attributed to a medication, and reopening shows the attribution retained (AC1)', async () => {
+    vi.useRealTimers();
+    const dialog = openLogEvent();
+    // The picker starts unattributed — no medication is assumed for the user.
+    expect(within(dialog).getByLabelText('Attributed to')).toHaveTextContent('No medication');
+
+    await chooseOption(dialog, 'Attributed to', 'Levetiracetam');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    const created = useStore.getState().eventInstances.find((e) => e.id !== 'ei1' && !e.deleted)!;
+    expect(created.medId).toBe('lev');
+    expect(created.doseLogEntryId).toBeUndefined();
+
+    // Reopen the saved instance: the attribution is still there. History is
+    // newest-first and the new instance is "now", so it is the first row.
+    const newest = within(historyCard()).getAllByText('Seizure')[0]!.closest<HTMLElement>('li')!;
+    fireEvent.click(within(newest).getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('Levetiracetam');
+    vi.useFakeTimers();
+  });
+
+  it('logging with no attribution stays a one-step flow and stores no medication (flare-up path)', () => {
+    const dialog = openLogEvent();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    const created = useStore.getState().eventInstances.find((e) => e.id !== 'ei1' && !e.deleted)!;
+    expect(created.medId).toBeUndefined();
+    expect(created.doseLogEntryId).toBeUndefined();
+  });
+
+  it('offers active medications, and keeps a deactivated one only while it is the current attribution', async () => {
+    vi.useRealTimers();
+    const dialog = openLogEvent();
+    fireEvent.click(within(dialog).getByLabelText('Attributed to'));
+    const names = (await screen.findAllByRole('option')).map((o) => o.textContent);
+    expect(names).toEqual(['No medication', 'Lamotrigine', 'Levetiracetam']);
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+    vi.useFakeTimers();
+  });
+
+  it('the attribution copy states an association and never a cause', () => {
+    const dialog = openLogEvent();
+    expect(dialog).toHaveTextContent(/attributed to/i);
+    expect(dialog.textContent).not.toMatch(/caused by|linked to|due to|because of/i);
+  });
+
+  it('blocks Save when the attributed medication no longer resolves (core validation surfaces here)', () => {
+    useStore.setState({
+      eventInstances: [
+        eventInstance({
+          id: 'ei1',
+          typeId: 'et1',
+          occurredAt: NOW - 3600_000,
+          zone: ZONE,
+          values: { severity: 3, duration: 90 },
+          medId: 'ghost',
+        }),
+      ],
+    });
+    render(<EventsScreen />);
+    fireEvent.click(within(historyRow('Seizure')).getByRole('button', { name: 'Edit' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog).toHaveTextContent(/no longer exists/i);
+    expect(within(dialog).getByRole('button', { name: 'Save' })).toBeDisabled();
   });
 });

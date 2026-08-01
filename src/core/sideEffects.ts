@@ -14,7 +14,7 @@
 // returns a list of human-readable messages (empty = valid) and never
 // originates a value. No React/store/DOM imports.
 
-import type { Dataset, EventInstance, Instant } from './types';
+import type { Dataset, EventInstance, EventType, Instant } from './types';
 
 const live = (r: { deleted?: boolean }) => !r.deleted;
 
@@ -121,4 +121,29 @@ export function sideEffectsForMedication(
         (window === undefined || (inst.occurredAt >= window.from && inst.occurredAt < window.to)),
     )
     .sort((a, b) => b.occurredAt - a.occurredAt || a.id.localeCompare(b.id));
+}
+
+/**
+ * The event types to offer when the user starts from "Log side effect" on a
+ * dose (FR-24.3): the live (non-deleted, non-archived) types marked
+ * `category: 'side-effect'`.
+ *
+ * **The fallback is the point.** `category` is optional and absent means
+ * general/flare, so a user who has never opened the type editor's category
+ * control has *no* side-effect types — and filtering strictly would hand them
+ * an empty picker, i.e. a dead end reached from a button that promised
+ * otherwise. When nothing is marked, every live type is offered instead: a
+ * general "Nausea" type is still the right thing to record, and the
+ * attribution — not the type's category — is what makes the entry a stated
+ * side effect. Once the user marks even one type, the picker narrows to the
+ * marked ones.
+ *
+ * (A dataset with no live types at all yields `[]`; the caller owns that empty
+ * state — see `ui/components/EventLogger.tsx`, which offers to create a type
+ * rather than showing an empty picker.)
+ */
+export function sideEffectTypeOptions(types: EventType[]): EventType[] {
+  const selectable = types.filter((t) => live(t) && !t.archived);
+  const marked = selectable.filter((t) => t.category === 'side-effect');
+  return marked.length > 0 ? marked : selectable;
 }

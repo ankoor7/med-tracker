@@ -10,20 +10,26 @@
 // tech without blocking submission (the editor keeps its own `canSave` gate).
 
 import {
+  Button as RACButton,
   DateField as RACDateField,
   DateInput,
   DateSegment,
   FieldError,
   Input,
   Label,
+  ListBox,
+  ListBoxItem,
   NumberField as RACNumberField,
+  Popover,
+  Select,
+  SelectValue,
   Text,
   TextField as RACTextField,
   TimeField as RACTimeField,
   type DateValue,
   type TimeValue,
 } from 'react-aria-components';
-import { inputClass } from './ui';
+import { ColorDot, inputClass } from './ui';
 
 // `toTimeValue`/`fromTimeValue` (./timeValue) and `toDateValue`/`fromDateValue`
 // (./dateValue) live in their own modules so this module exports components
@@ -201,5 +207,69 @@ export function DateField({
     >
       <SegmentedFieldBody label={label} hint={hint} />
     </RACDateField>
+  );
+}
+
+const selectTriggerClass =
+  'flex w-full items-center justify-between gap-2 rounded-xl border border-white/10 bg-slate-950/60 px-3 py-2 text-left text-sm text-slate-100 outline-none data-[focus-visible]:border-accent-muted data-[hovered]:border-white/20 disabled:opacity-50';
+const selectPopoverClass =
+  'w-[--trigger-width] overflow-auto rounded-xl border border-white/10 bg-slate-900/95 p-1 shadow-soft backdrop-blur-md';
+const selectItemClass =
+  'flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm outline-none data-[focused]:bg-accent/15 data-[selected]:bg-accent/10';
+
+/** One choice in a `ChoiceSelect`; `color` renders a leading `ColorDot`. */
+export interface SelectChoice {
+  id: string;
+  name: string;
+  color?: string;
+}
+
+/**
+ * The themed React Aria `Select` the app uses for every short fixed-vocabulary
+ * picker: property type, event type, and (Stage 24 FR-24.2) the medication an
+ * event is attributed to. The event-type and medication pickers rendered
+ * character-identical `Select`/`Popover`/`ListBox` trees that differed only in
+ * their items, so they are one component here rather than three copies.
+ *
+ * Selection is a plain id; `''` means "nothing selected" and shows the
+ * trigger's placeholder.
+ */
+export function ChoiceSelect({
+  'aria-label': ariaLabel,
+  choices,
+  selectedId,
+  isDisabled = false,
+  onChange,
+}: {
+  'aria-label': string;
+  choices: SelectChoice[];
+  selectedId: string;
+  isDisabled?: boolean;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <Select
+      aria-label={ariaLabel}
+      selectedKey={selectedId || null}
+      isDisabled={isDisabled}
+      onSelectionChange={(key) => onChange(String(key))}
+    >
+      <RACButton className={selectTriggerClass}>
+        <SelectValue />
+        <span aria-hidden className="text-slate-400">
+          ▾
+        </span>
+      </RACButton>
+      <Popover className={selectPopoverClass}>
+        <ListBox items={choices}>
+          {(choice) => (
+            <ListBoxItem id={choice.id} textValue={choice.name} className={selectItemClass}>
+              {choice.color !== undefined && <ColorDot color={choice.color} />}
+              {choice.name}
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </Popover>
+    </Select>
   );
 }
