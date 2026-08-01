@@ -1,3 +1,97 @@
+# Handoff — P0 track, Stage 24 (in progress)
+
+_Updated 2026-08-01. Branch: `claude/p0-feature-stages-ekntci` (pushed, remote
+level at `d860637`). Session stopped by the user mid-Stage-24. Read this section
+first; the older Stage-18/22/23 history follows._
+
+## Where Stage 24 actually is
+
+| Unit | What                                                                     | Commit    | State                                       |
+| ---- | ------------------------------------------------------------------------ | --------- | ------------------------------------------- |
+| U1   | Core types + FR-24.4 validation + FR-24.5 `sideEffectsForMedication`     | `7acba36` | **Done** — implemented, validated, reviewed |
+| U2   | `cloudRecord` mapping, migration `0011`, pgTAP, export/import round-trip | `3cc50fa` | **Done** — implemented, validated, reviewed |
+| U3   | UI: type category, logger attribution, "Log side effect" from a dose row | `d860637` | **UNFINISHED — do not trust**               |
+| U4   | Stage 23 pre-visit summary hook (FR-24.7 / AC7)                          | —         | **Not started**                             |
+
+Tree is clean; typecheck clean; **668 tests / 52 files green** (baseline was 609).
+
+### U3 is committed but not finished
+
+`d860637` is a deliberate WIP commit made to preserve work before the container
+was reclaimed. Its message lists the gaps; the important ones:
+
+- The `EventLogger` extraction landed **after** the validator signed off the live
+  flows, so **U3 has not been re-validated in the running app.** Re-check the
+  "Log side effect" path from a dose row and the `FirstTypePrompt` first-run path
+  before trusting it.
+- The **fallow gate was mid-clear**: `ValueInput`, `TodayScreen`, and four
+  test-file clone groups were still outstanding. The commit went through the
+  pre-commit hook without being blocked, but that is not the same as the
+  reviewer's findings having been cleared — they were not confirmed.
+- **No reviewer pass on U3.** A `stamp()` precedence sweep across all callers was
+  requested and never reported back (see below).
+- When deduping those clone groups, do not weaken what AC1/AC2 prove — near-identical
+  tests may pin different regressions.
+
+### Findings from this session worth keeping
+
+- **`validate_record` is re-declared in full by each migration.** The authoritative
+  body was `0010`, not `0004`. `0011` re-declares it; it was diffed against `0010`
+  and differs only in the two intended additions. Any future migration must do the
+  same or it will silently revert validator logic.
+- **SQL `NULL not in (...)` evaluates to `NULL`, which `if` treats as false.** A
+  first draft of the `category` check copied the `regimenChange.kind` idiom and
+  would have let JSON `category: null` pass the server while TS rejected it.
+  Fixed with `jsonb_typeof(...) is distinct from 'string'`. Neither vitest nor
+  (here) pgTAP would have caught it — only static review did.
+- **`stamp()` spread order was inverted** to `{ ...input, id, zone, updatedAt }` so
+  a caller cannot override the app's own stamping. This is a precedence change on a
+  **shared helper**: any caller that passed an explicit `updatedAt` and silently won
+  now silently loses. **The all-callers sweep was requested but never reported — do
+  it before trusting U3.**
+- **`sideEffectsForMedication` does not re-check that its `medId` still resolves** —
+  that is call-site discipline. **U4 must drive its grouping from
+  `dataset.medications.filter(live)`**, or a side effect attributed to a deleted
+  medication can surface in the clinician-facing pre-visit summary.
+- **Spec §7 Q1 is settled and struck in the spec:** `validate_record` is `immutable`
+  and sees one record at a time with no cross-record lookup, so hard-rejecting a
+  dangling `medId` is not implementable in the single-table design. Server accepts
+  optional strings; the client resolver is authoritative.
+
+### Environment gotchas specific to the cloud container
+
+- **No Docker.** `pnpm local:up/reset/env`, `pnpm db:test` (pgTAP), and `pnpm test:e2e`
+  cannot run. The app runs local-first (no `VITE_SUPABASE_*`), which is fine for UI
+  validation. **The `0011` pgTAP suite is written but has never been executed** —
+  CI's `db-tests` job is its first real run. AC6's pgTAP half is unverified.
+- **Playwright browser mismatch.** The repo pins `@playwright/test` ^1.61 (browser
+  build 1228); the image ships 1194, so `pnpm test:e2e:mocked` failed 4/4 on a clean
+  tree. Fixed by symlinking `/opt/pw-browsers/chromium-1228` and
+  `chromium_headless_shell-1228` onto the 1194 builds — then 4/4 passed. **This is
+  environment-side and does not survive a new container; redo it, and do not run
+  `playwright install` or edit the Playwright config.**
+- **Agent spawns are forced asynchronous here.** `run_in_background: false` is not
+  honoured, so an orchestrator's turn ends with its subagent still running. The loop
+  still works — one spawn per turn, resume on completion — but it needs an external
+  nudge each cycle. Never have two roles in flight at once; the validator mutates the
+  working tree.
+
+### Next steps, in order
+
+1. Re-validate and review U3, clear the remaining fallow findings, and replace
+   `d860637`'s WIP status with a proper reviewed commit (or a follow-up commit).
+2. Run the `stamp()` all-callers sweep.
+3. U4 — the Stage 23 summary hook (FR-24.7 / AC7), grouping from live medications.
+4. Update `specs/p0-feature-audit.md` (Stage 24 → DONE + sha, P0 #5 → ✅) and the
+   spec Status field.
+5. Then **Stage 25** (reminder reliability) and **Stage 26** (trust/transparency).
+   Note for 25: AC1/AC2 need a real server-sent Web Push and a Supabase subscription
+   row, so they are **not verifiable without Docker**; the pure-core half (FR-25.3
+   escalation, FR-25.7 prefs, FR-25.8 assume-taken authority) is. Stage 26 is fully
+   doable offline.
+
+---
+
 # Handoff — Stage 18 (UX hardening)
 
 _Updated 2026-07-25. Branch: `stage-18-ux-hardening`. Two tracks now live in
