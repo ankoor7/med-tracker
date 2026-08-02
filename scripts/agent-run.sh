@@ -228,5 +228,13 @@ log "run finished after $spawns spawn(s)"
 node "$SCRIPT_DIR/agent/run-report.mjs" --digest > "$REPO_ROOT/.agent/run-digest.md" 2>/dev/null &&
   log "wrote .agent/run-digest.md — feed it to the synthesis pass (pnpm agent:report)"
 
+# The doctrine audit (FR-A5.2) rides the same moment and the same inputs: which
+# rules fired, which were violated, which never engaged. Appending it here is what
+# gives FR-A5.3's pruning a run-over-run record to work from.
+if [[ -f "$REPO_ROOT/docs/agent-doctrine-ledger.md" ]]; then
+  node "$SCRIPT_DIR/agent/doctrine.mjs" audit --run "$(basename "$REPO_ROOT")-$(date +%Y%m%dT%H%M)" --append \
+    >/dev/null 2>&1 && log "appended the doctrine audit to docs/agent-doctrine-ledger.md"
+fi
+
 $RATCHET status
 exit 0

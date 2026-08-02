@@ -18,6 +18,9 @@ import {
   writeUnitsFixture,
 } from './fixture.mjs';
 import { collect, detectPatterns, digest, integrityFlags } from '../run-report.mjs';
+import { appendVerdict } from '../rubric.mjs';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 let root;
 beforeEach(() => {
@@ -214,6 +217,77 @@ describe('observability defects (AC-A4.7 gate)', () => {
     const md = digest(collect(root));
     expect(md).toMatch(/## Observability defects/);
     expect(md).toMatch(/unit-1 is committed but its learnings are one-sided/);
+  });
+});
+
+describe('doctrine audit and rubric verdicts in the digest (FR-A5.2, FR-A5.5)', () => {
+  const ledger = [
+    '# Ledger',
+    '',
+    '## Rules',
+    '',
+    '| id | section | anchor | class | provenance | date | status |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| D-01 | Core loop | Run the pre-spawn check | safety-critical | 2026-07-28 baseline | 2026-07-29 | active |',
+    '| D-02 | Core loop | Delegate reading | normal | prior | 2026-07-25 | active |',
+    '',
+    '## Audits',
+    '',
+  ].join('\n');
+
+  const writeLedger = () => {
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'agent-doctrine-ledger.md'), ledger);
+  };
+
+  it("classifies rules from this run's learnings and names the violated ones", () => {
+    writeLedger();
+    cli(root, [
+      'learn',
+      '--unit',
+      'unit-1',
+      '--kind',
+      'doctrine-gap',
+      '--rule',
+      'D-01',
+      '--evidence',
+      'Spawned a second validator for unit-1 while agent-af527349 sat on disk',
+      '--action',
+      'Run scripts/agent-preflight.sh before every spawn',
+    ]);
+    const data = collect(root);
+    expect(data.doctrine.counts).toMatchObject({ violated: 1, dormant: 1, fired: 0 });
+
+    const md = digest(data);
+    expect(md).toMatch(/## Doctrine audit/);
+    expect(md).toMatch(/\*\*D-01\*\* \("Run the pre-spawn check"\)/);
+  });
+
+  it('warns when nothing fired, because that alone makes every rule look prunable', () => {
+    writeLedger();
+    const md = digest(collect(root));
+    expect(md).toMatch(/No `doctrine-fired` learnings this run/);
+    expect(md).toMatch(/failure-only record marks the doctrine's best rules for removal/);
+  });
+
+  it('stays silent about doctrine in a repo with no ledger', () => {
+    const data = collect(root);
+    expect(data.doctrine).toBe(null);
+    expect(digest(data)).not.toMatch(/## Doctrine audit/);
+  });
+
+  it('tallies rubric verdicts per dimension and names what bounced', () => {
+    appendVerdict(root, {
+      unit: 'unit-1',
+      role: 'validator',
+      scores: { correctness: 'pass', 'test-honesty': 'fail', fit: 'pass', 'ux-clarity': 'n/a' },
+      bounce: true,
+      bounce_dimensions: ['test-honesty'],
+    });
+    const md = digest(collect(root));
+    expect(md).toMatch(/## Rubric verdicts/);
+    expect(md).toMatch(/\| test-honesty \| 0 \| 1 \| 0 \|/);
+    expect(md).toMatch(/`unit-1` validator bounced on \*\*test-honesty\*\*/);
   });
 });
 

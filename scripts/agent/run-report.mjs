@@ -19,6 +19,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { loadUnits, readLearnings, readRunLog } from './state.mjs';
+import { classifyRules, loadLedger, pruneCandidates } from './doctrine.mjs';
+import { DIMENSION_KEYS, readVerdicts, tallyVerdicts } from './rubric.mjs';
 
 const argv = process.argv.slice(2);
 const has = (f) => argv.includes(`--${f}`);
@@ -86,7 +88,43 @@ export function collect(root) {
     patterns: detectPatterns(perUnit, events, learnings),
     integrity: integrityFlags(perUnit, events, parseErrors),
     learnings,
+    doctrine: doctrineAudit(root, learnings),
+    verdicts: verdictSummary(root),
   };
+}
+
+/**
+ * The FR-A5.2 audit, computed here because it shares this pass's inputs exactly:
+ * one read of `learnings.jsonl`, no transcripts, no model. The synthesis agent
+ * gets the classification as a fact and spends its judgement on what to do about
+ * a `violated` rule, not on discovering there was one.
+ */
+export function doctrineAudit(root, learnings) {
+  let ledger;
+  try {
+    ledger = loadLedger(root);
+  } catch {
+    return null; // no ledger in this repo (fixtures, other repos) — not a run defect
+  }
+  const classifications = classifyRules({ ledger, learnings });
+  return {
+    classifications,
+    counts: {
+      fired: classifications.filter((c) => c.classification === 'fired').length,
+      violated: classifications.filter((c) => c.classification === 'violated').length,
+      dormant: classifications.filter((c) => c.classification === 'dormant').length,
+    },
+    // Two-sided capture is a hard input: with no `doctrine-fired` entries every
+    // rule reads dormant, which would mark the doctrine's best rules for removal.
+    twoSided: learnings.some((l) => l.kind === 'doctrine-fired'),
+    pruneCandidates: pruneCandidates(ledger),
+  };
+}
+
+export function verdictSummary(root) {
+  const verdicts = readVerdicts(root).filter((v) => !v.__parseError);
+  if (!verdicts.length) return null;
+  return { count: verdicts.length, tally: tallyVerdicts(verdicts), verdicts };
 }
 
 /**
@@ -277,6 +315,64 @@ export function digest(data) {
     L.push(`  - **change:** ${l.action}`);
   }
 
+  if (data.verdicts) {
+    L.push('');
+    L.push('## Rubric verdicts (FR-A5.5)');
+    L.push('');
+    L.push(`| dimension | ${['pass', 'fail', 'n/a'].join(' | ')} |`);
+    L.push('| --- | ---: | ---: | ---: |');
+    for (const key of DIMENSION_KEYS) {
+      const t = data.verdicts.tally[key];
+      L.push(`| ${key} | ${t.pass} | ${t.fail} | ${t['n/a']} |`);
+    }
+    const bounced = data.verdicts.verdicts.filter((v) => v.bounce);
+    if (bounced.length) {
+      L.push('');
+      for (const v of bounced) {
+        L.push(
+          `- \`${v.unit}\` ${v.role} bounced on **${(v.bounce_dimensions ?? []).join(', ')}**`,
+        );
+      }
+    }
+  }
+
+  if (data.doctrine) {
+    const { counts, classifications, twoSided, pruneCandidates: candidates } = data.doctrine;
+    L.push('');
+    L.push('## Doctrine audit (FR-A5.2)');
+    L.push('');
+    L.push(`${counts.fired} fired, ${counts.violated} violated, ${counts.dormant} dormant.`);
+    if (!twoSided) {
+      L.push('');
+      L.push(
+        '**No `doctrine-fired` learnings this run**, so every rule below reads dormant for that ' +
+          'reason alone. Fix the capture before drawing a pruning conclusion — a failure-only ' +
+          "record marks the doctrine's best rules for removal.",
+      );
+    }
+    const violated = classifications.filter((c) => c.classification === 'violated');
+    if (violated.length) {
+      L.push('');
+      L.push('Rules that should have fired and did not — these are the bugs:');
+      L.push('');
+      for (const c of violated) L.push(`- **${c.id}** ("${c.anchor}") — ${c.evidence}`);
+    }
+    const fired = classifications.filter((c) => c.classification === 'fired');
+    if (fired.length) {
+      L.push('');
+      L.push(`Fired: ${fired.map((c) => c.id).join(', ')}.`);
+    }
+    if (candidates.length) {
+      L.push('');
+      L.push(
+        `Dormant across ${candidates[0].audits.length} consecutive audits, proposed for removal ` +
+          `(FR-A5.3): ${candidates.map((c) => `${c.id} ("${c.anchor}")`).join('; ')}.`,
+      );
+    }
+    L.push('');
+    L.push("Append this run's audit with `pnpm agent:doctrine audit --run <id> --append`.");
+  }
+
   const failed = join(data.root, '.agent', 'failed-approaches.md');
   if (existsSync(failed)) {
     L.push('');
@@ -294,7 +390,10 @@ export function digest(data) {
     'Read the above and write `.agent/run-report.md`: confirm or discard each candidate pattern, ' +
       'name the loop-level strengths worth keeping and the weaknesses worth fixing, and state any ' +
       'observation no single unit could have made. Do not read transcripts — if a claim needs them, ' +
-      'say what is missing from this digest instead.',
+      'say what is missing from this digest instead. For each `violated` rule above, propose one ' +
+      'concrete change: a doctrine edit, or better, a mechanisation that makes the rule a command ' +
+      'nobody has to remember (FR-A1.4 is the worked example). Say plainly if a `dormant` rule is ' +
+      'dormant because nothing exercised it rather than because it is dead.',
   );
   L.push('');
   return L.join('\n');

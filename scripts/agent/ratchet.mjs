@@ -10,7 +10,7 @@
 //   set-status <unit> <status> [--sha S] [--reason R]
 //   record-role <unit> <role> --outcome O [--note N] [--transcript P]
 //   bounce <unit> --reason R                  send work back (increments bounce_count)
-//   learn --unit U --kind K --evidence E --action A [--role R] [--loose]
+//   learn --unit U --kind K --evidence E --action A [--role R] [--rule D-NN] [--loose]
 //   failed --unit U --approach A --why W --do-not-retry D [--role R]
 //   event --kind K [--unit U] [--extra JSON]  append to run-log.jsonl
 //   validate [--loose]                        check every file; exit 4 if anything is wrong
@@ -171,6 +171,8 @@ try {
         evidence: flag('evidence'),
         action: flag('action'),
       };
+      // Only doctrine entries carry one, and for those it is mandatory (FR-A5.2).
+      if (flag('rule')) entry.rule = flag('rule');
       if (!entry.kind || !LEARNING_KINDS.includes(entry.kind)) {
         die(`--kind must be one of: ${LEARNING_KINDS.join(', ')}`);
       }

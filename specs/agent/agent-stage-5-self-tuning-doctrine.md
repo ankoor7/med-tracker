@@ -5,7 +5,7 @@
 | **Depends on** | `agent-stage-3-state-ratchet.md` (FR-A3.7 two-sided learnings are this stage's input), `agent-stage-4-ephemeral-orchestrator.md` FR-A4.7 (run report), `.claude/agents/sequential-fix-orchestrator.md` |
 | **Implements** | FR-A5.1 … FR-A5.5 |
 | **Milestone** | Agent-method trial |
-| **Status** | Draft |
+| **Status** | Built 2026-08-02 — ledger back-filled (`docs/agent-doctrine-ledger.md`), audit/prune/size tooling (`scripts/agent/doctrine.mjs`), rubric (`scripts/agent/rubric.mjs`, `docs/agent-protocol.md` §6), model-fit table (`docs/agent-model-fit.md`). Tier-0 + baseline-corpus replay green (`pnpm agent:test`). **AC-A5.2, AC-A5.4, AC-A5.5 need runs**: no live audit yet, and every model-fit row is still `prior`. |
 | **Sources** | Ralph loop ("signs"); Cursor *Scaling agents* (prompting as primary lever; simplicity by removal; empirical model-role fit); Anthropic three-agent harness (calibrated evaluator rubrics) |
 
 ## 1. Objective
@@ -115,16 +115,24 @@ unit one commit — settled); automation that edits the doctrine without user re
 
 ## 7. Open questions
 
-- **Who runs the audit?** FR-A4.7's end-of-run synthesis agent is the natural owner —
-  same inputs, same moment, one spawn. Start agent-drafted, user-merged — consistent
-  with the "changes are proposed" scope line.
-- **Doctrine size target.** Is there a number? Cursor's lesson is directional
-  (simplicity wins), not quantitative. Proposal: no target, but AC-A5.3's no-silent-growth
-  rule plus per-turn context cost in the measurement output keeps the pressure visible.
+- **Who runs the audit?** ~~Open~~ **Settled 2026-08-02:** nobody — it is deterministic.
+  Classification is a fold over `learnings.jsonl` keyed by ledger id, so
+  `scripts/agent-run.sh` appends it at run end with no spawn at all
+  (`pnpm agent:doctrine audit --append`), and the synthesis agent reads the result in
+  the digest rather than deriving it. That inverts the original proposal for the reason
+  FR-A4.7 already gives: anything computable must not be paid for in a model pass. What
+  is left for judgement — is this `violated` rule worth a doctrine edit or a
+  mechanisation, is this `dormant` rule dead or merely unexercised — is asked of the
+  synthesis agent explicitly, and the user merges.
+- **Doctrine size target.** ~~Open~~ **Settled 2026-08-02:** no number. The ledger's
+  Size log plus AC-A5.3's no-silent-growth check makes each addition argue for itself,
+  which is the pressure a target was standing in for. The doctrine sat at 62 rules on
+  back-fill.
 - **Cross-repo generality.** The doctrine mixes universal rules (send-back, ratchet)
-  with med-tracker specifics (pre-commit timeout, pager hangs). If the agent method
-  outlives this repo, the ledger's provenance field is what makes the split obvious
-  later — worth structuring for it now?
+  with med-tracker specifics (pre-commit timeout, pager hangs). Partly answered by the
+  back-fill: the repo-specific rules (D-49, D-50) say so in their provenance, so the
+  split is greppable. Still open whether that should become a `scope` column before the
+  method leaves this repo.
 
 ## 8. Test plan
 

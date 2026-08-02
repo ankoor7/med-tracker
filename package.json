@@ -33,6 +33,8 @@
     "agent:ratchet": "node scripts/agent/ratchet.mjs",
     "agent:run": "./scripts/agent-run.sh",
     "agent:report": "node scripts/agent/run-report.mjs",
+    "agent:doctrine": "node scripts/agent/doctrine.mjs",
+    "agent:rubric": "node scripts/agent/rubric.mjs",
     "agent:test": "vitest run --config vitest.agent.config.ts",
     "coverage:merge": "node scripts/merge-coverage.mjs",
     "coverage": "pnpm test:coverage && pnpm test:e2e:coverage && pnpm test:e2e:mocked:coverage && pnpm coverage:merge",

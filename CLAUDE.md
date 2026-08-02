@@ -129,6 +129,12 @@ use it when work is enumerable up front and each item is independently shippable
   green.
 - Settle open questions **in the spec**, not just the chat.
 - Write session state to `HANDOFF.md` at a session boundary.
+- **Editing the orchestrator doctrine means editing its ledger.** Every rule in
+  `.claude/agents/sequential-fix-orchestrator.md` carries provenance in
+  [`docs/agent-doctrine-ledger.md`](docs/agent-doctrine-ledger.md), and
+  `pnpm agent:doctrine check` (part of `pnpm agent:test`) fails a rule added
+  without an incident or a `prior` marker. Rules dormant across three runs are
+  proposed for removal by `pnpm agent:doctrine prune`.
 
 ## Communication
 

@@ -70,7 +70,8 @@ Use the ratchet CLI; do not hand-edit `.agent/`.
 pnpm agent:ratchet record-role <unit> <role> --outcome green|bounced|stopped-at-gate|hung|no-outcome --note "…"
 pnpm agent:ratchet failed --unit <unit> --role <role> --approach "…" --why "…" --do-not-retry "…"
 pnpm agent:ratchet learn --unit <unit> --role <role> --kind strength|weakness|bounce|doctrine-gap|doctrine-fired \
-  --evidence "file:line, a quoted directive, a spec ref, or a sha" --action "what to repeat or change"
+  --evidence "file:line, a quoted directive, a spec ref, or a sha" --action "what to repeat or change" \
+  [--rule D-NN]
 ```
 
 You may write **only** your own `roles_run` entry, plus the failed-approaches and
@@ -79,6 +80,12 @@ that did the work never marks the work done.
 
 **Abandoned an approach? Record it before you move on.** A dead end that is not written
 down gets re-attempted by the next fresh context, which has no memory of your session.
+
+**A `doctrine-fired` or `doctrine-gap` entry must name its rule** with `--rule D-NN`
+from [`agent-doctrine-ledger.md`](agent-doctrine-ledger.md) — the CLI rejects it
+otherwise. The end-of-run audit (FR-A5.2) counts those entries to decide which rules
+still earn their context cost, and an unnamed rule is invisible to it: a rule that
+fired but was recorded anonymously reads as dormant, and dormant rules get pruned.
 
 ## 5. Report format
 
@@ -95,8 +102,40 @@ End every report with these sections, in this order:
 5. **Directive feedback (one line each)** — what in your brief helped, and what was
    missing. This is the raw material for the learnings record; it is required, and it
    is the only place strengths get captured.
+6. **Verdict** — the scored rubric below. Validators and reviewers MUST include it;
+   implementers may.
 
-## 6. Stop conditions
+## 6. The verdict rubric (FR-A5.5)
+
+End the report with a block in exactly this shape, then run
+`pnpm agent:rubric check <report-file>` — it fails on a missing dimension, a bare
+score, or a bounce that names no failing dimension.
+
+```
+## Verdict
+
+- correctness: pass — every AC exercised live; the "validated in sync.ts" comment checked out
+- test-honesty: fail — reverting the fix left the three new tests green
+- fit: pass — logic in src/core/, no store import
+- ux-clarity: n/a — no UI in this unit
+- bounce: yes (test-honesty)
+```
+
+Anchors, so a score means the same thing across runs and roles:
+
+| dimension      | asks                                                              | pass                                                                                                          | fail                                                                                                                                            |
+| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `correctness`  | Does it do what the unit says, for the reasons it claims?         | Every acceptance criterion exercised live and observed to hold; claims made in comments opened and confirmed. | A comment asserts "validated upstream" and the named file contains no such validation — a false claim is a defect even where the code is right. |
+| `test-honesty` | Can the new tests actually fail, and do they test the real logic? | The fix was reverted, the named new tests failed, and the revert was restored byte-identical.                 | Tests assert a ratio rather than the value, or mock so heavily the changed code never runs.                                                     |
+| `fit`          | Does it belong here — boundaries, duplication, scope?             | Domain logic in `src/core/` with no store or UI import; reused the existing helper.                           | The unit also refactored an adjacent screen, so the fix cannot be separated from the improvement.                                               |
+| `ux-clarity`   | Would a person understand the screen?                             | Drove the flow as a user; the result read unambiguously.                                                      | Every test passed and the label still says "Adj." — green checks were never the bar for a UX fix.                                               |
+
+`n/a` is legitimate (a core-only unit has no UX to score) but needs its reason on
+the line. **A scored verdict never replaces §5.3:** all-pass with an empty
+"Could not verify" section is rejected. Comparability is worth having; it is not
+worth having at the price of an honest report.
+
+## 7. Stop conditions
 
 Stop and report rather than guessing when: the unit's premise is unsound; a decision
 would change _what gets built_; a gate fails for reasons outside your unit; or the same

@@ -32,6 +32,9 @@ export const RESUMABLE_OUTCOMES = ['hung', 'no-outcome'];
 
 export const LEARNING_KINDS = ['strength', 'weakness', 'bounce', 'doctrine-gap', 'doctrine-fired'];
 
+/** Doctrine rule ids, as carried in the ledger (FR-A5.1). */
+export const DOCTRINE_RULE_ID = /^D-\d{2,}$/;
+
 export const UNITS_VERSION = 1;
 
 export const agentDir = (root) => join(root, '.agent');
@@ -352,6 +355,18 @@ export function validateLearning(entry, { strict = true } = {}) {
   }
   if (entry.role && !ROLES.includes(entry.role) && entry.role !== 'orchestrator') {
     errs.push(`unknown role \`${entry.role}\``);
+  }
+  // A doctrine entry that does not name its rule cannot be counted by the
+  // per-run audit (FR-A5.2), so it would silently leave that rule looking
+  // dormant — the one failure mode that gets good rules pruned.
+  if (
+    ['doctrine-fired', 'doctrine-gap'].includes(entry.kind) &&
+    !DOCTRINE_RULE_ID.test(entry.rule ?? '')
+  ) {
+    errs.push(
+      `a \`${entry.kind}\` entry must name the rule it is about with \`--rule D-NN\` ` +
+        '(ids are in docs/agent-doctrine-ledger.md)',
+    );
   }
   if (strict && entry.evidence) {
     const evidence = String(entry.evidence);

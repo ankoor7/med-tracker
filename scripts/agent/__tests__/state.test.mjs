@@ -213,8 +213,23 @@ describe('learnings are two-sided and parseable (FR-A3.7, AC-A3.6)', () => {
 
   it('counts bounce and doctrine-gap as weakness-class, doctrine-fired as strength-class', () => {
     appendLearning(root, { ...good, kind: 'bounce' });
-    appendLearning(root, { ...good, kind: 'doctrine-fired' });
+    appendLearning(root, { ...good, kind: 'doctrine-fired', rule: 'D-12' });
     expect(learningsCoverage(root).get('unit-1')).toMatchObject({ strength: 1, weakness: 1 });
+  });
+
+  // FR-A5.2: an anonymous doctrine entry cannot be counted by the run audit, so
+  // the rule it is about reads dormant — and dormant rules get proposed for
+  // removal. Rejecting it here is cheaper than pruning a rule that works.
+  it('requires a doctrine entry to name its ledger rule', () => {
+    expect(validateLearning({ ...good, kind: 'doctrine-gap' }).join()).toMatch(
+      /must name the rule it is about with `--rule D-NN`/,
+    );
+    expect(
+      validateLearning({ ...good, kind: 'doctrine-gap', rule: 'the preflight one' }).join(),
+    ).toMatch(/--rule D-NN/);
+    expect(validateLearning({ ...good, kind: 'doctrine-gap', rule: 'D-12' })).toEqual([]);
+    // Other kinds are unaffected — most learnings are not about a doctrine rule.
+    expect(validateLearning({ ...good, kind: 'weakness' })).toEqual([]);
   });
 
   it('survives a malformed line without losing the rest of the file', () => {
