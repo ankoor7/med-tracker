@@ -62,6 +62,33 @@ that boots Supabase and runs the pgTAP suite. A husky pre-commit hook runs
 PreToolUse hook blocks git operations while any fallow `*_introduced` count is above 0 —
 clear it by extracting/covering the new code, not by suppressing.
 
+**Fallow config** lives in `.fallowrc.jsonc` (`fallow` is a devDependency, so
+`pnpm exec fallow ...` always resolves). Two things there are easy to get wrong:
+
+- Fallow reads entry points from package.json scripts, which covers the agent
+  CLIs and their `.sh` wrappers — but _not_ `agent:test`, because its
+  `vitest.agent.config.ts` is a non-default vitest config the plugin never
+  loads. The `entry` glob supplies it; keep the two in sync or the whole agent
+  test suite reads as dead code.
+- `fallow audit` ignores the config's `health.coverage` — only `--coverage` /
+  `FALLOW_COVERAGE` reach it. The gate hook exports the env var itself. Run
+  `pnpm agent:test:coverage` after touching `scripts/agent/**`, or its functions
+  audit as zero-coverage and score as critical CRAP risks.
+
+Locally, use **`pnpm agent:audit`** rather than calling `fallow audit` directly:
+it attaches that coverage and fails closed when the report is missing or older
+than the sources it describes (stale line offsets stop fallow matching functions
+to coverage, and it falls back to estimation silently — a green local run then
+goes red in CI for no visible reason).
+
+In CI the audit runs in **one** place: the separate `Fallow` workflow
+(`.github/workflows/fallow.yml`, PR-only), which generates the coverage itself
+immediately before auditing, so it cannot go missing or stale there. `ci.yml`'s
+`agent-tooling` job only runs the agent suite — don't add a second audit to it;
+two gates that can disagree is worse than one. The local
+`.claude/hooks/fallow-gate.sh` hook fails _open_ by design and gates only the
+machine it runs on; the `Fallow` workflow is what actually enforces this.
+
 **Combined coverage:** unit (vitest), the real E2E suite, and the E2E-mocked
 suite each collect raw V8 coverage, merged into one report with
 [Monocart Coverage Reports](https://github.com/cenfun/monocart-coverage-reports).
@@ -129,6 +156,12 @@ use it when work is enumerable up front and each item is independently shippable
   green.
 - Settle open questions **in the spec**, not just the chat.
 - Write session state to `HANDOFF.md` at a session boundary.
+- **Editing the orchestrator doctrine means editing its ledger.** Every rule in
+  `.claude/agents/sequential-fix-orchestrator.md` carries provenance in
+  [`docs/agent-doctrine-ledger.md`](docs/agent-doctrine-ledger.md), and
+  `pnpm agent:doctrine check` (part of `pnpm agent:test`) fails a rule added
+  without an incident or a `prior` marker. Rules dormant across three runs are
+  proposed for removal by `pnpm agent:doctrine prune`.
 
 ## Communication
 

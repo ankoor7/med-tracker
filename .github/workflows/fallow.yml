@@ -23,10 +23,34 @@ jobs:
           # Full history: audit diffs changed files against the PR base ref.
           fetch-depth: 0
 
+      # The audit needs coverage for scripts/agent/**, and only this suite can
+      # produce it. Without it every branchy CLI function there scores as a
+      # critical CRAP risk (CRAP = cyclomatic² × uncovered³ + cyclomatic), which
+      # is 23 findings that say nothing about the code. Generated here, in the
+      # same job, immediately before the audit — so it cannot be missing or
+      # stale the way a hand-generated report can.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate agent tooling coverage
+        run: pnpm agent:test:coverage
+
       - name: Fallow audit (new-only)
         uses: fallow-rs/fallow@v3
         with:
           command: audit
+          # `fallow audit` ignores the config's `health.coverage` — only
+          # --coverage / FALLOW_COVERAGE reach it (see .fallowrc.jsonc).
+          args: --coverage coverage/agent/coverage-final.json
           # New-only: fail only on findings this PR newly introduces, not
           # pre-existing/inherited ones already in the changed files. Matches
           # the local commit gate (.claude/hooks/fallow-gate.sh, --gate-marker).

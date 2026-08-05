@@ -149,6 +149,35 @@ jobs:
           title: 'chore(badge): update coverage badge'
           body: Auto-generated from the latest `coverage` job on `${{ github.ref_name }}`.
 
+  # The agent-loop tooling under scripts/agent/ (specs/agent/*). Its suite is a
+  # separate vitest config that needs neither Docker nor a browser, so it does
+  # not belong in `build` above, and until now it ran in no CI job at all.
+  #
+  # The fallow audit of this code lives in the separate Fallow workflow
+  # (.github/workflows/fallow.yml), which generates its own coverage — one audit,
+  # in the workflow built for it, with PR review comments. Running a second one
+  # here would just be two gates that can disagree.
+  agent-tooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run agent tooling tests
+        run: pnpm agent:test
+
   # Server logic now lives in SQL (RLS + push_records + validate_record), so it's
   # covered by pgTAP against a real local Postgres. This boots only the DB
   # container, applies the migrations + seed, and runs the suite. Kept as a

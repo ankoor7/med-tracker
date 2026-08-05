@@ -100,7 +100,7 @@ importers:
         specifier: ^6.2.5
         version: 6.2.5
       fallow:
-        specifier: ^2.100.0
+        specifier: 2.104.0
         version: 2.104.0
       globals:
         specifier: ^17.8.0

@@ -24,6 +24,16 @@ fi
 INPUT="$(cat)"
 CMD="$(jq -r '.tool_input.command // empty' <<<"$INPUT")"
 
+# LOCAL ADDITION (not part of the generated installer).
+# `audit` ignores the config's `health.coverage`; only --coverage/FALLOW_COVERAGE
+# reach it. Without this the agent tooling audits as zero-coverage and its CLI
+# functions score as critical CRAP risks. Regenerate with `pnpm agent:test:coverage`;
+# a stale or missing file is harmless (fallow falls back to estimation).
+AGENT_COVERAGE="${CLAUDE_PROJECT_DIR:-.}/coverage/agent/coverage-final.json"
+if [ -z "${FALLOW_COVERAGE-}" ] && [ -f "$AGENT_COVERAGE" ]; then
+  export FALLOW_COVERAGE="$AGENT_COVERAGE"
+fi
+
 if ! printf '%s\n' "$CMD" | grep -Eq '(^|[[:space:];|&()])git[[:space:]]+(commit|push)([[:space:]]|$)'; then
   exit 0
 fi

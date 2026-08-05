@@ -1,0 +1,55 @@
+{
+  "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
+
+  // Fallow discovers entry points from package.json scripts, so the agent CLIs
+  // (`agent:ratchet`, `agent:doctrine`, `agent:rubric`, `agent:report`) and the
+  // `.sh` wrappers that shell into them are already covered.
+  //
+  // The one script it cannot follow is `agent:test`, which runs
+  // `vitest --config vitest.agent.config.ts`. Fallow's vitest plugin only reads
+  // the default `vitest.config.ts` / `vite.config.ts`, so that second config's
+  // `include` glob is invisible: without this entry the whole agent test suite
+  // reads as unused files, and everything only those tests import reads as an
+  // unused export. Keep this glob in sync with `vitest.agent.config.ts`.
+  "entry": ["scripts/agent/__tests__/**/*.test.mjs"],
+
+  "health": {
+    // Without real coverage fallow assumes zero, and CRAP (cyclomatic² ×
+    // uncovered³ + cyclomatic) turns every branchy CLI function into a
+    // "critical" finding. `pnpm agent:test:coverage` writes this file.
+    //
+    // NOTE: `fallow health` reads this key, but `fallow audit` (what the commit
+    // gate runs) does not — it only honours `--coverage` / `FALLOW_COVERAGE`.
+    // `.claude/hooks/fallow-gate.sh` exports the env var for that reason.
+    "coverage": "coverage/agent/coverage-final.json",
+
+    // Numeric ceilings rather than blanket suppressions, so these stay visible
+    // and a regression past the recorded number still fails.
+    "thresholdOverrides": [
+      {
+        "files": ["scripts/agent/state.mjs"],
+        "functions": ["ratchetViolations", "validateLearning", "nextAction"],
+        "maxCognitive": 28,
+        "reason": "Flat validation rule-sets: one branch per ratchet/learning rule, each independent and each named in specs/agent/agent-stage-3-state-ratchet.md. Splitting them scatters one readable checklist across helpers without removing a decision — the branch count *is* the spec.",
+      },
+      {
+        "files": ["scripts/agent/rubric.mjs"],
+        "functions": ["checkReport"],
+        "maxCognitive": 24,
+        "reason": "Same shape: one branch per FR-A5.5 verdict rule, accumulating into `problems`. The honesty guard depends on seeing all the scores together.",
+      },
+      {
+        "files": ["scripts/agent/doctrine.mjs"],
+        "functions": ["coverageProblems", "classifyLine"],
+        "maxCognitive": 24,
+        "reason": "Markdown ledger parsing (`docs/agent-doctrine-ledger.md`): the branching is the table's shape, and the row-classifying arrow at the top of the file is a single pass over cell variants.",
+      },
+      {
+        "files": ["scripts/agent/ratchet.mjs"],
+        "functions": ["describeAction"],
+        "maxCrap": 60,
+        "reason": "A 7-case switch (cognitive 2 — trivially simple). Its CRAP is high only because `ratchet.mjs` is exercised through spawned CLI runs, which in-process coverage cannot see; capturing child-process V8 coverage is not worth the harness complexity for one flat switch.",
+      },
+    ],
+  },
+}
