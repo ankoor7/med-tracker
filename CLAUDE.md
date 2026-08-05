@@ -75,14 +75,19 @@ clear it by extracting/covering the new code, not by suppressing.
   `pnpm agent:test:coverage` after touching `scripts/agent/**`, or its functions
   audit as zero-coverage and score as critical CRAP risks.
 
-Use **`pnpm agent:audit`** rather than calling `fallow audit` directly: it
-attaches that coverage and fails closed when the report is missing or older than
-the sources it describes (stale line offsets stop fallow matching functions to
-coverage, and it falls back to estimation silently). The `agent-tooling` CI job
-runs `pnpm agent:test:coverage` then `pnpm agent:audit` — that job is also the
-only place the agent suite runs in CI. The local
-`.claude/hooks/fallow-gate.sh` gate is a convenience that fails _open_; CI is
-what actually enforces this.
+Locally, use **`pnpm agent:audit`** rather than calling `fallow audit` directly:
+it attaches that coverage and fails closed when the report is missing or older
+than the sources it describes (stale line offsets stop fallow matching functions
+to coverage, and it falls back to estimation silently — a green local run then
+goes red in CI for no visible reason).
+
+In CI the audit runs in **one** place: the separate `Fallow` workflow
+(`.github/workflows/fallow.yml`, PR-only), which generates the coverage itself
+immediately before auditing, so it cannot go missing or stale there. `ci.yml`'s
+`agent-tooling` job only runs the agent suite — don't add a second audit to it;
+two gates that can disagree is worse than one. The local
+`.claude/hooks/fallow-gate.sh` hook fails _open_ by design and gates only the
+machine it runs on; the `Fallow` workflow is what actually enforces this.
 
 **Combined coverage:** unit (vitest), the real E2E suite, and the E2E-mocked
 suite each collect raw V8 coverage, merged into one report with
