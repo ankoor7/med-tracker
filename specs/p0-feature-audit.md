@@ -46,6 +46,18 @@ are numbered from 22 up and run on the same Implement→Validate→Review pipeli
 _#12 (iOS native) is deferred out of this pass. #10 (E2E) needs no build work — its
 posture is restated in Stage 26._
 
+### First P1 stage (outside this audit's P0 scope)
+
+| Stage | Covers | Spec | Status |
+|-------|--------|------|--------|
+| **27** | P1 "Refill / supply tracking + low-supply alerts" (`research/03` §1) | `stage-27-supply-repeat-prescriptions.md` | Draft (authored 2026-07-31) |
+
+Sequenced after 22–26. It depends on Stage 18's assume-taken resolution (stock
+consumption follows the same policy as adherence) and inherits Stage 25's delivery
+work for its four new reminder kinds, so it wants the P0 block landed first.
+
+| **28** | Supporting capability (not a P0/P1 line) — iCalendar `.ics` export | `stage-28-calendar-export.md` | **Draft — not ready for implementation** (blockers in its §10); unscheduled |
+
 Grouping rationale: #6 and #7 are the two "physician outputs" P0s and share the
 report/share plumbing, so they belong together (Stage 23), and both consume the
 med metadata from Stage 22 — hence 22 sequences first as a small prerequisite.
