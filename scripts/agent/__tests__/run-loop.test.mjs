@@ -14,7 +14,7 @@ import {
   cli,
   git,
   makeRepo,
-  readJsonl,
+  readAgentJsonl,
   readUnits,
   run,
   runSh,
@@ -53,7 +53,7 @@ describe('happy path (FR-A4.1, FR-A4.4)', () => {
 
   it('accounts for every spawn in the run log', () => {
     loop('commit');
-    const log = readJsonl(root, 'run-log.jsonl');
+    const log = readAgentJsonl(root, 'run-log.jsonl');
     expect(kinds(log).filter((k) => k === 'spawned')).toHaveLength(3);
     expect(kinds(log).filter((k) => k === 'exited')).toHaveLength(3);
     expect(kinds(log)[0]).toBe('run-started');
@@ -64,7 +64,7 @@ describe('happy path (FR-A4.1, FR-A4.4)', () => {
 
   it('respects dependency order', () => {
     loop('commit');
-    const log = readJsonl(root, 'run-log.jsonl').filter((e) => e.kind === 'spawned');
+    const log = readAgentJsonl(root, 'run-log.jsonl').filter((e) => e.kind === 'spawned');
     // unit-2 depends on unit-1, so it can never be spawned first.
     expect(log[0].unit).toBe('unit-1');
     expect(log.map((e) => e.unit).indexOf('unit-2')).toBeGreaterThan(0);
@@ -120,7 +120,7 @@ describe('ceiling breach (AC-A4.5, FR-A4.3)', () => {
     expect(res.stdout).toMatch(/CEILING BREACH after \d+s/);
     expect(res.stdout).toMatch(/tree is coherent/);
 
-    const log = readJsonl(root, 'run-log.jsonl');
+    const log = readAgentJsonl(root, 'run-log.jsonl');
     const breach = log.find((e) => e.kind === 'ceiling-breach');
     expect(breach).toMatchObject({ unit: 'unit-1' });
     expect(breach.elapsed_seconds).toBeGreaterThanOrEqual(2);
@@ -129,7 +129,7 @@ describe('ceiling breach (AC-A4.5, FR-A4.3)', () => {
   it('flags an incoherent tree so the successor salvages instead of building on it', () => {
     const res = loop('dirty-hang', { AGENT_MAX_SPAWNS: '1', AGENT_CEILING_SECONDS: '2' });
     expect(res.stdout).toMatch(/tree is NOT coherent/);
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).toContain('tree-incoherent');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).toContain('tree-incoherent');
   });
 
   it('bounds the loss to one ceiling interval rather than a whole night', () => {
@@ -158,7 +158,7 @@ describe('escalation and bounce budget (FR-A4.5, FR-A4.6)', () => {
     expect(units[2].status).toBe('blocked'); // the stub blocks whatever it gets
     expect(res.stdout).toMatch(/moving on to whatever else is eligible/);
     expect(res.stdout).toMatch(/nothing eligible remains/);
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).toContain('user-escalation');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).toContain('user-escalation');
   });
 
   it('never asks permission to continue', () => {
@@ -173,13 +173,13 @@ describe('escalation and bounce budget (FR-A4.5, FR-A4.6)', () => {
     expect(unit.status).toBe('blocked');
     expect(unit.blocked_reason).toMatch(/bounce budget exhausted/);
     expect(res.stdout).toMatch(/hit the bounce budget/);
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).toContain('bounce-budget-exhausted');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).toContain('bounce-budget-exhausted');
   });
 
   it('stops at max-spawns rather than running away', () => {
     const res = loop('bounce', { AGENT_MAX_SPAWNS: '2', AGENT_BOUNCE_BUDGET: '99' });
     expect(res.stdout).toMatch(/hit max-spawns \(2\)/);
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).toContain('max-spawns-reached');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).toContain('max-spawns-reached');
   });
 
   it('records a bounce as a resumable implementer step, not a fresh one', () => {
@@ -196,13 +196,13 @@ describe('learnings-on-exit gate (FR-A4.2)', () => {
   it('flags a committed unit whose orchestrator wrote no learnings', () => {
     const res = loop('commit-silent', { AGENT_MAX_SPAWNS: '1' });
     expect(res.stdout).toMatch(/committed but has no two-sided learnings/);
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).toContain('learnings-missing');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).toContain('learnings-missing');
   });
 
   it('does not flag a unit that wrote both sides', () => {
     const res = loop('commit', { AGENT_MAX_SPAWNS: '1' });
     expect(res.stdout).not.toMatch(/no two-sided learnings/);
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).not.toContain('learnings-missing');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).not.toContain('learnings-missing');
   });
 
   it('exits 7 from `learnings-ok` for a one-sided unit', () => {
@@ -225,7 +225,7 @@ describe('crash handling', () => {
   it('records a non-zero exit and moves on', () => {
     const res = loop('crash', { AGENT_MAX_SPAWNS: '2' });
     expect(res.stdout).toMatch(/exited 9/);
-    const exited = readJsonl(root, 'run-log.jsonl').find((e) => e.kind === 'exited');
+    const exited = readAgentJsonl(root, 'run-log.jsonl').find((e) => e.kind === 'exited');
     expect(exited.status).toBe(9);
   });
 });
@@ -236,7 +236,7 @@ describe('dry run', () => {
     expect(res.stdout).toMatch(/dry-run: would spawn for unit-1/);
     expect(readUnits(root).units[0].status).toBe('pending');
     // A dry run must not leave a spawn in the log.
-    expect(kinds(readJsonl(root, 'run-log.jsonl'))).not.toContain('spawned');
+    expect(kinds(readAgentJsonl(root, 'run-log.jsonl'))).not.toContain('spawned');
   });
 });
 

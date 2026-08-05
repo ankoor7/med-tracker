@@ -38,24 +38,12 @@ import {
   unitById,
   validateLearning,
 } from './state.mjs';
+import { argvReader, repoRoot } from './cli.mjs';
 
 const argv = process.argv.slice(2);
 const command = argv[0];
 
-function flag(name, fallback = null) {
-  const i = argv.indexOf(`--${name}`);
-  return i === -1 ? fallback : argv[i + 1];
-}
-const has = (name) => argv.includes(`--${name}`);
-
-function repoRoot() {
-  if (process.env.AGENT_ROOT) return process.env.AGENT_ROOT;
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
+const { flag, has } = argvReader(argv);
 
 const root = repoRoot();
 const positional = argv

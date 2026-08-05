@@ -21,6 +21,7 @@ import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { readLearnings } from './state.mjs';
+import { repoRoot } from './cli.mjs';
 
 export const doctrinePath = (root) =>
   join(root, '.claude', 'agents', 'sequential-fix-orchestrator.md');
@@ -493,15 +494,6 @@ export function pruneCandidates(ledger, { window = DORMANT_WINDOW } = {}) {
 
 const truncate = (s, n) => (String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
 const escapeCell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ');
-
-export function repoRoot() {
-  if (process.env.AGENT_ROOT) return process.env.AGENT_ROOT;
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 export function readDoctrine(root) {
   const path = doctrinePath(root);

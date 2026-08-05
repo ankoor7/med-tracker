@@ -17,10 +17,10 @@
 // or empty is rejected here, at the gate, rather than being counted as a clean
 // pass. Honest-limits reporting (FR-A2.7) outranks comparability.
 
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { agentDir, isoNow } from './state.mjs';
+import { agentDir, isoNow, readJsonl } from './state.mjs';
 
 export const SCORES = ['pass', 'fail', 'n/a'];
 
@@ -193,18 +193,7 @@ export function appendVerdict(root, entry) {
 }
 
 export function readVerdicts(root) {
-  const path = verdictsPath(root);
-  if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim())
-    .map((line, i) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return { __parseError: true, line: i + 1, raw: line };
-      }
-    });
+  return readJsonl(verdictsPath(root));
 }
 
 /** Dimension-by-dimension tallies — what makes AC-A5.5's cross-run comparison a table lookup. */

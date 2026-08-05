@@ -10,7 +10,7 @@ import {
   cli,
   commitAll,
   makeRepo,
-  readJsonl,
+  readAgentJsonl,
   readUnits,
   writeUnitsFixture,
 } from './fixture.mjs';
@@ -120,7 +120,7 @@ describe('ratchet CLI', () => {
   it('writes run-log events as one JSON object per line', () => {
     cli(root, ['event', '--kind', 'spawned', '--unit', 'unit-1']);
     cli(root, ['event', '--kind', 'exited', '--unit', 'unit-1', '--extra', '{"status":0}']);
-    const log = readJsonl(root, 'run-log.jsonl');
+    const log = readAgentJsonl(root, 'run-log.jsonl');
     expect(log).toHaveLength(2);
     expect(log[1]).toMatchObject({ kind: 'exited', unit: 'unit-1', status: 0 });
     expect(log[0].ts).toBeTruthy();

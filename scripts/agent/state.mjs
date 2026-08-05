@@ -13,7 +13,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } fr
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 
-export const STATUSES = [
+const STATUSES = [
   'pending',
   'implementing',
   'validating',
@@ -22,26 +22,26 @@ export const STATUSES = [
   'blocked',
   'committed',
 ];
-export const ROLES = ['implementer', 'validator', 'reviewer'];
+const ROLES = ['implementer', 'validator', 'reviewer'];
 
 // `no-outcome` and `hung` are the resume-not-respawn cases (FR-A3.4): the role
 // ran but delivered nothing, which from the outside looks exactly like never
 // having run. Keeping them distinct from `green` is the whole point.
-export const OUTCOMES = ['green', 'bounced', 'stopped-at-gate', 'hung', 'no-outcome'];
-export const RESUMABLE_OUTCOMES = ['hung', 'no-outcome'];
+const OUTCOMES = ['green', 'bounced', 'stopped-at-gate', 'hung', 'no-outcome'];
+const RESUMABLE_OUTCOMES = ['hung', 'no-outcome'];
 
 export const LEARNING_KINDS = ['strength', 'weakness', 'bounce', 'doctrine-gap', 'doctrine-fired'];
 
 /** Doctrine rule ids, as carried in the ledger (FR-A5.1). */
-export const DOCTRINE_RULE_ID = /^D-\d{2,}$/;
+const DOCTRINE_RULE_ID = /^D-\d{2,}$/;
 
-export const UNITS_VERSION = 1;
+const UNITS_VERSION = 1;
 
 export const agentDir = (root) => join(root, '.agent');
-export const unitsPath = (root) => join(agentDir(root), 'units.json');
-export const learningsPath = (root) => join(agentDir(root), 'learnings.jsonl');
-export const failedApproachesPath = (root) => join(agentDir(root), 'failed-approaches.md');
-export const runLogPath = (root) => join(agentDir(root), 'run-log.jsonl');
+const unitsPath = (root) => join(agentDir(root), 'units.json');
+const learningsPath = (root) => join(agentDir(root), 'learnings.jsonl');
+const failedApproachesPath = (root) => join(agentDir(root), 'failed-approaches.md');
+const runLogPath = (root) => join(agentDir(root), 'run-log.jsonl');
 
 export class RatchetError extends Error {
   constructor(violations) {
@@ -74,7 +74,7 @@ export function unitById(data, id) {
   return unit;
 }
 
-export function newUnit({ id, title, spec_ref = [], depends_on = [] }) {
+function newUnit({ id, title, spec_ref = [], depends_on = [] }) {
   return {
     id,
     title,
@@ -187,7 +187,7 @@ function loadUnitsSafe(root) {
 }
 
 /** Read → mutate → ratchet-check → write, so callers cannot skip the check. */
-export function updateUnits(root, mutate) {
+function updateUnits(root, mutate) {
   const prev = loadUnits(root);
   const next = JSON.parse(JSON.stringify(prev));
   mutate(next);
@@ -215,7 +215,7 @@ export function setStatus(root, id, status, { reason = null, sha = null } = {}) 
   });
 }
 
-export function assertCommitExists(root, sha) {
+function assertCommitExists(root, sha) {
   try {
     execFileSync('git', ['-C', root, 'cat-file', '-e', `${sha}^{commit}`], { stdio: 'ignore' });
   } catch {
@@ -395,18 +395,7 @@ export function appendLearning(root, entry, { strict = true } = {}) {
 }
 
 export function readLearnings(root) {
-  const path = learningsPath(root);
-  if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim())
-    .map((line, i) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return { __parseError: true, line: i + 1, raw: line };
-      }
-    });
+  return readJsonl(learningsPath(root));
 }
 
 /** Did this unit record both sides of the story? (AC-A3.6) */
@@ -464,12 +453,30 @@ export function appendRunEvent(root, event) {
 }
 
 export function readRunLog(root) {
-  const path = runLogPath(root);
+  return readJsonl(runLogPath(root));
+}
+
+/**
+ * Read a JSONL run-state file, tolerating malformed lines.
+ *
+ * A bad line becomes a `__parseError` record rather than an exception, because
+ * these files are appended to by agents mid-run: a half-written line must not
+ * make the whole run unreadable to the report that is supposed to explain it.
+ * Callers that want only good records filter on `__parseError`; the run report
+ * deliberately does not, and surfaces them as observability defects.
+ */
+export function readJsonl(path) {
   if (!existsSync(path)) return [];
   return readFileSync(path, 'utf8')
     .split('\n')
     .filter((l) => l.trim())
-    .map((l) => JSON.parse(l));
+    .map((line, i) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return { __parseError: true, line: i + 1, raw: line };
+      }
+    });
 }
 
 export function isoNow() {

@@ -17,22 +17,12 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { loadUnits, readLearnings, readRunLog } from './state.mjs';
 import { classifyRules, loadLedger, pruneCandidates } from './doctrine.mjs';
 import { DIMENSION_KEYS, readVerdicts, tallyVerdicts } from './rubric.mjs';
+import { argvReader, repoRoot } from './cli.mjs';
 
-const argv = process.argv.slice(2);
-const has = (f) => argv.includes(`--${f}`);
-
-function repoRoot() {
-  if (process.env.AGENT_ROOT) return process.env.AGENT_ROOT;
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
+const { has } = argvReader(process.argv.slice(2));
 
 const root = repoRoot();
 
@@ -134,61 +124,64 @@ export function verdictSummary(root) {
  * happening to notice.
  */
 export function detectPatterns(perUnit, events, learnings) {
-  const patterns = [];
+  return DETECTORS.flatMap((detect) => detect(perUnit, events, learnings));
+}
 
-  // A role that sends work back across more than one unit is a directive
-  // problem, not a unit problem — the single most actionable cross-unit signal.
+// A role that sends work back across more than one unit is a directive
+// problem, not a unit problem — the single most actionable cross-unit signal.
+function repeatedBounceRole(perUnit) {
   const senders = {};
   for (const u of perUnit) {
     for (const [role, outcomes] of Object.entries(u.roles ?? {})) {
       if (outcomes.some((o) => o === 'bounced')) (senders[role] ??= []).push(u.id);
     }
   }
-  for (const [role, units] of Object.entries(senders)) {
-    if (units.length > 1) {
-      patterns.push({
-        kind: 'repeated-bounce-role',
-        detail: `${role} sent work back on ${units.length} units (${units.join(', ')}) — suspect the directive shape, not the units`,
-        units,
-      });
-    }
-  }
+  return Object.entries(senders)
+    .filter(([, units]) => units.length > 1)
+    .map(([role, units]) => ({
+      kind: 'repeated-bounce-role',
+      detail: `${role} sent work back on ${units.length} units (${units.join(', ')}) — suspect the directive shape, not the units`,
+      units,
+    }));
+}
 
-  // The same role failing to deliver more than once is an environment or tooling
-  // fault (the baseline's hung MCP call), not bad luck.
+// The same role failing to deliver more than once is an environment or tooling
+// fault (the baseline's hung MCP call), not bad luck.
+function repeatedNonDelivery(perUnit) {
   const nonDelivery = {};
   for (const u of perUnit) {
     for (const [role, outcomes] of Object.entries(u.roles ?? {})) {
-      const bad = outcomes.filter((o) => o === 'hung' || o === 'no-outcome').length;
+      const bad = outcomes.filter((o) => NON_DELIVERY.includes(o)).length;
       if (bad) nonDelivery[role] = (nonDelivery[role] ?? 0) + bad;
     }
   }
-  for (const [role, count] of Object.entries(nonDelivery)) {
-    if (count > 1) {
-      patterns.push({
-        kind: 'repeated-non-delivery',
-        detail: `${role} ran without delivering ${count} times — treat as an environment/tooling fault and prove the root cause`,
-        units: perUnit
-          .filter((u) => (u.roles?.[role] ?? []).some((o) => ['hung', 'no-outcome'].includes(o)))
-          .map((u) => u.id),
-      });
-    }
-  }
+  return Object.entries(nonDelivery)
+    .filter(([, count]) => count > 1)
+    .map(([role, count]) => ({
+      kind: 'repeated-non-delivery',
+      detail: `${role} ran without delivering ${count} times — treat as an environment/tooling fault and prove the root cause`,
+      units: perUnit
+        .filter((u) => (u.roles?.[role] ?? []).some((o) => NON_DELIVERY.includes(o)))
+        .map((u) => u.id),
+    }));
+}
 
-  // Repeated ceiling breaches mean the ceiling is wrong or something hangs
-  // reproducibly; either way it is a loop-level fact, not a unit-level one.
-  const breachUnits = [
-    ...new Set(events.filter((e) => e.kind === 'ceiling-breach').map((e) => e.unit)),
-  ];
-  if (breachUnits.length > 1) {
-    patterns.push({
+// Repeated ceiling breaches mean the ceiling is wrong or something hangs
+// reproducibly; either way it is a loop-level fact, not a unit-level one.
+function repeatedCeilingBreach(_perUnit, events) {
+  const units = [...new Set(events.filter((e) => e.kind === 'ceiling-breach').map((e) => e.unit))];
+  if (units.length <= 1) return [];
+  return [
+    {
       kind: 'repeated-ceiling-breach',
-      detail: `spawns for ${breachUnits.join(', ')} hit the ceiling — re-check the ceiling value and look for a reproducible hang`,
-      units: breachUnits,
-    });
-  }
+      detail: `spawns for ${units.join(', ')} hit the ceiling — re-check the ceiling value and look for a reproducible hang`,
+      units,
+    },
+  ];
+}
 
-  // The same lesson recorded on several units means it was never applied.
+// The same lesson recorded on several units means it was never applied.
+function unappliedLearning(_perUnit, _events, learnings) {
   const actionCounts = new Map();
   for (const l of learnings) {
     const key = normalise(l.action);
@@ -197,29 +190,36 @@ export function detectPatterns(perUnit, events, learnings) {
     entry.units.add(l.unit);
     actionCounts.set(key, entry);
   }
-  for (const { action, units } of actionCounts.values()) {
-    if (units.size > 1) {
-      patterns.push({
-        kind: 'unapplied-learning',
-        detail: `the same action was recorded on ${units.size} units ("${truncate(action, 80)}") — it was written down and not applied`,
-        units: [...units],
-      });
-    }
-  }
-
-  // Multiple spawns for one unit means the unit did not fit one lifetime.
-  for (const u of perUnit) {
-    if (u.spawns > 2) {
-      patterns.push({
-        kind: 'unit-needed-many-spawns',
-        detail: `${u.id} took ${u.spawns} orchestrator spawns — candidate for splitting`,
-        units: [u.id],
-      });
-    }
-  }
-
-  return patterns;
+  return [...actionCounts.values()]
+    .filter(({ units }) => units.size > 1)
+    .map(({ action, units }) => ({
+      kind: 'unapplied-learning',
+      detail: `the same action was recorded on ${units.size} units ("${truncate(action, 80)}") — it was written down and not applied`,
+      units: [...units],
+    }));
 }
+
+// Multiple spawns for one unit means the unit did not fit one lifetime.
+function unitNeededManySpawns(perUnit) {
+  return perUnit
+    .filter((u) => u.spawns > 2)
+    .map((u) => ({
+      kind: 'unit-needed-many-spawns',
+      detail: `${u.id} took ${u.spawns} orchestrator spawns — candidate for splitting`,
+      units: [u.id],
+    }));
+}
+
+const NON_DELIVERY = ['hung', 'no-outcome'];
+
+// Order is the order they appear in the digest, so it is part of the contract.
+const DETECTORS = [
+  repeatedBounceRole,
+  repeatedNonDelivery,
+  repeatedCeilingBreach,
+  unappliedLearning,
+  unitNeededManySpawns,
+];
 
 /** Things that invalidate the run's own observability, which AC-A4.7 gates on. */
 export function integrityFlags(perUnit, events, parseErrors) {
@@ -255,138 +255,176 @@ const normalise = (s) =>
     : '';
 const truncate = (s, n) => (String(s).length > n ? `${String(s).slice(0, n)}…` : String(s));
 
+/**
+ * The digest is a fixed sequence of markdown sections. Each section is its own
+ * function returning the lines it contributes (empty = omitted), so adding or
+ * reordering a section is a one-line change here rather than a surgical edit
+ * inside a single long builder.
+ */
 export function digest(data) {
-  const L = [];
-  L.push(`# Run digest — ${data.stage}`);
-  L.push('');
-  L.push(
-    `${data.totals.committed}/${data.totals.units} units committed, ` +
-      `${data.totals.blocked} blocked, ${data.totals.spawns} orchestrator spawn(s), ` +
-      `${data.totals.bounces} bounce(s), ${data.totals.ceiling_breaches} ceiling breach(es).`,
-  );
+  return [
+    ...headerSection(data),
+    ...unitsSection(data),
+    ...listSection(
+      '## Candidate cross-unit patterns (confirm or discard these)',
+      data.patterns,
+      (p) => [`- **${p.kind}** — ${p.detail}`],
+    ),
+    ...listSection('## Observability defects (AC-A4.7 gates on these)', data.integrity, (f) => [
+      `- ${f}`,
+    ]),
+    ...learningsSection(
+      data,
+      '## What worked (strength-class learnings)',
+      STRENGTH_KINDS,
+      'repeat',
+    ),
+    ...learningsSection(
+      data,
+      '## What did not (weakness-class learnings)',
+      WEAKNESS_KINDS,
+      'change',
+    ),
+    ...verdictsSection(data),
+    ...doctrineSection(data),
+    ...failedApproachesSection(data),
+    ...synthesisSection(),
+    '',
+  ].join('\n');
+}
 
-  L.push('');
-  L.push('## Units');
-  L.push('');
-  L.push('| unit | status | spawns | bounces | roles | strengths | weaknesses |');
-  L.push('| --- | --- | ---: | ---: | --- | ---: | ---: |');
-  for (const u of data.perUnit) {
-    const roles = Object.entries(u.roles)
-      .map(([r, o]) => `${r}:${o.join('→')}`)
-      .join(' ');
-    L.push(
-      `| ${u.id} | ${u.status} | ${u.spawns} | ${u.bounce_count} | ${roles || '—'} | ${u.strengths.length} | ${u.weaknesses.length} |`,
-    );
-  }
+const STRENGTH_KINDS = ['strength', 'doctrine-fired'];
+const WEAKNESS_KINDS = ['weakness', 'bounce', 'doctrine-gap'];
 
-  if (data.patterns.length) {
-    L.push('');
-    L.push('## Candidate cross-unit patterns (confirm or discard these)');
-    L.push('');
-    for (const p of data.patterns) L.push(`- **${p.kind}** — ${p.detail}`);
-  }
+function headerSection(data) {
+  const t = data.totals;
+  return [
+    `# Run digest — ${data.stage}`,
+    '',
+    `${t.committed}/${t.units} units committed, ` +
+      `${t.blocked} blocked, ${t.spawns} orchestrator spawn(s), ` +
+      `${t.bounces} bounce(s), ${t.ceiling_breaches} ceiling breach(es).`,
+  ];
+}
 
-  if (data.integrity.length) {
-    L.push('');
-    L.push('## Observability defects (AC-A4.7 gates on these)');
-    L.push('');
-    for (const f of data.integrity) L.push(`- ${f}`);
-  }
+function unitsSection(data) {
+  return [
+    '',
+    '## Units',
+    '',
+    '| unit | status | spawns | bounces | roles | strengths | weaknesses |',
+    '| --- | --- | ---: | ---: | --- | ---: | ---: |',
+    ...data.perUnit.map((u) => {
+      const roles = Object.entries(u.roles)
+        .map(([r, o]) => `${r}:${o.join('→')}`)
+        .join(' ');
+      return `| ${u.id} | ${u.status} | ${u.spawns} | ${u.bounce_count} | ${roles || '—'} | ${u.strengths.length} | ${u.weaknesses.length} |`;
+    }),
+  ];
+}
 
-  L.push('');
-  L.push('## What worked (strength-class learnings)');
-  L.push('');
-  const strengths = data.learnings.filter((l) => ['strength', 'doctrine-fired'].includes(l.kind));
-  if (!strengths.length) L.push('_none recorded — this is itself a finding_');
-  for (const l of strengths) {
-    L.push(`- \`${l.unit}\` (${l.role ?? 'orchestrator'}): ${l.evidence}`);
-    L.push(`  - **repeat:** ${l.action}`);
-  }
+/** A heading plus one rendered entry per item, or nothing at all when empty. */
+function listSection(heading, items, render) {
+  if (!items.length) return [];
+  return ['', heading, '', ...items.flatMap(render)];
+}
 
-  L.push('');
-  L.push('## What did not (weakness-class learnings)');
-  L.push('');
-  const weaknesses = data.learnings.filter((l) =>
-    ['weakness', 'bounce', 'doctrine-gap'].includes(l.kind),
-  );
-  if (!weaknesses.length) L.push('_none recorded — this is itself a finding_');
-  for (const l of weaknesses) {
-    L.push(`- \`${l.unit}\` (${l.role ?? 'orchestrator'}): ${l.evidence}`);
-    L.push(`  - **change:** ${l.action}`);
-  }
+function learningsSection(data, heading, kinds, verb) {
+  const entries = data.learnings.filter((l) => kinds.includes(l.kind));
+  if (!entries.length) return ['', heading, '', '_none recorded — this is itself a finding_'];
+  return [
+    '',
+    heading,
+    '',
+    ...entries.flatMap((l) => [
+      `- \`${l.unit}\` (${l.role ?? 'orchestrator'}): ${l.evidence}`,
+      `  - **${verb}:** ${l.action}`,
+    ]),
+  ];
+}
 
-  if (data.verdicts) {
-    L.push('');
-    L.push('## Rubric verdicts (FR-A5.5)');
-    L.push('');
-    L.push(`| dimension | ${['pass', 'fail', 'n/a'].join(' | ')} |`);
-    L.push('| --- | ---: | ---: | ---: |');
-    for (const key of DIMENSION_KEYS) {
+function verdictsSection(data) {
+  if (!data.verdicts) return [];
+  const bounced = data.verdicts.verdicts.filter((v) => v.bounce);
+  return [
+    '',
+    '## Rubric verdicts (FR-A5.5)',
+    '',
+    `| dimension | ${['pass', 'fail', 'n/a'].join(' | ')} |`,
+    '| --- | ---: | ---: | ---: |',
+    ...DIMENSION_KEYS.map((key) => {
       const t = data.verdicts.tally[key];
-      L.push(`| ${key} | ${t.pass} | ${t.fail} | ${t['n/a']} |`);
-    }
-    const bounced = data.verdicts.verdicts.filter((v) => v.bounce);
-    if (bounced.length) {
-      L.push('');
-      for (const v of bounced) {
-        L.push(
-          `- \`${v.unit}\` ${v.role} bounced on **${(v.bounce_dimensions ?? []).join(', ')}**`,
-        );
-      }
-    }
-  }
+      return `| ${key} | ${t.pass} | ${t.fail} | ${t['n/a']} |`;
+    }),
+    ...(bounced.length
+      ? [
+          '',
+          ...bounced.map(
+            (v) =>
+              `- \`${v.unit}\` ${v.role} bounced on **${(v.bounce_dimensions ?? []).join(', ')}**`,
+          ),
+        ]
+      : []),
+  ];
+}
 
-  if (data.doctrine) {
-    const { counts, classifications, twoSided, pruneCandidates: candidates } = data.doctrine;
-    L.push('');
-    L.push('## Doctrine audit (FR-A5.2)');
-    L.push('');
-    L.push(`${counts.fired} fired, ${counts.violated} violated, ${counts.dormant} dormant.`);
-    if (!twoSided) {
-      L.push('');
-      L.push(
-        '**No `doctrine-fired` learnings this run**, so every rule below reads dormant for that ' +
-          'reason alone. Fix the capture before drawing a pruning conclusion — a failure-only ' +
-          "record marks the doctrine's best rules for removal.",
-      );
-    }
-    const violated = classifications.filter((c) => c.classification === 'violated');
-    if (violated.length) {
-      L.push('');
-      L.push('Rules that should have fired and did not — these are the bugs:');
-      L.push('');
-      for (const c of violated) L.push(`- **${c.id}** ("${c.anchor}") — ${c.evidence}`);
-    }
-    const fired = classifications.filter((c) => c.classification === 'fired');
-    if (fired.length) {
-      L.push('');
-      L.push(`Fired: ${fired.map((c) => c.id).join(', ')}.`);
-    }
-    if (candidates.length) {
-      L.push('');
-      L.push(
-        `Dormant across ${candidates[0].audits.length} consecutive audits, proposed for removal ` +
-          `(FR-A5.3): ${candidates.map((c) => `${c.id} ("${c.anchor}")`).join('; ')}.`,
-      );
-    }
-    L.push('');
-    L.push("Append this run's audit with `pnpm agent:doctrine audit --run <id> --append`.");
-  }
+function doctrineSection(data) {
+  if (!data.doctrine) return [];
+  const { counts, classifications, twoSided, pruneCandidates: candidates } = data.doctrine;
+  const violated = classifications.filter((c) => c.classification === 'violated');
+  const fired = classifications.filter((c) => c.classification === 'fired');
+  return [
+    '',
+    '## Doctrine audit (FR-A5.2)',
+    '',
+    `${counts.fired} fired, ${counts.violated} violated, ${counts.dormant} dormant.`,
+    ...(twoSided
+      ? []
+      : [
+          '',
+          '**No `doctrine-fired` learnings this run**, so every rule below reads dormant for that ' +
+            'reason alone. Fix the capture before drawing a pruning conclusion — a failure-only ' +
+            "record marks the doctrine's best rules for removal.",
+        ]),
+    ...(violated.length
+      ? [
+          '',
+          'Rules that should have fired and did not — these are the bugs:',
+          '',
+          ...violated.map((c) => `- **${c.id}** ("${c.anchor}") — ${c.evidence}`),
+        ]
+      : []),
+    ...(fired.length ? ['', `Fired: ${fired.map((c) => c.id).join(', ')}.`] : []),
+    ...(candidates.length
+      ? [
+          '',
+          `Dormant across ${candidates[0].audits.length} consecutive audits, proposed for removal ` +
+            `(FR-A5.3): ${candidates.map((c) => `${c.id} ("${c.anchor}")`).join('; ')}.`,
+        ]
+      : []),
+    '',
+    "Append this run's audit with `pnpm agent:doctrine audit --run <id> --append`.",
+  ];
+}
 
+function failedApproachesSection(data) {
   const failed = join(data.root, '.agent', 'failed-approaches.md');
-  if (existsSync(failed)) {
-    L.push('');
-    L.push('## Failed approaches recorded this run');
-    L.push('');
-    L.push('```');
-    L.push(readFileSync(failed, 'utf8').trim());
-    L.push('```');
-  }
+  if (!existsSync(failed)) return [];
+  return [
+    '',
+    '## Failed approaches recorded this run',
+    '',
+    '```',
+    readFileSync(failed, 'utf8').trim(),
+    '```',
+  ];
+}
 
-  L.push('');
-  L.push('## For the synthesis pass');
-  L.push('');
-  L.push(
+function synthesisSection() {
+  return [
+    '',
+    '## For the synthesis pass',
+    '',
     'Read the above and write `.agent/run-report.md`: confirm or discard each candidate pattern, ' +
       'name the loop-level strengths worth keeping and the weaknesses worth fixing, and state any ' +
       'observation no single unit could have made. Do not read transcripts — if a claim needs them, ' +
@@ -394,9 +432,7 @@ export function digest(data) {
       'concrete change: a doctrine edit, or better, a mechanisation that makes the rule a command ' +
       'nobody has to remember (FR-A1.4 is the worked example). Say plainly if a `dormant` rule is ' +
       'dormant because nothing exercised it rather than because it is dead.',
-  );
-  L.push('');
-  return L.join('\n');
+  ];
 }
 
 // Run as a CLI (but importable by the tests).

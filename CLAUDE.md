@@ -62,6 +62,19 @@ that boots Supabase and runs the pgTAP suite. A husky pre-commit hook runs
 PreToolUse hook blocks git operations while any fallow `*_introduced` count is above 0 —
 clear it by extracting/covering the new code, not by suppressing.
 
+**Fallow config** lives in `.fallowrc.jsonc` (`fallow` is a devDependency, so
+`pnpm exec fallow ...` always resolves). Two things there are easy to get wrong:
+
+- Fallow reads entry points from package.json scripts, which covers the agent
+  CLIs and their `.sh` wrappers — but _not_ `agent:test`, because its
+  `vitest.agent.config.ts` is a non-default vitest config the plugin never
+  loads. The `entry` glob supplies it; keep the two in sync or the whole agent
+  test suite reads as dead code.
+- `fallow audit` ignores the config's `health.coverage` — only `--coverage` /
+  `FALLOW_COVERAGE` reach it. The gate hook exports the env var itself. Run
+  `pnpm agent:test:coverage` after touching `scripts/agent/**`, or its functions
+  audit as zero-coverage and score as critical CRAP risks.
+
 **Combined coverage:** unit (vitest), the real E2E suite, and the E2E-mocked
 suite each collect raw V8 coverage, merged into one report with
 [Monocart Coverage Reports](https://github.com/cenfun/monocart-coverage-reports).

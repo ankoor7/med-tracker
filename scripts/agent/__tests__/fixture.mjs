@@ -4,13 +4,14 @@
 // would let that check pass vacuously.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJsonl } from '../state.mjs';
 
-export const scriptsDir = join(fileURLToPath(new URL('../../', import.meta.url)));
-export const ratchetCli = join(scriptsDir, 'agent', 'ratchet.mjs');
+const scriptsDir = join(fileURLToPath(new URL('../../', import.meta.url)));
+const ratchetCli = join(scriptsDir, 'agent', 'ratchet.mjs');
 export const bootstrapSh = join(scriptsDir, 'agent-bootstrap.sh');
 export const preflightSh = join(scriptsDir, 'agent-preflight.sh');
 export const runSh = join(scriptsDir, 'agent-run.sh');
@@ -83,13 +84,9 @@ export function readUnits(root) {
   return JSON.parse(readFileSync(join(root, '.agent', 'units.json'), 'utf8'));
 }
 
-export function readJsonl(root, name) {
-  const path = join(root, '.agent', name);
-  if (!existsSync(path)) return [];
-  return readFileSync(path, 'utf8')
-    .split('\n')
-    .filter((l) => l.trim())
-    .map((l) => JSON.parse(l));
+/** Read one of the fixture repo's `.agent/` JSONL files, by bare filename. */
+export function readAgentJsonl(root, name) {
+  return readJsonl(join(root, '.agent', name));
 }
 
 export const THREE_UNITS = [
