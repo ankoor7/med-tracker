@@ -40,7 +40,7 @@
       },
       {
         "files": ["scripts/agent/doctrine.mjs"],
-        "functions": ["coverageProblems", "<arrow>"],
+        "functions": ["coverageProblems", "classifyLine"],
         "maxCognitive": 24,
         "reason": "Markdown ledger parsing (`docs/agent-doctrine-ledger.md`): the branching is the table's shape, and the row-classifying arrow at the top of the file is a single pass over cell variants.",
       },

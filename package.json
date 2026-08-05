@@ -37,6 +37,7 @@
     "agent:rubric": "node scripts/agent/rubric.mjs",
     "agent:test": "vitest run --config vitest.agent.config.ts",
     "agent:test:coverage": "vitest run --coverage --config vitest.agent.config.ts",
+    "agent:audit": "node scripts/agent-audit.mjs",
     "coverage:merge": "node scripts/merge-coverage.mjs",
     "coverage": "pnpm test:coverage && pnpm test:e2e:coverage && pnpm test:e2e:mocked:coverage && pnpm coverage:merge",
     "coverage:ci": "pnpm test:coverage && pnpm test:e2e:mocked:coverage && pnpm coverage:merge",

@@ -149,6 +149,53 @@ jobs:
           title: 'chore(badge): update coverage badge'
           body: Auto-generated from the latest `coverage` job on `${{ github.ref_name }}`.
 
+  # The agent-loop tooling under scripts/agent/ (specs/agent/*). Its suite is a
+  # separate vitest config that needs neither Docker nor a browser, so it does
+  # not belong in `build` above — and it is the only job that can produce the
+  # coverage the fallow audit depends on.
+  #
+  # That dependency is the point of running the audit here rather than trusting
+  # the local `.claude/hooks/fallow-gate.sh`: the hook only gates the machine it
+  # runs on, and it deliberately fails open. `pnpm agent:audit` fails closed on
+  # missing or stale coverage, so "the gate passed" cannot mean "the gate never
+  # actually looked" (see scripts/agent-audit.mjs).
+  agent-tooling:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The audit diffs against a base ref, so it needs real history —
+          # the default shallow clone has no merge-base to compare with.
+          fetch-depth: 0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Runs the suite *and* writes coverage/agent/coverage-final.json, which the
+      # audit step below requires. One command, so the two cannot drift apart.
+      - name: Run agent tooling tests with coverage
+        run: pnpm agent:test:coverage
+
+      - name: Fallow audit (dead code, complexity, duplication)
+        run: |
+          if [ -n "${{ github.base_ref }}" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            pnpm agent:audit --base "origin/${{ github.base_ref }}"
+          else
+            # Push builds have no PR base; audit the pushed commit itself.
+            pnpm agent:audit --base HEAD^
+          fi
+
   # Server logic now lives in SQL (RLS + push_records + validate_record), so it's
   # covered by pgTAP against a real local Postgres. This boots only the DB
   # container, applies the migrations + seed, and runs the suite. Kept as a

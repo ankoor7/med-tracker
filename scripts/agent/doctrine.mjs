@@ -69,7 +69,9 @@ export function extractRules(markdown) {
     item = null;
   };
 
-  lines.forEach((line, i) => {
+  // Named rather than inline so the complexity budget for it in `.fallowrc.jsonc`
+  // can name it too — `<arrow>` matches every anonymous function in the file.
+  const classifyLine = (line, i) => {
     if (i === 0 && line.trim() === '---') {
       inFrontmatter = true;
       return;
@@ -124,7 +126,9 @@ export function extractRules(markdown) {
     if (/^\s*\*\*/.test(line)) {
       item = { section: section ?? '(preamble)', line: i + 1, text: line.trim() };
     }
-  });
+  };
+
+  lines.forEach(classifyLine);
   flush();
 
   return rules;
