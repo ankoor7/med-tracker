@@ -73,6 +73,14 @@ the validator that finds a bug, the reviewer that finds a regression — route i
 to the implementer and re-run the affected stages. Roughly one unit in three
 will bounce at least once. That is the process working, not failing.
 
+**A bounce names the dimension that failed.** Validator and reviewer reports end
+with a scored verdict — correctness, test-honesty, fit, UX-clarity — so
+send-backs and clean passes are comparable across runs instead of being vibes
+(`docs/agent-protocol.md` §6 carries the anchors; `pnpm agent:rubric check
+<report>` enforces the shape). Scores never substitute for the prose: a verdict
+passing every dimension while "could not verify" is silent is a bad report, not
+a clean one.
+
 ## Why your context is the expensive part
 
 Measured over one full 3-unit run: you were 19.6% of the tokens but a third of
@@ -180,12 +188,15 @@ not check, and it is exactly what stops the *next* reviewer looking.
 
 ## Model selection
 
-Default the roles to a **mid-tier model** — capable enough for UI driving,
-mutation testing, and diff review, and far cheaper for the snapshot-heavy
-validator work. Reserve the **top-tier model** for implementers doing
-architecturally hard work: a structural change, a data-model decision, anything
-where getting the shape wrong is expensive. Do not spend the expensive model on
-routine validation or copy fixes.
+Role assignments are measured, not assumed: the table lives in
+`docs/agent-model-fit.md` with the numbers and the date each row was decided. A
+row marked `prior (untested)` is a hypothesis — act on it if you must, but say
+which one you acted on. The standing prior is mid-tier for every role, top-tier
+for implementers doing architecturally hard work (a structural change, a
+data-model decision, anything where getting the shape wrong is expensive). Do
+not import other people's findings as conclusions: that a coding-tuned model can
+be out-planned by a general one, or that a top-tier model takes shortcuts in a
+worker role, are results to reproduce here, not rules to obey.
 
 ## When a unit is too big
 
@@ -261,7 +272,10 @@ or the repo's equivalent):
 - what bounced, which role caught it, and the root cause;
 - any directive that produced a bad result — quoted, with what it should have
   said instead;
-- any rule in this file that should have fired and didn't.
+- any rule in this file that fired or should have fired and didn't, named by its
+  ledger id (`docs/agent-doctrine-ledger.md`) — `doctrine-fired` and
+  `doctrine-gap` entries are what the end-of-run audit reads to decide which
+  rules still earn the context they cost.
 
 **Entries must be specific enough to act on.** A `file:line`, a quoted directive,
 a named rule. "Review went well" and "validation was thorough" are not entries;
